@@ -84,14 +84,85 @@ CREATE TABLE IF NOT EXISTS pedidos (
   -- Qué pasó con los avisos. Se guarda el resultado y no sólo un booleano:
   -- si el mail salió y el WhatsApp no, hay que poder saber cuál rehacer.
   aviso_mail     TEXT,
-  aviso_whatsapp TEXT
+  aviso_whatsapp TEXT,
+  -- Nulo para los pedidos hechos sin cuenta. No es obligatorio tener cuenta
+  -- para comprar: exigirla antes de ver un precio pierde clientes.
+  cliente_id     INTEGER REFERENCES clientes(id) ON DELETE SET NULL
 );
+
+CREATE TABLE IF NOT EXISTS colores (
+  id      INTEGER PRIMARY KEY AUTOINCREMENT,
+  nombre  TEXT NOT NULL UNIQUE,
+  -- El hex con el que se pinta el cuadrito. Se edita desde el panel con la
+  -- muestra al lado: elegir un color a ciegas por su código es adivinar.
+  hex     TEXT NOT NULL DEFAULT '#cccccc',
+  -- Marca los que todavía nadie confirmó. La pantalla del panel los ordena
+  -- primero: son los que hay que mirar.
+  provisorio INTEGER NOT NULL DEFAULT 1,
+  orden   INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS talles (
+  id      INTEGER PRIMARY KEY AUTOINCREMENT,
+  nombre  TEXT NOT NULL UNIQUE,
+  -- 'adulto' | 'nino'. Un talle 8 de niño y un talle 8 de adulto no son el
+  -- mismo talle, y sin separarlos la guía de medidas mezcla los dos.
+  grupo   TEXT NOT NULL DEFAULT 'adulto',
+  orden   INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS clientes (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  email         TEXT NOT NULL UNIQUE,
+  password_hash TEXT NOT NULL,
+  -- Los mismos campos que pide el pedido, para que al entrar se completen
+  -- solos. Guardarlos en otra forma obligaría a traducir entre dos formatos
+  -- cada vez, y el día que se agregue un campo se agrega en un solo lado.
+  nombre        TEXT NOT NULL,
+  cuit          TEXT NOT NULL,
+  telefono      TEXT NOT NULL,
+  provincia     TEXT,
+  ciudad        TEXT,
+  codigo_postal TEXT,
+  direccion     TEXT,
+  entre_calles  TEXT,
+  forma_envio   TEXT,
+  activo        INTEGER NOT NULL DEFAULT 1,
+  creado_en     TEXT NOT NULL,
+  ultimo_acceso TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_clientes_email ON clientes(email);
 
 CREATE TABLE IF NOT EXISTS config (
   clave TEXT PRIMARY KEY,
   valor TEXT
 );
 `);
+
+/*
+ * Columnas que se agregan a tablas que ya existen.
+ *
+ * `CREATE TABLE IF NOT EXISTS` no toca una tabla que ya está: en un despliegue
+ * nuevo la columna nace con la tabla, pero en el que ya venía andando —que es
+ * el caso de todos los deploys menos el primero— no aparece nunca, y la
+ * consulta falla en producción con un error que en la máquina de desarrollo no
+ * pasa. Se revisa en cada arranque y se agrega lo que falte.
+ */
+function asegurarColumna(tabla, columna, definicion) {
+  const columnas = db.prepare(`PRAGMA table_info(${tabla})`).all().map((c) => c.name);
+  if (columnas.includes(columna)) return;
+  db.exec(`ALTER TABLE ${tabla} ADD COLUMN ${columna} ${definicion}`);
+  console.log(`  [base] se agregó ${tabla}.${columna}`);
+}
+
+asegurarColumna('pedidos', 'cliente_id', 'INTEGER');
+asegurarColumna('variantes', 'color_id', 'INTEGER');
+asegurarColumna('variantes', 'talle_id', 'INTEGER');
+// Guía de medidas del producto, en JSON. Cambia por producto: un talle M no
+// mide lo mismo en una remera que en una campera, y el cliente necesita las
+// medidas de ESTE producto, no una tabla general.
+asegurarColumna('productos', 'guia_talles', 'TEXT');
+asegurarColumna('productos', 'descripcion', 'TEXT');
 
 /*
  * Orden de talles.

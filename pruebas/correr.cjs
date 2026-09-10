@@ -11,7 +11,8 @@ const path = require('node:path');
 const fs = require('node:fs');
 
 const API = process.env.API || 'http://localhost:8090';
-const CLAVE_ADMIN = process.env.ADMIN_PASSWORD || 'isuwaya-local-2026';
+const CLAVE_ADMIN = process.env.ADMIN_PASSWORD;
+const EMAIL_ADMIN = process.env.ADMIN_EMAIL || 'ruthtintaya9@gmail.com';
 
 let ok = 0, ko = 0;
 const chk = (t, esperado, obtenido) => {
@@ -59,6 +60,10 @@ const CLIENTE_OK = {
     p.combinaciones.reduce((t, c) => t + c.precio, 0), p.precioPorCurva);
   chk('no se filtra el stock: no viene ningún campo de stock', false,
     JSON.stringify(cat.json).toLowerCase().includes('"stock"'));
+  chk('los colores vienen con su hex para pintar el cuadrito', true,
+    p.colores.every((c) => c.nombre && /^(#|hsl)/.test(c.hex)));
+  chk('no quedó ningún producto de OFERTA', false,
+    productos.some((x) => /oferta/i.test(x.titulo)));
 
   tit('2. LOS PRECIOS LOS PONE EL SERVIDOR');
   /*
@@ -176,20 +181,31 @@ const CLIENTE_OK = {
   chk('los pedidos también', 401, (await pedir('/api/admin/pedidos', { admin: true })).status);
   chk('importar también', 401, (await pedir('/api/admin/importar', { metodo: 'POST', admin: true })).status);
 
-  const claveMala = await pedir('/api/admin/login', { metodo: 'POST', cuerpo: { password: 'a' } });
+  /*
+   * Se entra por la MISMA puerta que los clientes: /api/sesion. El servidor
+   * mira el email y decide el rol. Que el panel tuviera su propio login era
+   * tener dos formas de estar autenticado y dos lugares donde arreglar lo
+   * mismo.
+   */
+  const claveMala = await pedir('/api/sesion', {
+    metodo: 'POST', cuerpo: { email: EMAIL_ADMIN, password: 'a' },
+  });
   chk('con la contraseña equivocada no entra', 401, claveMala.status);
 
   // El limitador deja un intento por segundo: se espera para no medirlo a él.
   await new Promise((r) => setTimeout(r, 1100));
-  const entra = await pedir('/api/admin/login', { metodo: 'POST', cuerpo: { password: CLAVE_ADMIN } });
-  chk('con la correcta sí', 200, entra.status);
+  const entra = await pedir('/api/sesion', {
+    metodo: 'POST', cuerpo: { email: EMAIL_ADMIN, password: CLAVE_ADMIN },
+  });
+  chk('con la correcta sí',   200,     entra.status);
+  chk('y el rol es admin',    'admin', entra.json?.rol);
   chk('y ahora los productos se ven', 200, (await pedir('/api/admin/productos', { admin: true })).status);
 
   tit('9. UNA COOKIE FALSIFICADA NO SIRVE');
   const guardada = cookieAdmin;
-  cookieAdmin = 'isuwaya_admin=9999999999999.deadbeef';
+  cookieAdmin = 'isuwaya_sesion=eyJyb2wiOiJhZG1pbiJ9.firmaInventada';
   chk('firma inventada, rechazada', 401, (await pedir('/api/admin/productos', { admin: true })).status);
-  cookieAdmin = 'isuwaya_admin=1.' + 'a'.repeat(64);
+  cookieAdmin = 'isuwaya_sesion=' + Buffer.from(JSON.stringify({rol:'admin',vence:1})).toString('base64url') + '.x';
   chk('vencida, rechazada', 401, (await pedir('/api/admin/productos', { admin: true })).status);
   cookieAdmin = guardada;
 
@@ -199,7 +215,15 @@ const CLIENTE_OK = {
    * duplicado. Es lo que hace que se pueda reimportar después de tocar precios
    * en STOCKER sin miedo.
    */
-  const planilla = path.join(__dirname, 'export-stocker.xlsx');
+  /*
+ * Se reimporta el catálogo REAL, no el de ejemplo.
+ *
+ * Importar una planilla distinta agrega productos, que es lo correcto y no
+ * prueba nada sobre duplicados. Lo que hay que comprobar es que la MISMA
+ * planilla dos veces deje el catálogo igual — que es lo que hace que se pueda
+ * reimportar después de tocar precios sin miedo.
+ */
+const planilla = path.join(__dirname, 'catalogo-isuwaya.xlsx');
   if (!fs.existsSync(planilla)) {
     console.log('  (no está pruebas/export-stocker.xlsx: se saltea la importación)');
   } else {
@@ -210,6 +234,10 @@ const CLIENTE_OK = {
     chk('la planilla se importa', 200, imp.status);
     const despues = (await pedir('/api/admin/productos', { admin: true })).json.productos.length;
     chk('reimportar no duplica productos', antes, despues);
+    const cat = (await pedir('/api/catalogo')).json;
+    chk('y OFERTA sigue afuera después de reimportar', false,
+      cat.productos.some((x) => /oferta/i.test(x.titulo))
+      || cat.categorias.some((c) => /oferta/i.test(c.nombre)));
 
     const basura = new FormData();
     basura.append('planilla', new Blob(['esto no es un excel']), 'cualquiera.xlsx');

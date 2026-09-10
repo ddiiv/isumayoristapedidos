@@ -11,6 +11,7 @@ import {
   estado, productoPorSku, cuentaDeEntrada, totalesDelCarrito,
   guardarCarrito, refrescarFlotante, pintarCatalogo,
 } from './app.js';
+import { sesion, abrirCuenta } from './sesion.js';
 
 const dialogo = el('#dialogo');
 const cuerpo = el('#dialogo-cuerpo');
@@ -36,7 +37,23 @@ export function abrirDialogo() {
   paso = 'carrito';
   confirmado = null;
   erroresCliente = {};
-  try { datosCliente = JSON.parse(localStorage.getItem(CLAVE_DATOS) || '{}'); } catch { datosCliente = {}; }
+
+  /*
+   * Con la sesión abierta, los datos salen de la cuenta.
+   *
+   * Y se releen en cada pedido, no se arrastra lo que se editó en el anterior:
+   * si alguien mandó un pedido a otra sucursal, el siguiente tiene que volver
+   * a su dirección de siempre. Editar acá cambia SÓLO este envío; para cambiar
+   * la cuenta está «Mi cuenta».
+   *
+   * Sin sesión se usa lo último que se tipeó en este navegador, que para quien
+   * pide sin cuenta es la única memoria que hay.
+   */
+  if (sesion.rol === 'cliente' && sesion.datosDePedido) {
+    datosCliente = { ...sesion.datosDePedido };
+  } else {
+    try { datosCliente = JSON.parse(localStorage.getItem(CLAVE_DATOS) || '{}'); } catch { datosCliente = {}; }
+  }
   dialogo.classList.add('abierto');
   document.body.style.overflow = 'hidden';
   pintar();
@@ -142,7 +159,10 @@ const autocompletado = (n) => ({
 
 function vistaDatos() {
   return `
-    <p class="mensaje info">Con estos datos armamos el rótulo del paquete. Revisá la dirección: es la que se pega en la bolsa.</p>
+    ${sesion.rol === 'cliente'
+      ? `<p class="mensaje ok">Completamos con los datos de tu cuenta. Si este envío va a otra dirección, cambialos acá: se usan sólo para este pedido.</p>`
+      : `<p class="mensaje info">Con estos datos armamos el rótulo del paquete. Revisá la dirección: es la que se pega en la bolsa.
+           <button class="btn texto enlace-texto" id="ir-a-entrar" >Entrá a tu cuenta</button> y se completan solos.</p>`}
     <form id="form-datos" class="campos" novalidate>
       ${campo('nombre', 'Nombre y apellido', { obligatorio: true, ancho: true })}
       ${campo('cuit', 'CUIT', { obligatorio: true, ayuda: '30-12345678-9' })}
@@ -163,7 +183,12 @@ function leerFormulario() {
   for (const control of form.elements) {
     if (control.name) datosCliente[control.name] = control.value.trim();
   }
-  try { localStorage.setItem(CLAVE_DATOS, JSON.stringify(datosCliente)); } catch { /* modo privado */ }
+  // Sólo se recuerda en el navegador lo de quien NO tiene cuenta: para el que
+  // sí la tiene, la memoria es la cuenta, y dejar una copia en el equipo sería
+  // guardar su dirección en una computadora que puede ser compartida.
+  if (sesion.rol !== 'cliente') {
+    try { localStorage.setItem(CLAVE_DATOS, JSON.stringify(datosCliente)); } catch { /* modo privado */ }
+  }
 }
 
 // ── Paso 3: el resumen ────────────────────────────────────────────
@@ -195,7 +220,7 @@ function vistaResumen() {
         <b>${esc(c.formaEnvio)}</b>
       </div>
     </div>
-    <p class="rotulo" style="margin-top:18px">PRODUCTOS</p>
+    <p class="rotulo separado">PRODUCTOS</p>
     ${items}
     <div class="total-caja">
       <div><div class="u">${previsualizacion.unidades} unidades</div><div>Total del pedido</div></div>
@@ -224,14 +249,14 @@ function vistaConfirmado() {
     <div class="confirmado">
       ${cabecera}
       <div class="numero">${esc(confirmado.numero)}</div>
-      <p style="color:var(--tinta-suave);font-size:13px;margin:0">
+      <p class="apagado sin-margen">
         ${confirmado.unidades} unidades · ${pesos(confirmado.total)}
       </p>
       <div class="descargas">
         <a class="btn azul" href="/api/pedidos/${encodeURIComponent(confirmado.numero)}/pedido.pdf">Descargar el pedido</a>
         <a class="btn borde" href="/api/pedidos/${encodeURIComponent(confirmado.numero)}/rotulo.pdf">Descargar el rótulo</a>
       </div>
-      <p style="color:var(--tinta-suave);font-size:12px;margin-top:16px">
+      <p class="chico-2 separado">
         Guardá el número por si necesitás consultarlo.
       </p>
     </div>`;
@@ -396,6 +421,7 @@ dialogo.addEventListener('click', async (e) => {
     return;
   }
 
+  if (e.target.id === 'ir-a-entrar') { cerrarDialogo(); abrirCuenta('entrar'); return; }
   if (e.target.id === 'bajar-pdf') return bajarPdf(e.target);
   if (e.target.id === 'confirmar') return confirmar(e.target);
 });

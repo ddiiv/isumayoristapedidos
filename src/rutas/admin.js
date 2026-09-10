@@ -5,104 +5,21 @@ const express = require('express');
 const multer = require('multer');
 const { db, FOTOS_DIR } = require('../db');
 const { importarPlanilla } = require('../excel');
+const { ordenarCatalogo } = require('../normalizar');
 const { leerPedido } = require('../pedidos');
+const auth = require('../auth');
 
 const r = express.Router();
 
 /*
- * Sesión del panel, sin tabla de sesiones.
+ * El panel del dueño.
  *
- * Una cookie firmada con HMAC: el servidor no guarda nada y puede verificarla
- * igual. Para un panel de una sola persona, una tabla de sesiones es
- * infraestructura que hay que mantener sin que resuelva nada.
- *
- * La clave sale de ADMIN_PASSWORD. Si no está seteada el panel no abre: un
- * valor por defecto es una puerta abierta con la llave puesta, y este panel
- * edita precios y ve los datos de todos los clientes.
+ * La sesión y el rol los maneja `src/auth.js`, que es el mismo camino por el
+ * que entran los clientes: hay una sola puerta y un solo lugar donde se decide
+ * quién es quién. Cuando esto tenía su propio login, había dos formas de estar
+ * autenticado y dos lugares donde arreglar lo mismo.
  */
-const COOKIE = 'isuwaya_admin';
-const DURACION_MS = 8 * 60 * 60 * 1000;
-
-const secreto = () => {
-  const p = process.env.ADMIN_PASSWORD;
-  if (!p) return null;
-  return crypto.createHash('sha256').update(`isuwaya:${p}`).digest();
-};
-
-function firmar(vence) {
-  const s = secreto();
-  const firma = crypto.createHmac('sha256', s).update(String(vence)).digest('hex');
-  return `${vence}.${firma}`;
-}
-
-function tokenValido(token) {
-  const s = secreto();
-  if (!s || !token) return false;
-  const [vence, firma] = String(token).split('.');
-  if (!vence || !firma) return false;
-  if (Number(vence) < Date.now()) return false;
-  const esperada = crypto.createHmac('sha256', s).update(String(vence)).digest('hex');
-  // Comparación en tiempo constante: con un `===`, el tiempo de respuesta
-  // filtra cuántos caracteres de la firma acertó quien está probando.
-  const a = Buffer.from(firma, 'hex');
-  const b = Buffer.from(esperada, 'hex');
-  return a.length === b.length && crypto.timingSafeEqual(a, b);
-}
-
-function leerCookie(req) {
-  const bruto = req.headers.cookie || '';
-  for (const parte of bruto.split(';')) {
-    const [k, ...v] = parte.trim().split('=');
-    if (k === COOKIE) return decodeURIComponent(v.join('='));
-  }
-  return null;
-}
-
-function exigirAdmin(req, res, next) {
-  if (!secreto()) {
-    return res.status(503).json({ message: 'El panel no está configurado: falta ADMIN_PASSWORD en el servidor.' });
-  }
-  if (!tokenValido(leerCookie(req))) return res.status(401).json({ message: 'Entrá al panel.' });
-  next();
-}
-
-// Un intento por segundo alcanza para una persona y no para un diccionario.
-let ultimoIntento = 0;
-
-r.post('/login', (req, res) => {
-  if (!secreto()) {
-    return res.status(503).json({ message: 'Falta ADMIN_PASSWORD en el servidor.' });
-  }
-  const ahora = Date.now();
-  if (ahora - ultimoIntento < 1000) {
-    return res.status(429).json({ message: 'Esperá un segundo y probá de nuevo.' });
-  }
-  ultimoIntento = ahora;
-
-  const enviada = Buffer.from(String(req.body?.password || ''));
-  const real = Buffer.from(String(process.env.ADMIN_PASSWORD));
-  const ok = enviada.length === real.length && crypto.timingSafeEqual(enviada, real);
-  if (!ok) return res.status(401).json({ message: 'Contraseña incorrecta.' });
-
-  const token = firmar(Date.now() + DURACION_MS);
-  res.setHeader('Set-Cookie',
-    `${COOKIE}=${encodeURIComponent(token)}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${DURACION_MS / 1000}`
-    + (req.secure || process.env.NODE_ENV === 'production' ? '; Secure' : ''));
-  res.json({ ok: true });
-});
-
-r.post('/logout', (req, res) => {
-  res.setHeader('Set-Cookie', `${COOKIE}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0`);
-  res.json({ ok: true });
-});
-
-r.get('/sesion', (req, res) => res.json({
-  configurado: Boolean(secreto()),
-  entrado: tokenValido(leerCookie(req)),
-}));
-
-// ── De acá para abajo, todo pide sesión ───────────────────────────
-r.use(exigirAdmin);
+r.use(auth.exigirAdmin);
 
 /*
  * Importar la planilla de STOCKER.
@@ -119,7 +36,18 @@ r.post('/importar', subirPlanilla.single('planilla'), async (req, res, next) => 
   try {
     if (!req.file) return res.status(400).json({ message: 'Subí el archivo .xlsx exportado de STOCKER.' });
     const resumen = await importarPlanilla(req.file.buffer);
-    res.json({ ok: true, resumen });
+
+    /*
+     * Ordenar el catálogo es parte de importar, no un paso aparte.
+     *
+     * Los colores repetidos, los talles en minúscula, las categorías con
+     * tipeos y los productos de OFERTA vuelven con cada planilla nueva: es la
+     * misma fuente. Dejándolo como un script que alguien corre después, la
+     * primera importación que se haga sin acordarse devuelve el catálogo al
+     * desorden y nadie relaciona una cosa con la otra.
+     */
+    const orden = ordenarCatalogo();
+    res.json({ ok: true, resumen: { ...resumen, ...orden } });
   } catch (e) {
     if (e.status) return res.status(e.status).json({ message: e.message });
     next(e);
@@ -209,6 +137,60 @@ r.put('/categorias/:id', (req, res) => {
   res.json({ ok: true });
 });
 
+/*
+ * PUT /api/admin/categorias/:id/nombre — renombrar, y unir si el nombre ya existe.
+ *
+ * El catálogo real viene con categorías repetidas por tipeo —"Panalones" al
+ * lado de "Pantalones", "Short" al lado de "Shorts"—, y cada una aparece como
+ * una pestaña suelta con un producto adentro. No se unen solas al importar:
+ * eso sería adivinar cuál quiso escribir la persona, y el día que se equivoque
+ * la corrección estaría escondida en el importador. Se hace acá, a mano, y se
+ * ve lo que pasa.
+ */
+r.put('/categorias/:id/nombre', (req, res) => {
+  const nombre = String(req.body?.nombre || '').trim();
+  if (!nombre) return res.status(400).json({ message: 'Poné un nombre.' });
+
+  const actual = db.prepare('SELECT * FROM categorias WHERE id = ?').get(Number(req.params.id));
+  if (!actual) return res.status(404).json({ message: 'No existe esa categoría.' });
+
+  const destino = db.prepare('SELECT * FROM categorias WHERE nombre = ? AND id <> ?')
+    .get(nombre, actual.id);
+
+  if (!destino) {
+    db.prepare('UPDATE categorias SET nombre = ? WHERE id = ?').run(nombre, actual.id);
+    return res.json({ ok: true, accion: 'renombrada' });
+  }
+
+  // Ya existe una con ese nombre: se mueven los productos y se borra la vacía.
+  const mover = db.transaction(() => {
+    db.prepare('UPDATE productos SET categoria_id = ? WHERE categoria_id = ?').run(destino.id, actual.id);
+    db.prepare('DELETE FROM categorias WHERE id = ?').run(actual.id);
+  });
+  mover();
+  res.json({ ok: true, accion: 'unida', destino: destino.nombre });
+});
+
+// ── Clientes ──────────────────────────────────────────────────────
+r.get('/clientes', (req, res) => {
+  const filas = db.prepare(`
+    SELECT c.id, c.email, c.nombre, c.cuit, c.telefono, c.provincia, c.ciudad,
+           c.activo, c.creado_en, c.ultimo_acceso,
+           (SELECT COUNT(*) FROM pedidos p WHERE p.cliente_id = c.id) AS pedidos
+    FROM clientes c ORDER BY c.id DESC`).all();
+  res.json({ clientes: filas });
+});
+
+r.put('/clientes/:id', (req, res) => {
+  if (req.body?.activo === undefined) {
+    return res.status(400).json({ message: 'No mandaste nada para cambiar.' });
+  }
+  const info = db.prepare('UPDATE clientes SET activo = ? WHERE id = ?')
+    .run(req.body.activo ? 1 : 0, Number(req.params.id));
+  if (!info.changes) return res.status(404).json({ message: 'No existe ese cliente.' });
+  res.json({ ok: true });
+});
+
 // ── Pedidos ───────────────────────────────────────────────────────
 r.get('/pedidos', (req, res) => {
   const filas = db.prepare(`
@@ -234,4 +216,4 @@ r.put('/pedidos/:numero', (req, res) => {
   res.json({ ok: true });
 });
 
-module.exports = { rutas: r, exigirAdmin };
+module.exports = { rutas: r };

@@ -12,13 +12,12 @@
 import { el, esc, pesos, enteroPositivo } from './util.js';
 import {
   estado, productoPorSku, cuentaDeEntrada, guardarCarrito,
-  refrescarFlotante, pintarCatalogo,
+  refrescarFlotante, pintarCatalogo, fotosDe, pintarMuestras,
 } from './app.js';
 
 let actual = null;      // producto abierto
 let borrador = null;    // { curvas, cantidades }
 let modo = 'talles';    // 'talles' | 'curva'
-let colorActivo = null;
 let devolverFocoA = null;
 
 const panel = el('#panel');
@@ -35,7 +34,6 @@ export function abrirPanel(sku) {
   borrador = clonar(estado.carrito[sku] || { curvas: 0, cantidades: {} });
   borrador.cantidades = borrador.cantidades || {};
   modo = borrador.curvas > 0 ? 'curva' : 'talles';
-  colorActivo = producto.colores[0] ?? '';
 
   el('#panel-titulo').textContent = producto.titulo;
   el('#panel-sku').textContent = `${producto.sku}${producto.modelo ? ` · ${producto.modelo}` : ''}`;
@@ -63,45 +61,58 @@ export function cerrarPanel() {
 }
 
 // ── Pintado ───────────────────────────────────────────────────────
-function combinacionesDe(color) {
-  return actual.combinaciones.filter((c) => c.color === color);
-}
+/*
+ * La matriz completa: los colores en filas y los talles en columnas.
+ *
+ * Antes había un selector de color y una lista de talles del color elegido, lo
+ * que obliga a entrar y salir de cada color para cargar un pedido de siete
+ * colores. Puesto todo junto se carga de corrido, se ve cuánto lleva cada
+ * color sin cambiar de vista, y es la forma en que ya se piden estas cosas
+ * por planilla.
+ *
+ * El cruce que no existe no queda vacío: dice "Agotado". Un casillero en
+ * blanco se lee como "podés pedir cero", y quien lo intenta descubre que no se
+ * puede recién cuando el número no entra.
+ */
+function vistaMatriz() {
+  const talles = actual.talles.filter(Boolean);
+  const colores = actual.colores.filter((c) => c.nombre);
+  const porCruce = new Map(actual.combinaciones.map((c) => [`${c.color}|${c.talle}`, c]));
 
-function unidadesDeColor(color) {
-  return combinacionesDe(color)
-    .reduce((t, c) => t + enteroPositivo(borrador.cantidades[c.sku]), 0);
-}
+  const encabezado = `<tr><th class="col-color"></th>${
+    talles.map((t) => `<th>${esc(t)}</th>`).join('')}</tr>`;
 
-function vistaTalles() {
-  const conColores = actual.colores.filter(Boolean).length > 0;
-  const selector = conColores ? `
-    <p class="rotulo">COLOR</p>
-    <div class="colores-selector" id="selector-color">
-      ${actual.colores.map((c) => {
-        const n = unidadesDeColor(c);
-        return `<button data-color="${esc(c)}" aria-pressed="${c === colorActivo}">
-          ${esc(c || 'Único')}${n ? `<span class="cuenta">${n}</span>` : ''}
-        </button>`;
-      }).join('')}
-    </div>` : '';
+  const filas = colores.map((color) => {
+    const celdas = talles.map((talle) => {
+      const combo = porCruce.get(`${color.nombre}|${talle}`);
+      if (!combo) return '<td class="agotado"><span>Agotado</span></td>';
+      const valor = enteroPositivo(borrador.cantidades[combo.sku]) || '';
+      return `<td>
+        <input type="number" min="0" inputmode="numeric" data-sku="${esc(combo.sku)}"
+               value="${valor}" placeholder="0"
+               aria-label="${esc(talle)} en ${esc(color.nombre)}">
+      </td>`;
+    }).join('');
 
-  const combos = combinacionesDe(colorActivo);
-  const filas = combos.map((c) => `
-    <div class="fila-talle">
-      <span class="talle">${esc(c.talle || 'Único')}
-        <span class="precio-unit">${pesos(c.precio)}</span></span>
-      <span class="contador">
-        <button data-menos="${esc(c.sku)}" aria-label="Quitar uno de ${esc(c.talle)}">−</button>
-        <input type="number" min="0" inputmode="numeric" data-sku="${esc(c.sku)}"
-               value="${enteroPositivo(borrador.cantidades[c.sku]) || ''}" placeholder="0"
-               aria-label="Cantidad de ${esc(c.talle || 'talle único')} en ${esc(colorActivo || 'color único')}">
-        <button data-mas="${esc(c.sku)}" aria-label="Agregar uno de ${esc(c.talle)}">+</button>
-      </span>
-    </div>`).join('');
+    const enColor = actual.combinaciones
+      .filter((c) => c.color === color.nombre)
+      .reduce((t, c) => t + enteroPositivo(borrador.cantidades[c.sku]), 0);
 
-  return `${selector}
-    <p class="rotulo">TALLES ${conColores ? `· ${esc(colorActivo || 'ÚNICO')}` : ''}</p>
-    <div class="matriz" id="matriz">${filas}</div>`;
+    return `<tr data-color="${esc(color.nombre)}">
+      <th class="col-color">
+        <span class="cuadro" data-hex="${esc(color.hex)}"></span>
+        <span class="nombre">${esc(color.nombre)}</span>
+        ${enColor ? `<span class="cuenta-color">${enColor}</span>` : ''}
+      </th>${celdas}</tr>`;
+  }).join('');
+
+  return `
+    <div class="matriz-envoltorio">
+      <table class="matriz-talles">
+        <thead>${encabezado}</thead>
+        <tbody>${filas}</tbody>
+      </table>
+    </div>`;
 }
 
 function vistaCurva() {
@@ -133,31 +144,41 @@ function vistaCurva() {
 }
 
 function pintar() {
-  const foto = (colorActivo && actual.fotosPorColor[colorActivo]) || actual.foto;
-  const cabecera = modo === 'curva' ? '' : `
-    <div class="foto-grande">
-      ${foto ? `<img src="${esc(foto)}" alt="${esc(actual.titulo)}${colorActivo ? ` en ${esc(colorActivo)}` : ''}">`
-             : '<span class="sin-foto">SIN FOTO</span>'}
+  const fotos = fotosDe(actual);
+  const carrusel = modo === 'curva' || !fotos.length ? '' : `
+    <div class="carrusel-panel" data-foto="0">
+      <img src="${esc(fotos[0].ruta)}" alt="${esc(actual.titulo)}">
+      ${fotos.length > 1 ? `
+        <button class="carrusel-ir antes" data-paso="-1" aria-label="Foto anterior">‹</button>
+        <button class="carrusel-ir despues" data-paso="1" aria-label="Foto siguiente">›</button>
+        <span class="carrusel-cuenta">${fotos[0].color ? esc(fotos[0].color) : '1'}/${fotos.length}</span>` : ''}
     </div>`;
 
+  const guia = actual.guiaTalles
+    ? `<button class="btn borde ver-guia" type="button">Ver guía de talles</button>`
+    : '';
+
   el('#panel-contenido').innerHTML = `
-    ${cabecera}
+    ${carrusel}
+    ${actual.descripcion ? `<p class="descripcion">${esc(actual.descripcion)}</p>` : ''}
     <div class="modos" role="group" aria-label="Cómo cargar las cantidades">
-      <button data-modo="talles" aria-pressed="${modo === 'talles'}">Por talle</button>
+      <button data-modo="talles" aria-pressed="${modo === 'talles'}">Por color y talle</button>
       <button data-modo="curva" aria-pressed="${modo === 'curva'}">Por curva</button>
     </div>
-    ${modo === 'curva' ? vistaCurva() : vistaTalles()}`;
+    ${modo === 'curva' ? vistaCurva() : vistaMatriz()}
+    ${guia}`;
 
+  pintarMuestras(el('#panel-contenido'));
   refrescarPie();
 }
 
 function refrescarPie() {
   const c = cuentaDeEntrada(actual.sku, borrador);
-  el('#panel-unidades').textContent = `${c.unidades} unidad${c.unidades === 1 ? '' : 'es'}`;
-  el('#panel-subtotal').textContent = pesos(c.subtotal);
+  el('#panel-unidades').textContent = `Items: ${c.unidades}`;
+  el('#panel-subtotal').textContent = `Total: ${pesos(c.subtotal)}`;
   el('#panel-agregar').disabled = c.unidades === 0 && !estado.carrito[actual.sku];
   el('#panel-agregar').textContent = c.unidades === 0 && estado.carrito[actual.sku]
-    ? 'Quitar del pedido' : 'Agregar al pedido';
+    ? 'Quitar del pedido' : 'Añadir al carrito';
 }
 
 // ── Interacción ───────────────────────────────────────────────────
@@ -167,18 +188,18 @@ el('#panel-contenido').addEventListener('click', (e) => {
   if (!b) return;
 
   if (b.dataset.modo) {
-    modo = b.dataset.modo;
     /*
      * Cambiar de modo no borra lo cargado en el otro.
      *
-     * Alguien que carga tres curvas y después mira la matriz de talles para
-     * sumar dos remeras sueltas espera que las curvas sigan ahí. Los dos modos
-     * conviven: el pedido es la suma.
+     * Quien pide tres curvas y después suma dos remeras sueltas de un talle
+     * espera que las curvas sigan ahí. El pedido es la suma de los dos.
      */
+    modo = b.dataset.modo;
     pintar();
     return;
   }
-  if (b.dataset.color !== undefined) { colorActivo = b.dataset.color; pintar(); return; }
+
+  if (b.dataset.paso) { moverCarruselPanel(Number(b.dataset.paso)); return; }
 
   if (b.dataset.curva) {
     borrador.curvas = enteroPositivo(borrador.curvas + Number(b.dataset.curva));
@@ -187,22 +208,48 @@ el('#panel-contenido').addEventListener('click', (e) => {
     return;
   }
 
-  const skuMas = b.dataset.mas;
-  const skuMenos = b.dataset.menos;
-  const sku = skuMas || skuMenos;
-  if (!sku) return;
-
-  const actualN = enteroPositivo(borrador.cantidades[sku]);
-  const nuevo = enteroPositivo(actualN + (skuMas ? 1 : -1));
-  if (nuevo) borrador.cantidades[sku] = nuevo; else delete borrador.cantidades[sku];
-
-  const input = el(`input[data-sku="${CSS.escape(sku)}"]`);
-  if (input) input.value = nuevo || '';
-  // El contador del color en el selector cambia con cada suma, así que se
-  // repinta: sin eso, la persona no ve cuánto lleva cargado en los otros colores.
-  if (modo === 'talles' && actual.colores.filter(Boolean).length) pintar();
-  else refrescarPie();
+  if (b.classList.contains('ver-guia')) { abrirGuia(); }
 });
+
+function moverCarruselPanel(paso) {
+  const carrusel = el('.carrusel-panel');
+  const fotos = fotosDe(actual);
+  if (!carrusel || fotos.length < 2) return;
+  const actualIdx = Number(carrusel.dataset.foto) || 0;
+  const proxima = (actualIdx + paso + fotos.length) % fotos.length;
+  carrusel.dataset.foto = proxima;
+  carrusel.querySelector('img').src = fotos[proxima].ruta;
+  carrusel.querySelector('.carrusel-cuenta').textContent =
+    fotos[proxima].color ? fotos[proxima].color : `${proxima + 1}/${fotos.length}`;
+}
+
+/*
+ * La guía de talles, con las medidas de ESTE producto.
+ *
+ * Un talle M no mide lo mismo en una remera que en una campera. Una tabla
+ * general serviría para adivinar y no para decidir, que es justamente lo que
+ * el cliente necesita hacer antes de pedir cincuenta unidades.
+ */
+function abrirGuia() {
+  const g = actual.guiaTalles;
+  if (!g?.filas?.length) return;
+  const cols = g.columnas || [];
+  el('#guia-titulo').textContent = `Guía de talles · ${actual.titulo}`;
+  el('#guia-cuerpo').innerHTML = `
+    ${g.nota ? `<p class="mensaje info">${esc(g.nota)}</p>` : ''}
+    <div class="envoltorio-tabla">
+      <table class="datos">
+        <thead><tr><th>Talle</th>${cols.map((c) => `<th>${esc(c)}</th>`).join('')}</tr></thead>
+        <tbody>${g.filas.map((f) => `
+          <tr><th>${esc(f.talle)}</th>${cols.map((c) => `<td>${esc(f[c] ?? '—')}</td>`).join('')}</tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+    <p class="chico-2 separado">Medidas en centímetros, tomadas sobre la prenda apoyada.</p>`;
+  el('#dialogo-guia').classList.add('abierto');
+}
+
+el('#guia-cerrar')?.addEventListener('click', () => el('#dialogo-guia').classList.remove('abierto'));
 
 el('#panel-contenido').addEventListener('input', (e) => {
   if (!actual) return;
@@ -217,28 +264,32 @@ el('#panel-contenido').addEventListener('input', (e) => {
   const n = enteroPositivo(input.value);
   if (n) borrador.cantidades[sku] = n; else delete borrador.cantidades[sku];
   refrescarPie();
-  actualizarInsigniaDeColor();
+  actualizarCuentaDeFila(input);
 });
 
 /*
- * La insignia del color se actualiza sola, sin repintar.
+ * El total de la fila se actualiza sin repintar la tabla.
  *
- * Repintar en cada tecla reconstruye el input que la persona está usando y le
- * saca el foco a mitad de un número. Se toca sólo el contador del color activo,
+ * Repintar en cada tecla reconstruye el casillero que la persona está usando y
+ * le saca el foco a mitad de un número. Se toca sólo el contador de esa fila,
  * que es lo único que cambió.
  */
-function actualizarInsigniaDeColor() {
-  const boton = el(`#selector-color button[data-color="${CSS.escape(colorActivo)}"]`);
-  if (!boton) return;
-  const n = unidadesDeColor(colorActivo);
-  let insignia = boton.querySelector('.cuenta');
-  if (!n) { insignia?.remove(); return; }
-  if (!insignia) {
-    insignia = document.createElement('span');
-    insignia.className = 'cuenta';
-    boton.append(insignia);
+function actualizarCuentaDeFila(input) {
+  const fila = input.closest('tr[data-color]');
+  if (!fila) return;
+  const color = fila.dataset.color;
+  const n = actual.combinaciones
+    .filter((c) => c.color === color)
+    .reduce((t, c) => t + enteroPositivo(borrador.cantidades[c.sku]), 0);
+
+  let cuenta = fila.querySelector('.cuenta-color');
+  if (!n) { cuenta?.remove(); return; }
+  if (!cuenta) {
+    cuenta = document.createElement('span');
+    cuenta.className = 'cuenta-color';
+    fila.querySelector('.col-color').append(cuenta);
   }
-  insignia.textContent = n;
+  cuenta.textContent = n;
 }
 
 el('#panel-agregar').addEventListener('click', () => {

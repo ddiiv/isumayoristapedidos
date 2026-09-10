@@ -14,6 +14,7 @@
 <header class="principal">
   <div class="barra">
     <div class="marca">ISUWAYA <span>MAYORISTA</span><small>PEDIDOS ONLINE</small></div>
+    <div class="estado-sesion" id="estado-sesion"></div>
   </div>
 </header>
 
@@ -47,10 +48,10 @@
   <div class="contenido" id="panel-contenido"></div>
   <footer>
     <div class="resumen">
-      <span id="panel-unidades">0 unidades</span>
-      <b id="panel-subtotal">$ 0</b>
+      <span id="panel-unidades">Items: 0</span>
+      <b id="panel-subtotal">Total: $ 0</b>
     </div>
-    <button class="btn" id="panel-agregar">Agregar al pedido</button>
+    <button class="btn" id="panel-agregar">Añadir al carrito</button>
   </footer>
 </aside>
 
@@ -63,6 +64,29 @@
     </header>
     <div class="cuerpo" id="dialogo-cuerpo"></div>
     <div class="pie" id="dialogo-pie"></div>
+  </div>
+</div>
+
+<!-- ── Diálogo de cuenta: entrar, registrarse, mis datos ──────────── -->
+<div class="dialogo" id="dialogo-cuenta" role="dialog" aria-modal="true" aria-labelledby="cuenta-titulo">
+  <div class="caja">
+    <header>
+      <h2 id="cuenta-titulo">Entrar</h2>
+      <button class="cerrar" id="cuenta-cerrar" aria-label="Cerrar">✕</button>
+    </header>
+    <div class="cuerpo" id="cuenta-cuerpo"></div>
+    <div class="pie" id="cuenta-pie"></div>
+  </div>
+</div>
+
+<!-- ── Guía de talles del producto ────────────────────────────────── -->
+<div class="dialogo" id="dialogo-guia" role="dialog" aria-modal="true" aria-labelledby="guia-titulo">
+  <div class="caja">
+    <header>
+      <h2 id="guia-titulo">Guía de talles</h2>
+      <button class="cerrar" id="guia-cerrar" aria-label="Cerrar">✕</button>
+    </header>
+    <div class="cuerpo" id="guia-cuerpo"></div>
   </div>
 </div>
 

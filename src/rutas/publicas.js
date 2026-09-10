@@ -3,6 +3,7 @@ const { db } = require('../db');
 const { validarCliente, armarPedido, guardarPedido, leerPedido } = require('../pedidos');
 const { pdfPedido, pdfRotulo } = require('../pdf');
 const { avisarPedido } = require('../notificaciones');
+const auth = require('../auth');
 
 const r = express.Router();
 
@@ -21,16 +22,34 @@ r.get('/catalogo', (req, res) => {
     SELECT id, nombre FROM categorias WHERE visible = 1 ORDER BY orden, nombre`).all();
 
   const productos = db.prepare(`
-    SELECT p.id, p.sku_agrupador, p.titulo, p.precio, p.foto, p.modelo, p.genero, p.categoria_id
+    SELECT p.id, p.sku_agrupador, p.titulo, p.precio, p.foto, p.modelo, p.genero,
+           p.categoria_id, p.guia_talles, p.descripcion
     FROM productos p
     WHERE p.visible = 1
     ORDER BY p.orden, p.titulo`).all();
 
+  /*
+   * Las variantes salen con el color y el talle YA canónicos.
+   *
+   * El texto crudo de la planilla trae el mismo color escrito de cuatro formas.
+   * Resolverlo acá y no en el navegador evita que la pantalla tenga que saber
+   * que "Negra" y "Nero" son el mismo cuadrito — y que se olvide de saberlo la
+   * próxima vez que alguien toque el catálogo.
+   */
   const variantes = db.prepare(`
-    SELECT v.producto_id, v.sku, v.color, v.talle, v.orden_talle, v.precio
-    FROM variantes v JOIN productos p ON p.id = v.producto_id
+    SELECT v.producto_id, v.sku, v.precio,
+           COALESCE(c.nombre, v.color) AS color,
+           COALESCE(c.hex, '#cccccc')  AS hex,
+           COALESCE(t.nombre, v.talle) AS talle,
+           COALESCE(t.orden, v.orden_talle) AS orden_talle,
+           COALESCE(t.grupo, 'adulto') AS grupo_talle,
+           COALESCE(c.orden, 0) AS orden_color
+    FROM variantes v
+    JOIN productos p ON p.id = v.producto_id
+    LEFT JOIN colores c ON c.id = v.color_id
+    LEFT JOIN talles  t ON t.id = v.talle_id
     WHERE p.visible = 1
-    ORDER BY v.orden_talle, v.color`).all();
+    ORDER BY orden_color, color, orden_talle`).all();
 
   const fotos = db.prepare('SELECT producto_id, color, ruta FROM fotos_color').all();
 
@@ -44,10 +63,16 @@ r.get('/catalogo', (req, res) => {
 
   const salida = productos.map((p) => {
     const vs = porProducto.get(p.id) || [];
-    const colores = [...new Set(vs.map((v) => v.color))];
+    // Con su hex, para pintar el cuadrito sin una segunda consulta.
+    const colores = [...new Map(vs.map((v) => [v.color, v.hex])).entries()]
+      .map(([nombre, hex]) => ({ nombre, hex }));
     const talles = [...new Map(vs.map((v) => [v.talle, v.orden_talle])).entries()]
       .sort((a, b) => a[1] - b[1]).map(([t]) => t);
+    const grupos = [...new Set(vs.map((v) => v.grupo_talle))];
     return {
+      grupoTalle: grupos.includes('nino') && grupos.includes('adulto') ? 'mixto' : (grupos[0] || 'adulto'),
+      guiaTalles: p.guia_talles ? JSON.parse(p.guia_talles) : null,
+      descripcion: p.descripcion || null,
       sku: p.sku_agrupador,
       titulo: p.titulo,
       categoriaId: p.categoria_id,
@@ -61,7 +86,9 @@ r.get('/catalogo', (req, res) => {
       // La grilla completa: con qué SKU se pide cada cruce de color y talle.
       // Que lo resuelva el servidor evita que el navegador tenga que adivinar
       // qué combinaciones existen de verdad — no todas las existen.
-      combinaciones: vs.map((v) => ({ sku: v.sku, color: v.color, talle: v.talle, precio: v.precio ?? p.precio })),
+      combinaciones: vs.map((v) => ({
+        sku: v.sku, color: v.color, hex: v.hex, talle: v.talle, precio: v.precio ?? p.precio,
+      })),
       // Una curva es una unidad de CADA combinación que existe.
       unidadesPorCurva: vs.length,
       precioPorCurva: vs.reduce((t, v) => t + (v.precio ?? p.precio), 0),
@@ -116,6 +143,18 @@ r.post('/pedidos', async (req, res, next) => {
     if (!items.length) return res.status(400).json({ message: 'El pedido está vacío.', errores });
 
     const pedido = guardarPedido({ cliente, items, total, unidades });
+
+    /*
+     * Si venía con la sesión abierta, el pedido queda atado a esa cuenta.
+     *
+     * Se guarda igual el cliente que vino en el formulario y no el de la
+     * cuenta: son los datos de ESTE envío, que puede ir a otra dirección. La
+     * cuenta dice quién lo pidió; el formulario, a dónde va.
+     */
+    if (req.sesion?.rol === 'cliente') {
+      db.prepare('UPDATE pedidos SET cliente_id = ? WHERE id = ?')
+        .run(req.sesion.cliente.id, pedido.id);
+    }
 
     /*
      * El pedido ya está guardado antes de avisar.

@@ -54,6 +54,28 @@ header.principal {
 .marca span { font-weight: 400; opacity: .85; }
 .marca small { display: block; font-size: 10px; font-weight: 500; letter-spacing: 2.4px; opacity: .8; }
 
+/* Estado de la sesión, arriba a la derecha. */
+.estado-sesion { display: flex; gap: 8px; align-items: center; flex-shrink: 0; }
+.btn-barra {
+  border: 1px solid rgba(255,255,255,.35); background: rgba(255,255,255,.08);
+  color: #fff; border-radius: 8px; padding: 7px 13px;
+  font-size: 13px; font-weight: 600; text-decoration: none; line-height: 1.2;
+  display: inline-block; white-space: nowrap;
+}
+.btn-barra:hover { background: rgba(255,255,255,.18); }
+.btn-barra small { display: block; font-size: 10px; font-weight: 400; opacity: .8; }
+
+/* La tabla de "mis pedidos" reusa la del panel; acá van sus mínimos para que
+   no dependa de la hoja del administrador, que el cliente no descarga. */
+table.datos { width: 100%; border-collapse: collapse; font-size: 13px; }
+table.datos th { text-align: left; font-size: 11px; color: var(--tinta-suave);
+  padding: 8px 10px; border-bottom: 2px solid var(--linea); }
+table.datos td { padding: 9px 10px; border-bottom: 1px solid var(--linea); vertical-align: middle; }
+.envoltorio-tabla { overflow-x: auto; }
+.pastilla { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 20px; }
+.pastilla.si { background: var(--verde-claro); color: var(--verde); }
+.pastilla.no { background: #f1f3f6; color: var(--tinta-suave); }
+
 /* Las categorías se desplazan solas en el teléfono en vez de apilarse:
    apiladas empujan el catálogo fuera de la pantalla en el primer scroll. */
 nav.categorias {
@@ -343,4 +365,215 @@ main { max-width: 1200px; margin: 0 auto; padding: 22px 20px 120px; }
   main { padding: 18px 16px 120px; }
   nav.categorias { top: 56px; }
   .grilla { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+}
+
+/*
+ * ── Clases de apoyo ──────────────────────────────────────────────
+ *
+ * Existen porque la política de seguridad de contenido bloquea los atributos
+ * `style="..."`, y con razón: el mismo permiso que los habilita habilita
+ * también los que llegan inyectados en un texto. Escribirlas acá cuesta un
+ * renglón y evita aflojar la política del sitio entero.
+ */
+.centrado { text-align: center; }
+.enlinea { display: inline-block; text-decoration: none; }
+.sin-corte { white-space: nowrap; }
+.apagado { color: var(--tinta-suave); }
+.chico { font-size: 11px; color: var(--tinta-suave); }
+.chico-2 { font-size: 12px; color: var(--tinta-suave); }
+.fuerte { font-weight: 700; }
+.semi { font-weight: 600; }
+.destacado { font-weight: 700; color: var(--azul); }
+.nota { margin: 14px 0 0; font-size: 13px; color: var(--tinta-suave); }
+.nota.pegada { margin: 6px 0 0; font-size: 12px; }
+.nota.separada { margin: 16px 0 0; }
+.sin-margen { margin: 0; }
+.separado { margin-top: 18px; }
+.enlace-texto { padding: 0 2px; }
+.btn-mini { padding: 5px 9px; font-size: 12px; text-decoration: none; }
+.btn-mini.mas-chico { padding: 4px 9px; }
+.btn-archivo { padding: 5px 10px; font-size: 12px; cursor: pointer; }
+.vacio-tabla { text-align: center; padding: 30px; color: var(--tinta-suave); }
+.select-mini {
+  font: inherit; font-size: 12.5px; padding: 4px 6px;
+  border: 1px solid var(--linea); border-radius: 6px;
+}
+.pastilla-boton { border: 0; }
+
+/* ═══ Catálogo en filas ══════════════════════════════════════════ */
+/*
+ * Un producto por fila y una sola columna.
+ *
+ * En una compra mayorista lo que se mira antes de entrar a un producto es qué
+ * colores y qué talles hay. En una tarjeta chica eso no entra; en una fila
+ * ancha se lee de un vistazo y la página se recorre bajando, que es lo que la
+ * mano hace sola en el teléfono.
+ */
+.lista { display: flex; flex-direction: column; gap: 14px; }
+
+.fila-producto {
+  display: grid;
+  grid-template-columns: 190px 1fr;
+  gap: 18px;
+  background: var(--papel);
+  border: 1px solid var(--linea);
+  border-radius: var(--radio);
+  overflow: hidden;
+  cursor: pointer;
+  transition: box-shadow .15s, border-color .15s;
+}
+.fila-producto:hover { box-shadow: var(--sombra); border-color: var(--azul-borde); }
+
+.carrusel {
+  position: relative;
+  /*
+   * `min-height` en vez de `aspect-ratio` a secas, y estirada a toda la fila.
+   *
+   * Con la proporción fija, la foto terminaba antes que la columna de datos y
+   * quedaba una franja blanca abajo que parte la fila al medio. Estirándola,
+   * la foto acompaña el alto del texto sea cual sea.
+   */
+  min-height: 100%;
+  align-self: stretch;
+  background: var(--azul-claro);
+  display: grid; place-items: center;
+  overflow: hidden;
+}
+.carrusel img { align-self: stretch; }
+.carrusel img { width: 100%; height: 100%; object-fit: cover; }
+.carrusel .sin-foto { color: var(--azul); opacity: .35; font-size: 11px; font-weight: 600; letter-spacing: 1.4px; }
+.carrusel-ir {
+  position: absolute; top: 50%; transform: translateY(-50%);
+  width: 30px; height: 30px; border-radius: 50%;
+  border: 0; background: rgba(255,255,255,.9); color: var(--azul);
+  font-size: 18px; line-height: 1; box-shadow: 0 1px 6px rgba(0,0,0,.2);
+  display: grid; place-items: center;
+}
+.carrusel-ir.antes { left: 7px; }
+.carrusel-ir.despues { right: 7px; }
+.carrusel-cuenta {
+  position: absolute; bottom: 7px; right: 7px;
+  background: rgba(1,49,122,.82); color: #fff;
+  font-size: 10.5px; font-weight: 600; padding: 2px 7px; border-radius: 20px;
+}
+
+.fila-datos { padding: 14px 16px 14px 0; display: flex; flex-direction: column; gap: 11px; }
+.fila-encabezado { display: flex; justify-content: space-between; gap: 14px; align-items: flex-start; }
+.fila-encabezado h3 { margin: 0; font-size: 16px; font-weight: 700; line-height: 1.25; }
+.fila-encabezado .sku { margin: 3px 0 0; font-size: 11.5px; color: var(--tinta-suave); }
+.fila-precio {
+  font-size: 18px; font-weight: 800; color: var(--azul);
+  text-align: right; white-space: nowrap; line-height: 1.1;
+}
+.fila-precio small { display: block; font-size: 10px; font-weight: 500; color: var(--tinta-suave); }
+
+.rotulo-linea {
+  display: block; font-size: 10px; font-weight: 700;
+  letter-spacing: .8px; color: var(--tinta-suave); margin-bottom: 5px;
+}
+.muestras { display: flex; flex-wrap: wrap; gap: 6px; }
+.muestra {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11.5px; font-weight: 600; color: var(--tinta);
+  background: var(--fondo); border: 1px solid var(--linea);
+  border-radius: 20px; padding: 3px 9px 3px 4px;
+}
+.muestra i {
+  width: 15px; height: 15px; border-radius: 50%;
+  border: 1px solid rgba(0,0,0,.16); flex: 0 0 auto;
+}
+.talles-linea { display: flex; flex-wrap: wrap; gap: 5px; }
+.talle-chip {
+  font-size: 11.5px; font-weight: 700; color: var(--azul);
+  background: var(--azul-claro); border-radius: 6px; padding: 3px 9px;
+}
+.fila-pie { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: auto; }
+.fila-pie .btn { padding: 9px 16px; font-size: 13px; }
+.fila-pie .en-pedido { font-size: 12.5px; font-weight: 700; color: var(--verde); }
+
+.titulo-categoria small {
+  font-weight: 500; color: var(--tinta-suave); font-size: 12px; margin-left: 6px;
+}
+
+@media (max-width: 640px) {
+  .fila-producto { grid-template-columns: 122px 1fr; gap: 12px; }
+  .fila-datos { padding: 12px 12px 12px 0; gap: 9px; }
+  .fila-encabezado h3 { font-size: 14.5px; }
+  .fila-precio { font-size: 15px; }
+  .carrusel-ir { width: 26px; height: 26px; font-size: 15px; }
+  .fila-pie .btn { width: 100%; }
+}
+
+/* ═══ Matriz de color × talle ════════════════════════════════════ */
+/*
+ * Todos los colores y todos los talles a la vez.
+ *
+ * Es la forma en que ya se piden estas cosas por planilla: se baja por los
+ * colores cargando números, sin entrar y salir de cada uno. La primera columna
+ * queda fija al desplazar a lo ancho — con seis talles, sin eso se termina
+ * cargando un número sin saber de qué color es.
+ */
+.matriz-envoltorio { overflow-x: auto; margin: 0 -18px; padding: 0 18px; }
+
+table.matriz-talles { border-collapse: separate; border-spacing: 0; width: 100%; }
+table.matriz-talles th, table.matriz-talles td {
+  padding: 7px 6px; text-align: center; vertical-align: middle;
+}
+table.matriz-talles thead th {
+  font-size: 12px; font-weight: 700; color: var(--azul);
+  background: var(--azul-claro); border-bottom: 1px solid var(--azul-borde);
+  position: sticky; top: 0; z-index: 2; min-width: 62px;
+}
+table.matriz-talles tbody tr:nth-child(even) td,
+table.matriz-talles tbody tr:nth-child(even) th { background: #fafbfd; }
+
+th.col-color {
+  text-align: left; position: sticky; left: 0; z-index: 1;
+  background: var(--papel); min-width: 132px;
+  display: flex; align-items: center; gap: 7px;
+  font-size: 12.5px; font-weight: 600;
+  border-right: 1px solid var(--linea);
+}
+thead th.col-color { background: var(--azul-claro); }
+th.col-color .cuadro {
+  width: 26px; height: 26px; border-radius: 5px; flex: 0 0 auto;
+  border: 1px solid rgba(0,0,0,.18);
+}
+th.col-color .nombre { flex: 1; text-align: left; line-height: 1.15; }
+th.col-color .cuenta-color {
+  background: var(--verde); color: #fff; border-radius: 20px;
+  font-size: 10.5px; font-weight: 700; padding: 1px 7px; flex: 0 0 auto;
+}
+
+table.matriz-talles input {
+  width: 100%; max-width: 64px; height: 38px; text-align: center;
+  font: inherit; font-size: 14px; font-weight: 600;
+  border: 1px solid var(--linea); border-radius: 7px; background: #fff;
+  -moz-appearance: textfield;
+}
+table.matriz-talles input::-webkit-outer-spin-button,
+table.matriz-talles input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+table.matriz-talles input:focus { outline: 2px solid var(--azul); outline-offset: -1px; }
+
+td.agotado span {
+  display: inline-block; font-size: 10.5px; font-weight: 600;
+  color: var(--tinta-suave); background: #f1f3f6;
+  border-radius: 6px; padding: 10px 6px; width: 100%; max-width: 64px;
+}
+
+.carrusel-panel {
+  position: relative; aspect-ratio: 4 / 3; margin-bottom: 14px;
+  border-radius: var(--radio); overflow: hidden; background: var(--azul-claro);
+}
+.carrusel-panel img { width: 100%; height: 100%; object-fit: cover; }
+
+.descripcion { font-size: 13px; color: var(--tinta-suave); line-height: 1.5; margin: 0 0 14px; }
+.ver-guia { margin-top: 14px; width: 100%; }
+
+.panel footer .resumen b { font-size: 15px; }
+
+@media (pointer: coarse), (max-width: 900px) {
+  table.matriz-talles input { height: 44px; font-size: 16px; }
+  td.agotado span { padding: 13px 6px; }
+  th.col-color { min-width: 118px; }
 }

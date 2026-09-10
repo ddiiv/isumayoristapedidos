@@ -25,30 +25,22 @@ const api = async (ruta, opciones = {}) => {
 const aviso = (texto, tipo = 'ok') =>
   `<p class="mensaje ${tipo}">${esc(texto)}</p>`;
 
-// ── Entrar ────────────────────────────────────────────────────────
-function pintarEntrada(mensaje = '') {
+/*
+ * El panel ya no tiene su propia entrada.
+ *
+ * Se entra por la misma puerta que los clientes, en la página principal, y el
+ * servidor decide el rol. Con dos formularios de login había dos formas de
+ * estar autenticado y dos lugares donde arreglar lo mismo — y quien se
+ * confundía de puerta recibía "contraseña incorrecta" cuando lo que erró fue
+ * la pantalla.
+ */
+function pintarSinPermiso(mensaje) {
   raiz.innerHTML = `
     <div class="tarjeta entrar">
-      <h3>Panel de ISUWAYA</h3>
-      <p class="sub">Entrá con la contraseña del panel.</p>
-      ${mensaje ? aviso(mensaje, 'error') : ''}
-      <form id="form-entrar">
-        <div class="campo">
-          <label for="clave">Contraseña</label>
-          <input id="clave" type="password" autocomplete="current-password" required>
-        </div>
-        <button class="btn" style="margin-top:12px;width:100%">Entrar</button>
-      </form>
+      <h3>Esto es el panel de ISUWAYA</h3>
+      <p class="sub">${esc(mensaje || 'Entrá con la cuenta de administrador para verlo.')}</p>
+      <a class="btn enlinea" href="/" >Ir a la página y entrar</a>
     </div>`;
-  el('#form-entrar').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    try {
-      await api('/login', { method: 'POST', body: JSON.stringify({ password: el('#clave').value }) });
-      arrancar();
-    } catch (err) {
-      pintarEntrada(err.message);
-    }
-  });
 }
 
 // ── Catálogo ──────────────────────────────────────────────────────
@@ -56,19 +48,19 @@ function vistaCatalogo() {
   const filas = datos.productos.map((p) => `
     <tr data-sku="${esc(p.sku_agrupador)}">
       <td>
-        <div style="font-weight:600">${esc(p.titulo)}</div>
-        <div style="font-size:11px;color:var(--tinta-suave)">${esc(p.sku_agrupador)}</div>
+        <div class="semi">${esc(p.titulo)}</div>
+        <div class="chico">${esc(p.sku_agrupador)}</div>
       </td>
       <td>${esc(p.categoria || '—')}</td>
-      <td style="text-align:center">${p.variantes}</td>
+      <td class="centrado">${p.variantes}</td>
       <td><input type="number" min="0" step="1" value="${p.precio}" data-campo="precio"></td>
-      <td style="text-align:center">
-        <button class="pastilla ${p.visible ? 'si' : 'no'}" data-campo="visible" style="border:0">
+      <td class="centrado">
+        <button class="pastilla ${p.visible ? 'si' : 'no'} pastilla-boton" data-campo="visible" >
           ${p.visible ? 'En el catálogo' : 'Oculto'}
         </button>
       </td>
       <td>
-        <label class="btn borde" style="padding:5px 10px;font-size:12px;cursor:pointer">
+        <label class="btn borde btn-archivo">
           Foto<input type="file" accept="image/jpeg,image/png,image/webp" data-foto hidden>
         </label>
       </td>
@@ -92,7 +84,7 @@ function vistaCatalogo() {
     </div>
 
     <div class="tarjeta">
-      <h3>Productos <span style="font-weight:400;color:var(--tinta-suave)">(${datos.productos.length})</span></h3>
+      <h3>Productos <span class="apagado">(${datos.productos.length})</span></h3>
       <p class="sub">El precio y la visibilidad se guardan solos al cambiarlos.</p>
       <div class="envoltorio-tabla">
         <table class="datos">
@@ -100,7 +92,7 @@ function vistaCatalogo() {
             <th>Producto</th><th>Categoría</th><th>Variantes</th>
             <th>Precio mayorista</th><th>Estado</th><th>Foto principal</th>
           </tr></thead>
-          <tbody>${filas || '<tr><td colspan="6" style="text-align:center;padding:30px;color:var(--tinta-suave)">Todavía no importaste nada.</td></tr>'}</tbody>
+          <tbody>${filas || '<tr><td colspan="6" class="vacio-tabla">Todavía no importaste nada.</td></tr>'}</tbody>
         </table>
       </div>
     </div>`;
@@ -111,26 +103,26 @@ const ESTADOS = ['nuevo', 'preparando', 'enviado', 'cancelado'];
 
 function vistaPedidos() {
   if (!datos.pedidos.length) {
-    return '<div class="tarjeta"><p class="sub" style="margin:0">Todavía no entró ningún pedido.</p></div>';
+    return '<div class="tarjeta"><p class="sub sin-margen">Todavía no entró ningún pedido.</p></div>';
   }
   const filas = datos.pedidos.map((p) => {
     const avisoFallado = [p.aviso_mail, p.aviso_whatsapp].some((a) => a && a !== 'ok');
     return `
     <tr data-numero="${esc(p.numero)}">
       <td>
-        <div style="font-weight:700;color:var(--azul)">${esc(p.numero)}</div>
-        <div style="font-size:11px;color:var(--tinta-suave)">
+        <div class="destacado">${esc(p.numero)}</div>
+        <div class="chico">
           ${new Date(p.creado_en).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
         </div>
       </td>
       <td>
-        <div style="font-weight:600">${esc(p.cliente.nombre)}</div>
-        <div style="font-size:11px;color:var(--tinta-suave)">${esc(p.cliente.ciudad)}, ${esc(p.cliente.provincia)}</div>
+        <div class="semi">${esc(p.cliente.nombre)}</div>
+        <div class="chico">${esc(p.cliente.ciudad)}, ${esc(p.cliente.provincia)}</div>
       </td>
-      <td style="text-align:center">${p.unidades}</td>
-      <td style="font-weight:700">${pesos(p.total)}</td>
+      <td class="centrado">${p.unidades}</td>
+      <td class="fuerte">${pesos(p.total)}</td>
       <td>
-        <select data-estado style="font:inherit;font-size:12.5px;padding:4px 6px;border:1px solid var(--linea);border-radius:6px">
+        <select data-estado class="select-mini">
           ${ESTADOS.map((e) => `<option${e === p.estado ? ' selected' : ''}>${e}</option>`).join('')}
         </select>
       </td>
@@ -139,10 +131,10 @@ function vistaPedidos() {
           ? `<span class="pastilla aviso" title="${esc(`mail: ${p.aviso_mail} · whatsapp: ${p.aviso_whatsapp}`)}">Revisar aviso</span>`
           : '<span class="pastilla si">Avisado</span>'}
       </td>
-      <td style="white-space:nowrap">
-        <a class="btn borde" style="padding:5px 9px;font-size:12px;text-decoration:none"
+      <td class="sin-corte">
+        <a class="btn borde btn-mini"
            href="/api/pedidos/${encodeURIComponent(p.numero)}/pedido.pdf">Remito</a>
-        <a class="btn borde" style="padding:5px 9px;font-size:12px;text-decoration:none"
+        <a class="btn borde btn-mini"
            href="/api/pedidos/${encodeURIComponent(p.numero)}/rotulo.pdf">Rótulo</a>
       </td>
     </tr>`;
@@ -150,7 +142,7 @@ function vistaPedidos() {
 
   return `
     <div class="tarjeta">
-      <h3>Pedidos <span style="font-weight:400;color:var(--tinta-suave)">(${datos.pedidos.length})</span></h3>
+      <h3>Pedidos <span class="apagado">(${datos.pedidos.length})</span></h3>
       <p class="sub">
         Los últimos doscientos. «Revisar aviso» significa que el mail o el WhatsApp
         no salieron — el pedido está igual, y los PDF se bajan de acá.
@@ -189,8 +181,10 @@ async function arrancar() {
     await cargar();
     pintar();
   } catch (e) {
-    if (e.status === 401) return pintarEntrada();
-    if (e.status === 503) return pintarEntrada('El panel no está configurado en el servidor (falta ADMIN_PASSWORD).');
+    if (e.status === 401) return pintarSinPermiso();
+    if (e.status === 503) {
+      return pintarSinPermiso('El panel no está configurado en el servidor: falta ADMIN_PASSWORD.');
+    }
     raiz.innerHTML = aviso('No pudimos cargar el panel.', 'error');
   }
 }
@@ -271,9 +265,8 @@ raiz.addEventListener('submit', async (e) => {
 });
 
 el('#salir').addEventListener('click', async () => {
-  await api('/logout', { method: 'POST' });
-  el('#salir').hidden = true;
-  pintarEntrada();
+  await fetch('/api/sesion', { method: 'DELETE' });
+  window.location.href = '/';
 });
 
 arrancar();
