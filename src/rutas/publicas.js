@@ -1,0 +1,158 @@
+const express = require('express');
+const { db } = require('../db');
+const { validarCliente, armarPedido, guardarPedido, leerPedido } = require('../pedidos');
+const { pdfPedido, pdfRotulo } = require('../pdf');
+const { avisarPedido } = require('../notificaciones');
+
+const r = express.Router();
+
+/*
+ * GET /api/catalogo
+ *
+ * Todo el catálogo en un solo pedido.
+ *
+ * Un endpoint por categoría obligaría a una vuelta al servidor por cada
+ * pestaña que toca el cliente. El catálogo de un mayorista son cientos de
+ * variantes, no cientos de miles: entra en una respuesta y deja la navegación
+ * instantánea, que es lo que hace que alguien recorra el catálogo entero.
+ */
+r.get('/catalogo', (req, res) => {
+  const categorias = db.prepare(`
+    SELECT id, nombre FROM categorias WHERE visible = 1 ORDER BY orden, nombre`).all();
+
+  const productos = db.prepare(`
+    SELECT p.id, p.sku_agrupador, p.titulo, p.precio, p.foto, p.modelo, p.genero, p.categoria_id
+    FROM productos p
+    WHERE p.visible = 1
+    ORDER BY p.orden, p.titulo`).all();
+
+  const variantes = db.prepare(`
+    SELECT v.producto_id, v.sku, v.color, v.talle, v.orden_talle, v.precio
+    FROM variantes v JOIN productos p ON p.id = v.producto_id
+    WHERE p.visible = 1
+    ORDER BY v.orden_talle, v.color`).all();
+
+  const fotos = db.prepare('SELECT producto_id, color, ruta FROM fotos_color').all();
+
+  const porProducto = new Map(productos.map((p) => [p.id, []]));
+  for (const v of variantes) porProducto.get(v.producto_id)?.push(v);
+  const fotosPorProducto = new Map();
+  for (const f of fotos) {
+    if (!fotosPorProducto.has(f.producto_id)) fotosPorProducto.set(f.producto_id, {});
+    fotosPorProducto.get(f.producto_id)[f.color] = f.ruta;
+  }
+
+  const salida = productos.map((p) => {
+    const vs = porProducto.get(p.id) || [];
+    const colores = [...new Set(vs.map((v) => v.color))];
+    const talles = [...new Map(vs.map((v) => [v.talle, v.orden_talle])).entries()]
+      .sort((a, b) => a[1] - b[1]).map(([t]) => t);
+    return {
+      sku: p.sku_agrupador,
+      titulo: p.titulo,
+      categoriaId: p.categoria_id,
+      precio: p.precio,
+      modelo: p.modelo,
+      genero: p.genero,
+      foto: p.foto,
+      fotosPorColor: fotosPorProducto.get(p.id) || {},
+      colores,
+      talles,
+      // La grilla completa: con qué SKU se pide cada cruce de color y talle.
+      // Que lo resuelva el servidor evita que el navegador tenga que adivinar
+      // qué combinaciones existen de verdad — no todas las existen.
+      combinaciones: vs.map((v) => ({ sku: v.sku, color: v.color, talle: v.talle, precio: v.precio ?? p.precio })),
+      // Una curva es una unidad de CADA combinación que existe.
+      unidadesPorCurva: vs.length,
+      precioPorCurva: vs.reduce((t, v) => t + (v.precio ?? p.precio), 0),
+    };
+  }).filter((p) => p.combinaciones.length > 0);
+
+  res.json({ categorias, productos: salida });
+});
+
+// POST /api/pedidos/previsualizar — valoriza sin guardar nada.
+r.post('/pedidos/previsualizar', (req, res) => {
+  const { cliente, errores: erroresCliente } = validarCliente(req.body?.cliente);
+  const { items, total, unidades, errores } = armarPedido(req.body?.carrito);
+
+  if (!items.length) {
+    return res.status(400).json({ message: 'El pedido está vacío.', errores, erroresCliente });
+  }
+  res.json({ cliente, items, total, unidades, errores, erroresCliente });
+});
+
+/*
+ * POST /api/pedidos/pdf — el remito preliminar, antes de confirmar.
+ *
+ * Se genera con el mismo código que el definitivo. Con una vista previa hecha
+ * aparte, el papel que el cliente descarga y el que llega al depósito pueden
+ * decir cosas distintas, y nadie lo nota hasta que hay un reclamo.
+ */
+r.post('/pedidos/pdf', async (req, res, next) => {
+  try {
+    const { cliente } = validarCliente(req.body?.cliente);
+    const { items, total, unidades } = armarPedido(req.body?.carrito);
+    if (!items.length) return res.status(400).json({ message: 'El pedido está vacío.' });
+
+    const pdf = await pdfPedido({
+      numero: 'PRELIMINAR', creado_en: new Date().toISOString(), cliente, items, total, unidades,
+    });
+    res.type('application/pdf')
+      .setHeader('Content-Disposition', 'attachment; filename="pedido-preliminar.pdf"');
+    res.send(pdf);
+  } catch (e) { next(e); }
+});
+
+// POST /api/pedidos — confirma, guarda y avisa.
+r.post('/pedidos', async (req, res, next) => {
+  try {
+    const { cliente, errores: erroresCliente } = validarCliente(req.body?.cliente);
+    if (Object.keys(erroresCliente).length) {
+      return res.status(400).json({ message: 'Faltan datos para el envío.', erroresCliente });
+    }
+
+    const { items, total, unidades, errores } = armarPedido(req.body?.carrito);
+    if (!items.length) return res.status(400).json({ message: 'El pedido está vacío.', errores });
+
+    const pedido = guardarPedido({ cliente, items, total, unidades });
+
+    /*
+     * El pedido ya está guardado antes de avisar.
+     *
+     * Si el mail o el WhatsApp fallaran y eso devolviera un error, el cliente
+     * volvería a mandar el mismo pedido y llegarían dos. Primero se guarda —que
+     * es lo que no se puede perder— y después se avisa.
+     */
+    const [pdfDelPedido, pdfDelRotulo] = await Promise.all([pdfPedido(pedido), pdfRotulo(pedido)]);
+    const avisos = await avisarPedido(pedido, { pedido: pdfDelPedido, rotulo: pdfDelRotulo });
+    db.prepare('UPDATE pedidos SET aviso_mail = ?, aviso_whatsapp = ? WHERE id = ?')
+      .run(avisos.mail, avisos.whatsapp, pedido.id);
+
+    res.status(201).json({
+      numero: pedido.numero,
+      total: pedido.total,
+      unidades: pedido.unidades,
+      avisos,
+    });
+  } catch (e) { next(e); }
+});
+
+// GET /api/pedidos/:numero/pedido.pdf | rotulo.pdf
+r.get('/pedidos/:numero/:documento.pdf', async (req, res, next) => {
+  try {
+    const pedido = leerPedido(req.params.numero);
+    if (!pedido) return res.status(404).json({ message: 'No existe ese pedido.' });
+
+    const cual = req.params.documento;
+    if (cual !== 'pedido' && cual !== 'rotulo') {
+      return res.status(404).json({ message: 'Ese documento no existe.' });
+    }
+    const pdf = cual === 'rotulo' ? await pdfRotulo(pedido) : await pdfPedido(pedido);
+    res.type('application/pdf')
+      .setHeader('Content-Disposition', `attachment; filename="${pedido.numero}-${cual}.pdf"`);
+    res.send(pdf);
+  } catch (e) { next(e); }
+});
+
+module.exports = r;

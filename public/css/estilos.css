@@ -1,0 +1,346 @@
+/*
+ * ISUWAYA MAYORISTA
+ *
+ * Azul para lo que estructura —encabezados, bordes, títulos— y verde sólo para
+ * lo que hay que apretar. Si el verde también decorara, dejaría de señalar la
+ * acción: en un portal de pedidos, el color que dice "seguí por acá" tiene que
+ * aparecer una vez por pantalla.
+ */
+:root {
+  --azul: #01317a;
+  --azul-claro: #eaf0f9;
+  --azul-borde: #cfdcef;
+  --verde: #027010;
+  --verde-claro: #eaf5eb;
+  --tinta: #16202e;
+  --tinta-suave: #5b6875;
+  --linea: #e3e8ee;
+  --papel: #ffffff;
+  --fondo: #f6f8fb;
+  --rojo: #b3261e;
+  --radio: 10px;
+  --sombra: 0 1px 2px rgba(1, 49, 122, .06), 0 8px 24px rgba(1, 49, 122, .07);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  /* Misma familia que STOCKER: sans limpia, con la del sistema como respaldo
+     para no cargar una fuente que retrase el primer pintado del catálogo. */
+  font-family: Inter, Roboto, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  color: var(--tinta);
+  background: var(--fondo);
+  -webkit-font-smoothing: antialiased;
+}
+
+img { max-width: 100%; display: block; }
+button { font: inherit; cursor: pointer; }
+[hidden] { display: none !important; }
+
+/* ── Encabezado ─────────────────────────────────────────────────── */
+header.principal {
+  background: var(--azul);
+  color: #fff;
+  position: sticky;
+  top: 0;
+  z-index: 30;
+}
+.barra {
+  max-width: 1200px; margin: 0 auto; padding: 14px 20px;
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+}
+.marca { font-size: 19px; font-weight: 800; letter-spacing: .5px; }
+.marca span { font-weight: 400; opacity: .85; }
+.marca small { display: block; font-size: 10px; font-weight: 500; letter-spacing: 2.4px; opacity: .8; }
+
+/* Las categorías se desplazan solas en el teléfono en vez de apilarse:
+   apiladas empujan el catálogo fuera de la pantalla en el primer scroll. */
+nav.categorias {
+  background: #fff; border-bottom: 1px solid var(--linea);
+  position: sticky; top: 60px; z-index: 25;
+}
+.categorias-lista {
+  max-width: 1200px; margin: 0 auto; padding: 0 20px;
+  display: flex; gap: 6px; overflow-x: auto; scrollbar-width: thin;
+}
+.categorias-lista button {
+  flex: 0 0 auto; border: 0; background: none; padding: 13px 12px;
+  color: var(--tinta-suave); font-size: 13.5px; font-weight: 600;
+  border-bottom: 3px solid transparent; white-space: nowrap;
+}
+.categorias-lista button[aria-current="true"] { color: var(--azul); border-bottom-color: var(--azul); }
+
+/* ── Catálogo ───────────────────────────────────────────────────── */
+main { max-width: 1200px; margin: 0 auto; padding: 22px 20px 120px; }
+
+.titulo-categoria {
+  font-size: 15px; font-weight: 700; color: var(--azul);
+  margin: 26px 0 12px; padding-bottom: 8px; border-bottom: 2px solid var(--azul-borde);
+}
+.titulo-categoria:first-child { margin-top: 0; }
+
+.grilla {
+  display: grid; gap: 16px;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+}
+
+.producto {
+  background: var(--papel); border: 1px solid var(--linea); border-radius: var(--radio);
+  overflow: hidden; text-align: left; padding: 0; width: 100%;
+  transition: box-shadow .15s, border-color .15s;
+}
+.producto:hover, .producto:focus-visible { box-shadow: var(--sombra); border-color: var(--azul-borde); }
+.producto .foto {
+  aspect-ratio: 3 / 4; background: var(--azul-claro);
+  display: grid; place-items: center; overflow: hidden;
+}
+.producto .foto img { width: 100%; height: 100%; object-fit: cover; }
+.producto .foto .sin-foto { color: var(--azul); opacity: .35; font-size: 11px; font-weight: 600; letter-spacing: 1px; }
+.producto .cuerpo { padding: 10px 12px 13px; }
+.producto h3 { margin: 0 0 3px; font-size: 13.5px; font-weight: 600; line-height: 1.3; }
+.producto .sku { font-size: 11px; color: var(--tinta-suave); }
+.producto .precio { margin-top: 7px; font-size: 15px; font-weight: 700; color: var(--azul); }
+.producto .colores { display: flex; gap: 4px; margin-top: 8px; flex-wrap: wrap; }
+.producto .colores span {
+  font-size: 10px; padding: 2px 6px; border-radius: 20px;
+  background: var(--azul-claro); color: var(--azul); font-weight: 600;
+}
+.producto .en-pedido {
+  margin-top: 8px; font-size: 11px; font-weight: 700; color: var(--verde);
+}
+
+/* ── Panel deslizante del producto ──────────────────────────────── */
+.telon {
+  position: fixed; inset: 0; background: rgba(10, 22, 40, .45);
+  z-index: 40; opacity: 0; pointer-events: none; transition: opacity .18s;
+}
+.telon.abierto { opacity: 1; pointer-events: auto; }
+
+.panel {
+  position: fixed; top: 0; right: 0; bottom: 0; width: min(480px, 100%);
+  background: var(--papel); z-index: 45; display: flex; flex-direction: column;
+  transform: translateX(100%); transition: transform .22s ease;
+  box-shadow: -8px 0 30px rgba(1, 49, 122, .16);
+}
+.panel.abierto { transform: none; }
+.panel header {
+  padding: 14px 18px; border-bottom: 1px solid var(--linea);
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+}
+.panel header h2 { margin: 0; font-size: 16px; font-weight: 700; line-height: 1.25; }
+.panel header .sku { font-size: 11.5px; color: var(--tinta-suave); margin-top: 2px; }
+.cerrar {
+  border: 1px solid var(--linea); background: #fff; border-radius: 8px;
+  width: 32px; height: 32px; font-size: 17px; line-height: 1; color: var(--tinta-suave); flex: 0 0 auto;
+}
+.panel .contenido { flex: 1; overflow-y: auto; padding: 16px 18px 20px; }
+.panel footer {
+  border-top: 1px solid var(--linea); padding: 12px 18px;
+  display: flex; align-items: center; gap: 12px; background: #fff;
+}
+.panel footer .resumen { flex: 1; font-size: 12.5px; color: var(--tinta-suave); }
+.panel footer .resumen b { display: block; font-size: 16px; color: var(--azul); }
+
+.foto-grande {
+  aspect-ratio: 4 / 3; background: var(--azul-claro); border-radius: var(--radio);
+  overflow: hidden; display: grid; place-items: center; margin-bottom: 16px;
+}
+.foto-grande img { width: 100%; height: 100%; object-fit: cover; }
+.foto-grande .sin-foto { color: var(--azul); opacity: .35; font-size: 12px; font-weight: 600; letter-spacing: 1.5px; }
+
+.rotulo { font-size: 11px; font-weight: 700; letter-spacing: .8px; color: var(--tinta-suave); margin: 0 0 8px; }
+
+.colores-selector { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 18px; }
+.colores-selector button {
+  border: 1.5px solid var(--linea); background: #fff; border-radius: 8px;
+  padding: 7px 12px; font-size: 13px; font-weight: 600; color: var(--tinta);
+}
+.colores-selector button[aria-pressed="true"] {
+  border-color: var(--azul); background: var(--azul-claro); color: var(--azul);
+}
+.colores-selector button .cuenta {
+  display: inline-block; margin-left: 6px; font-size: 11px;
+  color: #fff; background: var(--verde); border-radius: 20px; padding: 1px 6px;
+}
+
+/* Modo de carga: por talle o por curva */
+.modos { display: flex; gap: 0; border: 1px solid var(--azul-borde); border-radius: 8px; overflow: hidden; margin-bottom: 16px; }
+.modos button {
+  flex: 1; border: 0; background: #fff; padding: 9px 10px;
+  font-size: 12.5px; font-weight: 700; color: var(--tinta-suave);
+}
+.modos button[aria-pressed="true"] { background: var(--azul); color: #fff; }
+
+.matriz { display: grid; gap: 8px; }
+.fila-talle {
+  display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 12px;
+  padding: 9px 12px; border: 1px solid var(--linea); border-radius: 8px;
+}
+.fila-talle .talle { font-size: 14px; font-weight: 600; }
+.fila-talle .precio-unit { font-size: 11px; color: var(--tinta-suave); font-weight: 400; margin-left: 6px; }
+.contador { display: flex; align-items: center; gap: 0; }
+.contador button {
+  width: 32px; height: 32px; border: 1px solid var(--linea); background: #fff;
+  font-size: 16px; line-height: 1; color: var(--azul); font-weight: 700;
+}
+.contador button:first-child { border-radius: 8px 0 0 8px; }
+.contador button:last-child { border-radius: 0 8px 8px 0; }
+.contador input {
+  width: 52px; height: 32px; text-align: center; font: inherit; font-size: 14px; font-weight: 600;
+  border: 1px solid var(--linea); border-left: 0; border-right: 0; -moz-appearance: textfield;
+}
+.contador input::-webkit-outer-spin-button, .contador input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+
+.aviso-curva {
+  background: var(--verde-claro); border: 1px solid #bcdcc0; border-radius: 8px;
+  padding: 11px 13px; font-size: 12.5px; color: #144d1b; line-height: 1.5; margin-bottom: 14px;
+}
+.aviso-curva b { color: var(--verde); }
+
+/* ── Botones ────────────────────────────────────────────────────── */
+.btn {
+  border: 0; border-radius: 8px; padding: 11px 18px;
+  font-size: 14px; font-weight: 700; color: #fff; background: var(--verde);
+}
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.btn.azul { background: var(--azul); }
+.btn.borde { background: #fff; color: var(--azul); border: 1.5px solid var(--azul-borde); }
+.btn.texto { background: none; color: var(--tinta-suave); font-weight: 600; padding: 8px 4px; }
+
+/* ── Botón flotante del pedido ──────────────────────────────────── */
+/*
+ * Flotante y centrado abajo, angosto a propósito.
+ *
+ * Una barra de ancho completo tapa la última fila del catálogo justo cuando la
+ * persona está mirando si le falta algo. Así queda encima pero sin comerse
+ * contenido, y el catálogo tiene abajo el espacio para que nada quede debajo.
+ */
+.flotante {
+  position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%) translateY(120%);
+  z-index: 35; transition: transform .22s ease;
+  display: flex; align-items: center; gap: 14px;
+  background: var(--verde); color: #fff; border: 0;
+  border-radius: 40px; padding: 12px 14px 12px 20px;
+  box-shadow: 0 6px 20px rgba(2, 112, 16, .32);
+  font-size: 14px; font-weight: 700; max-width: calc(100vw - 24px);
+  /* En una sola línea siempre: partido en dos, el botón crece hacia abajo y
+     se sale de la pantalla justo donde el pulgar lo va a buscar. */
+  white-space: nowrap;
+}
+.flotante.visible { transform: translateX(-50%); }
+.flotante .cuenta-items { font-weight: 500; opacity: .9; font-size: 12.5px; }
+.flotante .ir { background: rgba(255,255,255,.18); border-radius: 30px; padding: 6px 14px; }
+
+/* ── Diálogo del pedido ─────────────────────────────────────────── */
+.dialogo {
+  position: fixed; inset: 0; z-index: 50; display: none;
+  background: rgba(10, 22, 40, .5); overflow-y: auto; padding: 24px 16px;
+}
+.dialogo.abierto { display: block; }
+.dialogo .caja {
+  max-width: 720px; margin: 0 auto; background: #fff;
+  border-radius: 12px; overflow: hidden; box-shadow: var(--sombra);
+}
+.dialogo .caja > header {
+  background: var(--azul); color: #fff; padding: 15px 20px;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.dialogo .caja > header h2 { margin: 0; font-size: 16px; }
+.dialogo .caja > header .cerrar { background: rgba(255,255,255,.14); border-color: transparent; color: #fff; }
+.dialogo .cuerpo { padding: 20px; }
+.dialogo .pie {
+  padding: 14px 20px; border-top: 1px solid var(--linea);
+  display: flex; gap: 10px; align-items: center; justify-content: flex-end; flex-wrap: wrap;
+}
+
+/* ── Formulario ─────────────────────────────────────────────────── */
+.campos { display: grid; grid-template-columns: 1fr 1fr; gap: 13px; }
+.campo.ancho { grid-column: 1 / -1; }
+.campo label { display: block; font-size: 11.5px; font-weight: 700; color: var(--tinta-suave); margin-bottom: 5px; }
+.campo label .req { color: var(--rojo); }
+.campo input, .campo select, .campo textarea {
+  width: 100%; font: inherit; font-size: 14px; padding: 9px 11px;
+  border: 1px solid var(--linea); border-radius: 8px; background: #fff; color: var(--tinta);
+}
+.campo input:focus, .campo select:focus { outline: 2px solid var(--azul); outline-offset: -1px; border-color: var(--azul); }
+.campo .error { color: var(--rojo); font-size: 11.5px; margin-top: 4px; font-weight: 600; }
+.campo input[aria-invalid="true"], .campo select[aria-invalid="true"] { border-color: var(--rojo); }
+
+/* ── Resumen del pedido ─────────────────────────────────────────── */
+.resumen-item { border: 1px solid var(--linea); border-radius: 8px; padding: 11px 13px; margin-bottom: 9px; }
+.resumen-item .encabezado { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+.resumen-item h4 { margin: 0; font-size: 13.5px; font-weight: 700; }
+.resumen-item .categoria { font-size: 11px; color: var(--tinta-suave); }
+.resumen-item .importe { font-weight: 700; color: var(--azul); font-size: 14px; white-space: nowrap; }
+.resumen-item .lineas { margin-top: 7px; font-size: 12px; color: #37455c; line-height: 1.7; }
+.resumen-item .lineas b { color: var(--verde); }
+.resumen-item .curva { font-size: 11.5px; color: var(--verde); font-weight: 700; margin-top: 4px; }
+.resumen-item .quitar { border: 0; background: none; color: var(--rojo); font-size: 11.5px; font-weight: 600; padding: 4px 0 0; }
+
+.total-caja {
+  background: var(--azul); color: #fff; border-radius: 10px;
+  padding: 15px 18px; display: flex; justify-content: space-between; align-items: center; margin-top: 12px;
+}
+.total-caja .u { font-size: 12.5px; opacity: .85; }
+.total-caja .n { font-size: 24px; font-weight: 800; }
+
+.mensaje { padding: 11px 13px; border-radius: 8px; font-size: 13px; margin-bottom: 14px; line-height: 1.5; }
+.mensaje.error { background: #fdeceb; color: var(--rojo); border: 1px solid #f3c6c3; }
+.mensaje.ok { background: var(--verde-claro); color: #144d1b; border: 1px solid #bcdcc0; }
+.mensaje.info { background: var(--azul-claro); color: var(--azul); border: 1px solid var(--azul-borde); }
+
+.vacio { text-align: center; padding: 50px 20px; color: var(--tinta-suave); }
+.vacio h3 { color: var(--azul); margin: 0 0 6px; }
+
+.cargando { text-align: center; padding: 60px 20px; color: var(--tinta-suave); font-size: 14px; }
+
+/* ── Confirmación ───────────────────────────────────────────────── */
+.confirmado { text-align: center; padding: 12px 0 4px; }
+.confirmado .numero { font-size: 28px; font-weight: 800; color: var(--azul); margin: 6px 0 2px; letter-spacing: 1px; }
+.confirmado .descargas { display: flex; gap: 10px; justify-content: center; margin-top: 18px; flex-wrap: wrap; }
+
+/*
+ * En el teléfono el botón dice menos.
+ *
+ * "· 2 productos · 20 u." no entra en 375 px y empujaba el importe fuera de la
+ * pantalla. La cuenta de productos es la parte prescindible: lo que se mira
+ * antes de tocar es cuántas unidades y cuánta plata.
+ */
+@media (max-width: 430px) {
+  .flotante { font-size: 13px; padding: 11px 12px 11px 16px; gap: 10px; }
+  .flotante .prod { display: none; }
+  .flotante .ir { padding: 5px 11px; }
+}
+
+/*
+ * En pantalla táctil, los contadores se agrandan.
+ *
+ * 32 px alcanza para un mouse y no para un pulgar: la guía táctil pide 44, y
+ * cargar cantidades es LA interacción de esta app en el teléfono. Con el
+ * objetivo chico, el error no es "no pasó nada" sino haber cargado un talle que
+ * no era, y eso se descubre en el depósito.
+ *
+ * Va por `pointer: coarse` Y por ancho hasta 900 px. Sólo con `coarse` alcanza
+ * en el aparato real, pero no se puede confiar en que todos lo reporten —hay
+ * tablets y híbridos que dicen `fine`—, y el costo de equivocarse para el otro
+ * lado es un botón un poco más grande en una ventana chica de escritorio.
+ */
+@media (pointer: coarse), (max-width: 900px) {
+  .contador button { width: 44px; height: 44px; font-size: 19px; }
+  .contador input { width: 62px; height: 44px; font-size: 16px; }
+  .fila-talle { padding: 10px 12px; }
+  /* 16 px en los campos: por debajo de eso, iOS hace zoom al enfocar un input
+     y deja el formulario corrido para el resto de la carga. */
+  .campo input, .campo select, .campo textarea { font-size: 16px; }
+  .modos button { padding: 12px 10px; }
+  .colores-selector button { padding: 10px 14px; }
+}
+
+@media (max-width: 620px) {
+  .campos { grid-template-columns: 1fr; }
+  .barra { padding: 12px 16px; }
+  main { padding: 18px 16px 120px; }
+  nav.categorias { top: 56px; }
+  .grilla { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+}

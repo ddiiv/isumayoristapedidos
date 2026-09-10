@@ -1,0 +1,36 @@
+/* Lo propio del panel. Lo demás lo hereda de la hoja del catálogo. */
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--linea); margin-bottom: 20px; }
+.tabs button {
+  border: 0; background: none; padding: 11px 14px; font-size: 13.5px; font-weight: 600;
+  color: var(--tinta-suave); border-bottom: 3px solid transparent;
+}
+.tabs button[aria-current="true"] { color: var(--azul); border-bottom-color: var(--azul); }
+
+.tarjeta {
+  background: #fff; border: 1px solid var(--linea); border-radius: var(--radio);
+  padding: 18px; margin-bottom: 16px;
+}
+.tarjeta h3 { margin: 0 0 4px; font-size: 15px; color: var(--azul); }
+.tarjeta p.sub { margin: 0 0 14px; font-size: 13px; color: var(--tinta-suave); line-height: 1.5; }
+
+table.datos { width: 100%; border-collapse: collapse; font-size: 13px; }
+table.datos th {
+  text-align: left; font-size: 11px; letter-spacing: .4px; color: var(--tinta-suave);
+  padding: 8px 10px; border-bottom: 2px solid var(--linea); white-space: nowrap;
+}
+table.datos td { padding: 9px 10px; border-bottom: 1px solid var(--linea); vertical-align: middle; }
+table.datos tr:hover td { background: #fafbfd; }
+table.datos input[type="number"], table.datos input[type="text"] {
+  width: 110px; font: inherit; font-size: 13px; padding: 5px 8px;
+  border: 1px solid var(--linea); border-radius: 6px;
+}
+.envoltorio-tabla { overflow-x: auto; }
+
+.pastilla { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 20px; }
+.pastilla.si { background: var(--verde-claro); color: var(--verde); }
+.pastilla.no { background: #f1f3f6; color: var(--tinta-suave); }
+.pastilla.aviso { background: #fdeceb; color: var(--rojo); }
+
+.entrar { max-width: 380px; margin: 60px auto; }
+.subida { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.subida input[type="file"] { font-size: 13px; }

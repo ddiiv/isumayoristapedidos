@@ -1,0 +1,13 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "isuwaya",
+      "runtimeExecutable": "/home/ddiiv/.nvm/versions/node/v24.18.0/bin/node",
+      "runtimeArgs": ["server.js"],
+      "port": 8090,
+      "cwd": ".",
+      "autoPort": false
+    }
+  ]
+}

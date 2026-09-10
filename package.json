@@ -1,0 +1,23 @@
+{
+  "name": "isuwaya-mayorista",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Portal de pedidos mayoristas de ISUWAYA — catálogo, armado de pedido por curvas y generación de remito y rótulo",
+  "main": "server.js",
+  "type": "commonjs",
+  "engines": { "node": ">=20.0.0" },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "test": "node pruebas/correr.cjs"
+  },
+  "dependencies": {
+    "axios": "^1.7.7",
+    "better-sqlite3": "^11.5.0",
+    "exceljs": "^4.4.0",
+    "express": "^4.21.1",
+    "multer": "^2.0.0",
+    "nodemailer": "^6.9.15",
+    "pdfkit": "^0.15.0"
+  }
+}
