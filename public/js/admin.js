@@ -15,6 +15,14 @@ import { el, esc, pesos } from './util.js';
 const raiz = el('#panel-admin');
 
 const vista = { tab: 'catalogo', sku: null, pedido: null };
+
+/*
+ * Los talles que suelen tener un precio distinto.
+ *
+ * Del 3XL para arriba lleva más tela, y el ÚNICO va acá porque es el talle de
+ * los productos que no tienen curva y se cotizan aparte.
+ */
+const TALLES_GRANDES = ['3XL', '4XL', '5XL', 'ÚNICO', 'UNICO', 'Único'];
 let datos = { productos: [], categorias: [], colores: [], talles: [], pedidos: [], totales: null, clientes: [] };
 let detalle = null;      // producto abierto
 let filtroPedidos = { desde: '', hasta: '', estado: '', buscar: '' };
@@ -104,7 +112,7 @@ function vistaProducto() {
       <img src="${esc(f.ruta)}" alt="">
       <select class="select-mini" data-color-foto="${f.id}" aria-label="Color de la foto">
         <option value="">Foto general</option>
-        ${datos.colores.map((c) => `<option value="${c.id}"${c.id === f.color_id ? ' selected' : ''}>${esc(c.nombre)}</option>`).join('')}
+        ${detalle.colores.map((c) => `<option value="${c.id}"${c.id === f.color_id ? ' selected' : ''}>${esc(c.nombre)}</option>`).join('')}
       </select>
       <div class="foto-acciones">
         ${p.foto === f.ruta
@@ -165,7 +173,10 @@ function vistaProducto() {
       <h3>Fotos <span class="apagado">(${detalle.fotos.length} de ${detalle.maxFotos})</span></h3>
       <p class="sub">
         La principal es la que se ve en la fila del catálogo. Las que tengan un color
-        asignado se muestran al elegir ese color en la matriz.
+        asignado se muestran al elegir ese color — sólo aparecen los colores que
+        <b>este</b> producto tiene.
+        <br>Medida recomendada: <b>vertical 3:4</b>, tipo 1440×1920. Es la proporción con
+        la que se recortan las fotos; una apaisada se recorta arriba y abajo.
       </p>
       ${detalle.fotos.length < detalle.maxFotos
         ? `<form class="subida" id="form-foto">
@@ -207,8 +218,31 @@ function vistaProducto() {
     </div>
 
     <div class="tarjeta">
+      <h3>Precio de los talles grandes</h3>
+      <p class="sub">
+        Del 3XL para arriba suele salir más caro porque lleva más tela, y cuánto más
+        cambia por producto. Poné el precio y se aplica a los talles que marques de
+        <b>este</b> producto. Vacío los devuelve al precio del producto.
+      </p>
+      <div class="talles-grandes">
+        ${TALLES_GRANDES.filter((t) => detalle.talles.some((x) => x.nombre === t)).map((t) => `
+          <label class="chip-check"><input type="checkbox" class="talle-grande" value="${esc(t)}" checked> ${esc(t)}</label>`).join('')
+          || '<span class="apagado">Este producto no tiene talles grandes ni ÚNICO.</span>'}
+      </div>
+      ${detalle.talles.some((x) => TALLES_GRANDES.includes(x.nombre)) ? `
+        <div class="acciones">
+          <input id="precio-grandes" type="number" min="0" placeholder="Precio para esos talles" class="nombre-color">
+          <button class="btn" data-precio-talles>Aplicar</button>
+          <button class="btn texto" data-precio-talles-limpiar>Volver al precio del producto</button>
+        </div>` : ''}
+    </div>
+
+    <div class="tarjeta">
       <h3>Variantes <span class="apagado">(${detalle.variantes.length})</span></h3>
-      <p class="sub">El precio vacío significa que sigue el del producto.</p>
+      <p class="sub">
+        El precio vacío significa que sigue el del producto (${pesos(p.precio)}).
+        Se guarda solo al salir del casillero.
+      </p>
       <div class="envoltorio-tabla">
         <table class="datos">
           <thead><tr><th>Color</th><th>Talle</th><th>SKU</th><th>Precio propio</th></tr></thead>
@@ -217,7 +251,11 @@ function vistaProducto() {
               <td><span class="muestra"><i data-hex="${esc(v.hex)}"></i>${esc(v.color)}</span></td>
               <td class="semi">${esc(v.talle)}</td>
               <td class="chico">${esc(v.sku)}</td>
-              <td>${v.precio === null ? '<span class="apagado">hereda</span>' : pesos(v.precio)}</td>
+              <td>
+                <input class="medida" type="number" min="0" data-precio-variante="${v.id}"
+                       value="${v.precio ?? ''}" placeholder="${p.precio}"
+                       aria-label="Precio de ${esc(v.color)} ${esc(v.talle)}">
+              </td>
             </tr>`).join('')}</tbody>
         </table>
       </div>
@@ -632,6 +670,21 @@ raiz.addEventListener('click', (e) => conError(async () => {
     return;
   }
 
+  // ── Precio de los talles grandes
+  if (t.closest('[data-precio-talles]') || t.closest('[data-precio-talles-limpiar]')) {
+    const limpiar = Boolean(t.closest('[data-precio-talles-limpiar]'));
+    const talles = [...raiz.querySelectorAll('.talle-grande:checked')].map((i) => i.value);
+    if (!talles.length) { mensaje('Marcá al menos un talle.', 'error'); pintar(); return; }
+    const r = await api(`/productos/${encodeURIComponent(vista.sku)}/precio-talles`, {
+      method: 'PUT',
+      body: JSON.stringify({ talles, precio: limpiar ? null : el('#precio-grandes').value }),
+    });
+    detalle = await api(`/productos/${encodeURIComponent(vista.sku)}`);
+    mensaje(`Listo: ${r.cambiadas} variantes ${limpiar ? 'vuelven al precio del producto' : 'con precio propio'}.`);
+    pintar();
+    return;
+  }
+
   // ── Fotos
   const principal = t.closest('[data-principal]');
   if (principal) {
@@ -758,6 +811,16 @@ raiz.addEventListener('change', (e) => conError(async () => {
   if (t.dataset?.grupo) {
     await api(`/talles/${t.dataset.grupo}`, { method: 'PUT', body: JSON.stringify({ grupo: t.value }) });
     await cargar();
+    return;
+  }
+  if (t.dataset?.precioVariante) {
+    await api(`/variantes/${t.dataset.precioVariante}`, {
+      method: 'PUT', body: JSON.stringify({ precio: t.value }),
+    });
+    // Sin repintar: repintar la tabla entera saca el foco del casillero
+    // siguiente, que es donde la persona ya está escribiendo.
+    t.style.borderColor = 'var(--verde)';
+    setTimeout(() => { t.style.borderColor = ''; }, 900);
     return;
   }
   if (t.dataset?.colorFoto) {

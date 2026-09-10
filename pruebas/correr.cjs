@@ -368,6 +368,71 @@ const planilla = path.join(__dirname, 'catalogo-isuwaya.xlsx');
     (await pedir(`/api/admin/productos/${encodeURIComponent(unProducto.sku_agrupador)}`, { admin: true }))
       .json.variantes.every((v) => v.precio === null));
 
+  tit('15b. PRECIO PROPIO PARA LOS TALLES GRANDES');
+  /*
+   * Del 3XL para arriba lleva más tela y suele salir más caro, y cuánto más
+   * cambia por producto. Sin esto, la única salida sería crear un producto
+   * aparte por talle: parte el catálogo y rompe la curva.
+   */
+  const conGrandes = (await pedir('/api/catalogo')).json.productos
+    .find((x) => x.talles.some((t) => ['3XL', '4XL', '5XL'].includes(t)));
+
+  if (!conGrandes) {
+    console.log('  (ningún producto tiene talles grandes: se saltea)');
+  } else {
+    const aplicar = await pedir(`/api/admin/productos/${encodeURIComponent(conGrandes.sku)}/precio-talles`, {
+      metodo: 'PUT', cuerpo: { talles: ['3XL', '4XL', '5XL'], precio: 99999 }, admin: true,
+    });
+    chk('se aplica a esos talles', 200,  aplicar.status);
+    chk('y dice a cuántas tocó',   true, aplicar.json.cambiadas > 0);
+
+    const verlo = (await pedir('/api/catalogo')).json.productos.find((x) => x.sku === conGrandes.sku);
+    const grandes = verlo.combinaciones.filter((c) => ['3XL', '4XL', '5XL'].includes(c.talle));
+    const resto = verlo.combinaciones.filter((c) => !['3XL', '4XL', '5XL'].includes(c.talle));
+    chk('el CLIENTE ve el precio distinto en esos talles', true, grandes.every((c) => c.precio === 99999));
+    chk('y el resto sigue con el del producto',            true, resto.every((c) => c.precio === verlo.precio));
+    // Es lo que hace que valga la pena: la curva lleva un talle de cada uno.
+    chk('la curva cuesta lo que suman sus talles',
+      verlo.combinaciones.reduce((t, c) => t + c.precio, 0), verlo.precioPorCurva);
+
+    await pedir(`/api/admin/productos/${encodeURIComponent(conGrandes.sku)}/precio-talles`, {
+      metodo: 'PUT', cuerpo: { talles: ['3XL', '4XL', '5XL'], precio: null }, admin: true,
+    });
+    chk('y se puede volver atrás', true,
+      (await pedir('/api/catalogo')).json.productos.find((x) => x.sku === conGrandes.sku)
+        .combinaciones.every((c) => c.precio === verlo.precio));
+
+    const sinTalles = await pedir(`/api/admin/productos/${encodeURIComponent(conGrandes.sku)}/precio-talles`, {
+      metodo: 'PUT', cuerpo: { talles: [], precio: 100 }, admin: true,
+    });
+    chk('sin elegir talles se rechaza', 400, sinTalles.status);
+  }
+
+  tit('15c. LOS COLORES DE UNA FOTO SON LOS DEL PRODUCTO');
+  /*
+   * Ofreciendo los treinta y seis colores del catálogo, se puede etiquetar la
+   * foto de un pantalón negro como "Salmon" — y esa foto no se muestra nunca,
+   * sin ningún error que lo avise.
+   */
+  const detalleProd = (await pedir(`/api/admin/productos/${encodeURIComponent(unProducto.sku_agrupador)}`, { admin: true })).json;
+  const coloresReales = new Set(detalleProd.variantes.map((v) => v.color));
+  chk('el detalle trae sólo los colores del producto', true,
+    detalleProd.colores.length > 0 && detalleProd.colores.every((c) => coloresReales.has(c.nombre)));
+  chk('y no los del catálogo entero', true,
+    detalleProd.colores.length < (await pedir('/api/admin/colores', { admin: true })).json.colores.length);
+  chk('los talles también, y ordenados', true,
+    detalleProd.talles.every((t, i, a) => i === 0 || a[i - 1].orden <= t.orden));
+
+  tit('15d. LOS VEINTE COLORES OFICIALES');
+  const paleta = (await pedir('/api/admin/colores', { admin: true })).json;
+  chk('la lista oficial tiene veinte', 20, paleta.oficiales.length);
+  chk('están todos cargados', true,
+    paleta.oficiales.every((o) => paleta.colores.some((c) => c.nombre === o)));
+  chk('con la ortografía del negocio', true,
+    ['Beish', 'Melang', 'Bordo', 'Salmon', 'Aero'].every((n) => paleta.colores.some((c) => c.nombre === n)));
+  chk('y los que no están en la lista quedan marcados', true,
+    paleta.colores.some((c) => !c.oficial));
+
   tit('16. EL HISTORIAL RESPONDE PREGUNTAS');
   const historial = await pedir('/api/admin/pedidos', { admin: true });
   chk('trae pedidos',   true, Array.isArray(historial.json.pedidos));

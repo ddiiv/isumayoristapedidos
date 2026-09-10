@@ -176,12 +176,49 @@ function quitarOferta() {
   return productos.length;
 }
 
+/*
+ * Lleva los colores ya guardados a la ortografía oficial.
+ *
+ * El mapa de alias se aplica al importar, pero una base que ya venía andando
+ * tiene los nombres viejos: "Beige" donde ahora va "Beish". Si dos terminan en
+ * el mismo nombre canónico, se unen — que es lo que hay que hacer.
+ */
+function renombrarColoresACanonico() {
+  const todos = db.prepare('SELECT * FROM colores').all();
+  let renombrados = 0;
+  let unidos = 0;
+
+  const correr = db.transaction(() => {
+    for (const c of todos) {
+      const canonico = colores.canonico(c.nombre);
+      if (canonico === c.nombre) continue;
+
+      const destino = db.prepare('SELECT * FROM colores WHERE nombre = ? AND id <> ?').get(canonico, c.id);
+      if (destino) {
+        db.prepare('UPDATE variantes SET color_id = ? WHERE color_id = ?').run(destino.id, c.id);
+        db.prepare('UPDATE fotos SET color_id = ? WHERE color_id = ?').run(destino.id, c.id);
+        db.prepare('DELETE FROM colores WHERE id = ?').run(c.id);
+        unidos += 1;
+      } else {
+        db.prepare('UPDATE colores SET nombre = ? WHERE id = ?').run(canonico, c.id);
+        renombrados += 1;
+      }
+    }
+  });
+  correr();
+  return { renombrados, unidos };
+}
+
 /** Todo junto: lo que corre después de cada importación. */
 function ordenarCatalogo() {
   const ofertaQuitada = quitarOferta();
   const categoriasUnidas = unirCategoriasParecidas();
   const resumen = normalizarTodo();
-  return { ...resumen, categoriasUnidas, ofertaQuitada };
+  const nombres = renombrarColoresACanonico();
+  return { ...resumen, categoriasUnidas, ofertaQuitada, coloresRenombrados: nombres.renombrados, coloresUnidos: nombres.unidos };
 }
 
-module.exports = { ordenarCatalogo, normalizarTodo, unirCategoriasParecidas, quitarOferta, canonicoDeTalle };
+module.exports = {
+  ordenarCatalogo, normalizarTodo, unirCategoriasParecidas, quitarOferta,
+  renombrarColoresACanonico, canonicoDeTalle,
+};

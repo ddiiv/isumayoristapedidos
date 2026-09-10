@@ -99,3 +99,11 @@ input.medida {
   .totales-fila > div { min-width: 96px; padding: 8px 10px; }
   .totales-fila b { font-size: 15px; }
 }
+
+.talles-grandes { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.chip-check {
+  display: inline-flex; align-items: center; gap: 6px;
+  border: 1px solid var(--linea); border-radius: 20px; padding: 6px 12px;
+  font-size: 13px; font-weight: 600; cursor: pointer; background: #fff;
+}
+.chip-check input { margin: 0; }

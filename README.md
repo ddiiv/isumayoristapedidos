@@ -112,6 +112,41 @@ productos de STOCKER; de ahí en adelante todo se toca acá, donde se ve el efec
 en el momento. Lo que edites en el panel —fotos, guía, descripción— sobrevive a
 la próxima importación; el precio no, porque viene de la planilla.
 
+## Los colores
+
+Son **veinte**, con la ortografía que usa el negocio en STOCKER: `Beish` y no
+"Beige", `Melang` y no "Melange", `Bordo` sin tilde. Corregirles la escritura
+sería inventar un nombre que no usa nadie, y el día que alguien busque "Beish"
+en el panel no lo encuentra.
+
+El catálogo trae además otros dieciséis que no están en esa lista —`Azul
+Marino`, `Gris Topo`, `Moliné`…—. **No se unen solos a ninguno de los veinte**:
+"Azul Marino" no es "Azul". Quedan marcados en el panel como fuera de la lista
+para resolverlos ahí, a la vista.
+
+Los hex son provisorios hasta que se toquen desde el panel: aproximan el nombre
+para que la pantalla no arranque en gris.
+
+## Las fotos
+
+**Vertical 3:4**, tipo 1440 × 1920 — la proporción con la que se recortan en el
+catálogo y en el panel del producto. Una foto apaisada se recorta arriba y abajo.
+
+Hasta **20 por producto**. A cada una se le puede asignar un color, y entonces se
+muestra al elegir ese color: la lista ofrece **sólo los colores que ese producto
+tiene**, porque con los treinta y seis del catálogo se puede etiquetar la foto de
+un pantalón negro como "Salmon" y esa foto no se muestra nunca.
+
+## Precios por talle
+
+Del **3XL para arriba** —y el ÚNICO— suele salir más caro porque lleva más tela,
+y cuánto más cambia por producto. En el panel de cada producto hay un atajo:
+marcar los talles, poner el precio y aplicar. También se puede editar el precio
+de una variante suelta en la tabla de abajo.
+
+Vacío quiere decir *seguí el precio del producto*, así que cambiar el precio del
+padre le llega a todas las que no tengan uno propio.
+
 ## La guía de talles
 
 Es de **cada producto**, no una tabla general: un talle M no mide lo mismo en

@@ -14,45 +14,72 @@
  * no arranque en gris. Se editan desde el panel, con la muestra al lado.
  */
 
+/*
+ * Los veinte colores oficiales de ISUWAYA.
+ *
+ * Son los que están cargados como valores del atributo "Color" en STOCKER, con
+ * SU ortografía: "Beish" y no "Beige", "Melang" y no "Melange", "Bordo" sin
+ * tilde. Corregirles la escritura sería inventar un nombre que no usa nadie del
+ * negocio, y el día que alguien busque "Beish" en el panel no lo encuentra.
+ *
+ * Los hex son PROVISORIOS: aproximan el nombre para que la pantalla no arranque
+ * en gris. Se editan desde el panel, con la muestra al lado.
+ */
+const OFICIALES = [
+  'Beish', 'Negro', 'Verde', 'Rojo', 'Blanco', 'Melang', 'Topo', 'Violeta',
+  'Chocolate', 'Bordo', 'Amarillo', 'Crema', 'Azul', 'Dulce de Leche', 'Uva',
+  'Salmon', 'Olivo', 'Celeste', 'Aero', 'Naranja',
+];
+
 // canónico → [hex provisorio, ...alias]
 const CANON = {
+  // ── Los veinte oficiales
   'Negro':            ['#111111', 'negra', 'nero', 'nego'],
   'Blanco':           ['#FFFFFF', 'blanca'],
   'Crema':            ['#F3EADA'],
-  'Beige':            ['#E4D5BE', 'beish', 'beis'],
-  'Perla':            ['#EDE7DC'],
+  'Beish':            ['#E4D5BE', 'beis', 'beige'],
   'Topo':             ['#8C8075'],
-  'Gris Topo':        ['#7D766D'],
+  'Melang':           ['#B5B5B5', 'melange'],
+  'Chocolate':        ['#4E342A', 'choco'],
+  'Dulce de Leche':   ['#C08A55'],
+  'Azul':             ['#2F5597'],
+  'Celeste':          ['#8FC1E3'],
+  'Aero':             ['#7B8FA8', 'aereo'],
+  'Verde':            ['#3F6B45'],
+  'Olivo':            ['#6E6B3C'],
+  'Violeta':          ['#6B4E9B'],
+  'Uva':              ['#4A2B4E'],
+  'Bordo':            ['#6E1F2C', 'bordó'],
+  'Rojo':             ['#B3261E'],
+  'Salmon':           ['#E9A08B', 'salmón'],
+  'Naranja':          ['#D9772F'],
+  'Amarillo':         ['#E8C547', 'amarilla'],
+
+  /*
+   * ── Los que existen en el catálogo pero NO están en la lista de veinte.
+   *
+   * No se unen solos a ninguno de los oficiales: "Azul Marino" no es "Azul" y
+   * "Gris Topo" no es "Topo". Unirlos por parecido sería decidir por el negocio
+   * qué color le está mandando al cliente. Quedan marcados en el panel como
+   * fuera de la lista, para que se decidan ahí a la vista.
+   */
+  'Perla':            ['#EDE7DC'],
   'Gris':             ['#9A9A9A', 'gri'],
   'Gris Claro':       ['#C4C4C4'],
   'Gris Perla':       ['#D6D3CD'],
-  'Melange':          ['#B5B5B5', 'melang'],
+  'Gris Topo':        ['#7D766D'],
   'Moliné':           ['#A8A29B', 'moline'],
-  'Chocolate':        ['#4E342A', 'choco'],
-  'Dulce de Leche':   ['#C08A55', 'dulce de leche'],
   'Camel Claro':      ['#C9A277'],
   'Tostado':          ['#A9743F'],
   'Habano':           ['#8B6A4F'],
-  'Azul':             ['#2F5597'],
   'Azul Marino':      ['#1B2A4A'],
   'Azul Granito':     ['#42556B'],
-  'Celeste':          ['#8FC1E3'],
   'Cielo':            ['#A9CFE8'],
-  'Aéreo':            ['#7B8FA8', 'aereo', 'aero'],
   'Francia':          ['#3A5FA8'],
-  'Verde':            ['#3F6B45'],
   'Verde Militar':    ['#4A5240'],
   'Verde Granito':    ['#6B7A63'],
-  'Olivo':            ['#6E6B3C'],
   'Sage':             ['#A8B5A3'],
-  'Violeta':          ['#6B4E9B'],
-  'Uva':              ['#4A2B4E'],
-  'Bordó':            ['#6E1F2C', 'bordo'],
-  'Rojo':             ['#B3261E'],
-  'Salmón':           ['#E9A08B', 'salmon'],
   'Rosa':             ['#E6A8BE'],
-  'Naranja':          ['#D9772F'],
-  'Amarillo':         ['#E8C547', 'amarilla'],
   'Único':            ['#D8D8D8', 'unico'],
 };
 
@@ -99,4 +126,10 @@ function hexDerivado(nombre) {
   return `hsl(${h}, 14%, 62%)`;
 }
 
-module.exports = { CANON, canonico, hexSugerido, hexDerivado, plano };
+/** ¿Está en la lista de veinte que usa el negocio? */
+function esOficial(nombre) {
+  const p = plano(canonico(nombre));
+  return OFICIALES.some((o) => plano(o) === p);
+}
+
+module.exports = { CANON, OFICIALES, canonico, esOficial, hexSugerido, hexDerivado, plano };

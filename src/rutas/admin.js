@@ -6,6 +6,7 @@ const multer = require('multer');
 const { db, FOTOS_DIR, ordenDeTalle } = require('../db');
 const { importarPlanilla } = require('../excel');
 const { ordenarCatalogo } = require('../normalizar');
+const paleta = require('../colores');
 const { leerPedido } = require('../pedidos');
 const auth = require('../auth');
 
@@ -273,6 +274,21 @@ r.get('/productos/:sku', (req, res) => {
     FROM fotos f LEFT JOIN colores c ON c.id = f.color_id
     WHERE f.producto_id = ? ORDER BY f.orden`).all(p.id);
 
+  /*
+   * Los colores y talles de ESTE producto, no los del catálogo entero.
+   *
+   * La lista para asignarle un color a una foto tiene que ofrecer sólo los
+   * colores que el producto tiene: con los treinta y seis del catálogo, se
+   * puede etiquetar la foto de un pantalón negro como "Salmon" y esa foto no
+   * se muestra nunca, sin ningún error que lo avise.
+   */
+  const coloresDelProducto = [...new Map(
+    variantes.filter((v) => v.color_id).map((v) => [v.color_id, { id: v.color_id, nombre: v.color, hex: v.hex }]),
+  ).values()];
+  const tallesDelProducto = [...new Map(
+    variantes.filter((v) => v.talle_id).map((v) => [v.talle_id, { id: v.talle_id, nombre: v.talle, orden: v.orden_talle }]),
+  ).values()].sort((a, b) => a.orden - b.orden);
+
   res.json({
     producto: {
       ...p,
@@ -281,6 +297,8 @@ r.get('/productos/:sku', (req, res) => {
     },
     variantes,
     fotos,
+    colores: coloresDelProducto,
+    talles: tallesDelProducto,
     maxFotos: MAX_FOTOS,
   });
 });
@@ -405,6 +423,67 @@ r.post('/variantes/contar', (req, res) => {
   res.json({ variantes: n, sinFiltro: condiciones.length === 1 });
 });
 
+/*
+ * PUT /api/admin/variantes/:id — el precio de UNA variante.
+ *
+ * Los talles grandes —3XL, 4XL, 5XL— y el ÚNICO suelen costar más porque
+ * llevan más tela, y eso cambia por producto. Con el precio sólo en el
+ * producto padre, la única salida sería crear un producto aparte por talle,
+ * que parte el catálogo y rompe la curva.
+ *
+ * Vacío o nulo = vuelve a seguir el precio del producto.
+ */
+r.put('/variantes/:id', (req, res) => {
+  const variante = db.prepare('SELECT * FROM variantes WHERE id = ?').get(Number(req.params.id));
+  if (!variante) return res.status(404).json({ message: 'No existe esa variante.' });
+
+  const bruto = req.body?.precio;
+  if (bruto === null || bruto === undefined || bruto === '') {
+    db.prepare('UPDATE variantes SET precio = NULL WHERE id = ?').run(variante.id);
+    return res.json({ ok: true, precio: null });
+  }
+  const precio = Number(bruto);
+  if (!Number.isFinite(precio) || precio < 0) return res.status(400).json({ message: 'Precio inválido.' });
+  db.prepare('UPDATE variantes SET precio = ? WHERE id = ?').run(precio, variante.id);
+  res.json({ ok: true, precio });
+});
+
+/*
+ * PUT /api/admin/productos/:sku/precio-talles — un precio para varios talles.
+ *
+ * El caso concreto: "en este producto, del 3XL para arriba sale dos mil pesos
+ * más". Hacerlo variante por variante son doce clics por producto, y de esos
+ * doce alguno se olvida — y el que se olvida sale barato hasta que alguien lo
+ * nota en la facturación.
+ */
+r.put('/productos/:sku/precio-talles', (req, res) => {
+  const producto = db.prepare('SELECT * FROM productos WHERE sku_agrupador = ?').get(req.params.sku);
+  if (!producto) return res.status(404).json({ message: 'No existe ese producto.' });
+
+  const talles = Array.isArray(req.body?.talles) ? req.body.talles.map(String) : [];
+  if (!talles.length) return res.status(400).json({ message: 'Elegí al menos un talle.' });
+
+  const marcas = talles.map(() => '?').join(',');
+  const bruto = req.body?.precio;
+
+  if (bruto === null || bruto === undefined || bruto === '') {
+    const info = db.prepare(`
+      UPDATE variantes SET precio = NULL
+      WHERE producto_id = ? AND talle_id IN (SELECT id FROM talles WHERE nombre IN (${marcas}))`)
+      .run(producto.id, ...talles);
+    return res.json({ ok: true, cambiadas: info.changes, precio: null });
+  }
+
+  const precio = Number(bruto);
+  if (!Number.isFinite(precio) || precio < 0) return res.status(400).json({ message: 'Precio inválido.' });
+  const info = db.prepare(`
+    UPDATE variantes SET precio = ?
+    WHERE producto_id = ? AND talle_id IN (SELECT id FROM talles WHERE nombre IN (${marcas}))`)
+    .run(precio, producto.id, ...talles);
+
+  res.json({ ok: true, cambiadas: info.changes, precio });
+});
+
 // ── Colores ───────────────────────────────────────────────────────
 /*
  * Los colores se administran acá porque el catálogo llega con el mismo color
@@ -413,10 +492,20 @@ r.post('/variantes/contar', (req, res) => {
  * lo mismo, y el importador no.
  */
 r.get('/colores', (req, res) => {
-  const colores = db.prepare(`
+  const filas = db.prepare(`
     SELECT c.*, (SELECT COUNT(*) FROM variantes v WHERE v.color_id = c.id) AS variantes
     FROM colores c ORDER BY c.provisorio DESC, variantes DESC, c.nombre`).all();
-  res.json({ colores });
+  /*
+   * Se marca cuáles están fuera de los veinte oficiales.
+   *
+   * No se unen solos: "Azul Marino" no es "Azul" y "Gris Topo" no es "Topo".
+   * Unirlos por parecido sería decidir por el negocio qué color le llega al
+   * cliente. Se marcan y se resuelven acá, a la vista.
+   */
+  res.json({
+    colores: filas.map((c) => ({ ...c, oficial: paleta.esOficial(c.nombre) })),
+    oficiales: paleta.OFICIALES,
+  });
 });
 
 const HEX_VALIDO = /^#[0-9a-fA-F]{6}$/;
