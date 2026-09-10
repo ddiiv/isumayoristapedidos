@@ -72,6 +72,17 @@ CREATE TABLE IF NOT EXISTS fotos_color (
   PRIMARY KEY (producto_id, color)
 );
 
+CREATE TABLE IF NOT EXISTS fotos (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  producto_id INTEGER NOT NULL REFERENCES productos(id) ON DELETE CASCADE,
+  ruta        TEXT NOT NULL,
+  -- Nulo = foto general del producto. Con color, es la foto de ESE color y es
+  -- la que se muestra al elegirlo en la matriz.
+  color_id    INTEGER REFERENCES colores(id) ON DELETE SET NULL,
+  orden       INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_fotos_producto ON fotos(producto_id, orden);
+
 CREATE TABLE IF NOT EXISTS pedidos (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   numero      TEXT NOT NULL UNIQUE,

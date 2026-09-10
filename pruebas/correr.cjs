@@ -245,6 +245,140 @@ const planilla = path.join(__dirname, 'catalogo-isuwaya.xlsx');
     chk('un archivo que no es planilla se rechaza con 400', 400, mala.status);
   }
 
+  tit('12. COLORES: SE EDITAN, SE UNEN, Y NO SE BORRAN SI ESTÁN EN USO');
+  const colores = (await pedir('/api/admin/colores', { admin: true })).json.colores;
+  chk('hay colores cargados', true, colores.length > 0);
+  chk('todos con hex válido', true, colores.every((c) => /^(#[0-9a-f]{6}|hsl)/i.test(c.hex)));
+
+  const unColor = colores.find((c) => c.variantes > 0);
+  const hexOriginal = unColor.hex;
+  const cambio = await pedir(`/api/admin/colores/${unColor.id}`, {
+    metodo: 'PUT', cuerpo: { hex: '#123456' }, admin: true,
+  });
+  chk('se cambia el hex', 200, cambio.status);
+  const trasCambio = (await pedir('/api/admin/colores', { admin: true })).json.colores
+    .find((c) => c.id === unColor.id);
+  chk('y queda guardado',                '#123456', trasCambio.hex);
+  chk('y deja de estar "por confirmar"', 0,         trasCambio.provisorio);
+
+  const hexMalo = await pedir(`/api/admin/colores/${unColor.id}`, {
+    metodo: 'PUT', cuerpo: { hex: 'azulcito' }, admin: true,
+  });
+  chk('un hex inventado se rechaza', 400, hexMalo.status);
+
+  /*
+   * Borrar un color en uso dejaría a esas variantes sin color: el cliente
+   * vería una fila sin cuadrito ni nombre y no sabría qué está pidiendo.
+   */
+  const borrado = await pedir(`/api/admin/colores/${unColor.id}`, { metodo: 'DELETE', admin: true });
+  chk('no se borra un color en uso', 409, borrado.status);
+
+  // Unir: se crea uno y se lo renombra al que ya existe.
+  await pedir('/api/admin/colores', {
+    metodo: 'POST', cuerpo: { nombre: 'QA Color Temporal', hex: '#abcdef' }, admin: true,
+  });
+  const temporal = (await pedir('/api/admin/colores', { admin: true })).json.colores
+    .find((c) => c.nombre === 'QA Color Temporal');
+  const union = await pedir(`/api/admin/colores/${temporal.id}`, {
+    metodo: 'PUT', cuerpo: { nombre: unColor.nombre }, admin: true,
+  });
+  chk('renombrar a uno que existe los une', 'unido', union.json?.accion);
+  chk('y el temporal desaparece', undefined,
+    (await pedir('/api/admin/colores', { admin: true })).json.colores.find((c) => c.nombre === 'QA Color Temporal'));
+
+  await pedir(`/api/admin/colores/${unColor.id}`, { metodo: 'PUT', cuerpo: { hex: hexOriginal }, admin: true });
+
+  tit('13. TALLES: NIÑO Y ADULTO SON COSAS DISTINTAS');
+  const talles = (await pedir('/api/admin/talles', { admin: true })).json.talles;
+  chk('hay talles', true, talles.length > 0);
+  chk('separados en grupos', true, talles.some((t) => t.grupo === 'nino') && talles.some((t) => t.grupo === 'adulto'));
+  chk('no quedaron minúsculas sueltas', false, talles.some((t) => t.nombre !== t.nombre.toUpperCase() && /^\d?x/i.test(t.nombre)));
+
+  const talleEnUso = talles.find((t) => t.variantes > 0);
+  chk('no se borra un talle en uso', 409,
+    (await pedir(`/api/admin/talles/${talleEnUso.id}`, { metodo: 'DELETE', admin: true })).status);
+
+  tit('14. LA GUÍA DE TALLES ES DE CADA PRODUCTO');
+  const unProducto = (await pedir('/api/admin/productos', { admin: true })).json.productos[0];
+  const guia = {
+    columnas: ['Ancho', 'Largo'],
+    filas: [{ talle: 'M', Ancho: '54', Largo: '70' }, { talle: 'L', Ancho: '58', Largo: '72' }],
+    nota: 'Medidas en cm.',
+  };
+  const guardarGuia = await pedir(`/api/admin/productos/${encodeURIComponent(unProducto.sku_agrupador)}/guia`, {
+    metodo: 'PUT', cuerpo: { guia }, admin: true,
+  });
+  chk('se guarda', 200, guardarGuia.status);
+
+  const enCatalogo = (await pedir('/api/catalogo')).json.productos
+    .find((p2) => p2.sku === unProducto.sku_agrupador);
+  chk('y el CLIENTE la ve', 2, enCatalogo?.guiaTalles?.filas?.length);
+  chk('con las medidas puestas', '54', enCatalogo.guiaTalles.filas[0].Ancho);
+
+  /*
+   * Una guía CON talles pero SIN qué medir no es una guía: sería una columna de
+   * talles sola, que el cliente ya ve en la matriz.
+   */
+  const guiaSinMedidas = await pedir(`/api/admin/productos/${encodeURIComponent(unProducto.sku_agrupador)}/guia`, {
+    metodo: 'PUT', cuerpo: { guia: { columnas: [], filas: [{ talle: 'M' }] } }, admin: true,
+  });
+  chk('con talles pero sin medidas se rechaza', 400, guiaSinMedidas.status);
+
+  // Y una guía vacía del todo SÍ es válida: quiere decir "sacala".
+  const quitarla = await pedir(`/api/admin/productos/${encodeURIComponent(unProducto.sku_agrupador)}/guia`, {
+    metodo: 'PUT', cuerpo: { guia: null }, admin: true,
+  });
+  chk('mandarla vacía la quita', 200,  quitarla.status);
+  chk('y el cliente deja de verla', null,
+    (await pedir('/api/catalogo')).json.productos
+      .find((p2) => p2.sku === unProducto.sku_agrupador)?.guiaTalles ?? null);
+
+  tit('15. PRECIOS EN MASA: NUNCA SIN FILTRO');
+  const sinFiltro = await pedir('/api/admin/variantes', {
+    metodo: 'PUT', cuerpo: { accion: 'porcentaje', valor: 10 }, admin: true,
+  });
+  /*
+   * Sin filtro esto tocaría las 2300 variantes del catálogo. Un cambio de ese
+   * tamaño tiene que pedirse a propósito, no salir de un formulario vacío.
+   */
+  chk('sin ningún filtro se rechaza', 400, sinFiltro.status);
+
+  const cuenta = await pedir('/api/admin/variantes/contar', {
+    metodo: 'POST', cuerpo: { skuAgrupador: unProducto.sku_agrupador }, admin: true,
+  });
+  chk('se puede ver a cuántas toca antes', true, cuenta.json.variantes > 0);
+
+  const antesDelCambio = (await pedir(`/api/admin/productos/${encodeURIComponent(unProducto.sku_agrupador)}`, { admin: true })).json;
+  const aplicar = await pedir('/api/admin/variantes', {
+    metodo: 'PUT',
+    cuerpo: { skuAgrupador: unProducto.sku_agrupador, accion: 'fijar', valor: 12345 },
+    admin: true,
+  });
+  chk('con filtro se aplica',      200,                    aplicar.status);
+  chk('y dice cuántas cambió',     cuenta.json.variantes,  aplicar.json.cambiadas);
+
+  const despuesDelCambio = (await pedir(`/api/admin/productos/${encodeURIComponent(unProducto.sku_agrupador)}`, { admin: true })).json;
+  chk('las variantes quedaron con ese precio', true,
+    despuesDelCambio.variantes.every((v) => v.precio === 12345));
+
+  await pedir('/api/admin/variantes', {
+    metodo: 'PUT', cuerpo: { skuAgrupador: unProducto.sku_agrupador, accion: 'heredar' }, admin: true,
+  });
+  chk('y "heredar" las devuelve al precio del producto', true,
+    (await pedir(`/api/admin/productos/${encodeURIComponent(unProducto.sku_agrupador)}`, { admin: true }))
+      .json.variantes.every((v) => v.precio === null));
+
+  tit('16. EL HISTORIAL RESPONDE PREGUNTAS');
+  const historial = await pedir('/api/admin/pedidos', { admin: true });
+  chk('trae pedidos',   true, Array.isArray(historial.json.pedidos));
+  chk('y los totales',  true, historial.json.totales
+    && 'facturado' in historial.json.totales && 'unidades' in historial.json.totales);
+  chk('con el detalle de cada uno', true,
+    historial.json.pedidos.length === 0 || Array.isArray(historial.json.pedidos[0].items));
+
+  const futuro = await pedir('/api/admin/pedidos?desde=2099-01-01', { admin: true });
+  chk('un filtro de fecha que no alcanza a nada da cero', 0, futuro.json.totales.pedidos);
+
   tit('11. LAS RESPUESTAS QUE NO EXISTEN SON HONESTAS');
   const apiRara = await pedir('/api/lo-que-sea');
   chk('un endpoint inventado da 404 en JSON', 404, apiRara.status);

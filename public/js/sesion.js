@@ -219,10 +219,24 @@ const leerForm = (sel) => {
 };
 
 async function hacer(accion) {
+  /*
+   * El formulario se lee ANTES de repintar.
+   *
+   * `pintar()` reconstruye el HTML del diálogo, así que los campos vuelven a
+   * nacer vacíos: leyéndolos después, se manda un pedido sin datos y el
+   * servidor contesta "escribí tu email y tu contraseña" con el email escrito
+   * en la pantalla. Es de esos errores que parecen del servidor.
+   */
+  const FORMULARIOS = {
+    entrar: '#form-sesion', registrar: '#form-registro',
+    guardar: '#form-cuenta', password: '#form-password',
+  };
+  const campos = leerForm(FORMULARIOS[accion]);
+
   ocupado = true; errores = {}; mensaje = null; pintar();
   try {
     if (accion === 'entrar') {
-      const datos = await api('/api/sesion', { method: 'POST', body: JSON.stringify(leerForm('#form-sesion')) });
+      const datos = await api('/api/sesion', { method: 'POST', body: JSON.stringify(campos) });
       Object.assign(sesion, datos);
       pintarBarra();
       if (datos.rol === 'admin') { window.location.href = '/admin.html'; return; }
@@ -231,7 +245,7 @@ async function hacer(accion) {
       return;
     }
     if (accion === 'registrar') {
-      const datos = await api('/api/cuenta', { method: 'POST', body: JSON.stringify(leerForm('#form-registro')) });
+      const datos = await api('/api/cuenta', { method: 'POST', body: JSON.stringify(campos) });
       Object.assign(sesion, datos);
       pintarBarra();
       cerrarCuenta();
@@ -239,7 +253,7 @@ async function hacer(accion) {
       return;
     }
     if (accion === 'guardar') {
-      const datos = await api('/api/cuenta', { method: 'PUT', body: JSON.stringify(leerForm('#form-cuenta')) });
+      const datos = await api('/api/cuenta', { method: 'PUT', body: JSON.stringify(campos) });
       sesion.cliente = datos.cliente;
       sesion.datosDePedido = datos.datosDePedido;
       mensaje = { tipo: 'ok', texto: 'Listo, guardamos tus datos.' };
@@ -247,7 +261,7 @@ async function hacer(accion) {
       document.dispatchEvent(new CustomEvent('sesion-cambio'));
     }
     if (accion === 'password') {
-      await api('/api/cuenta/password', { method: 'PUT', body: JSON.stringify(leerForm('#form-password')) });
+      await api('/api/cuenta/password', { method: 'PUT', body: JSON.stringify(campos) });
       vista = 'cuenta';
       mensaje = { tipo: 'ok', texto: 'Contraseña cambiada.' };
     }

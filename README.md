@@ -87,6 +87,40 @@ recibió, sin afirmar que ya se avisó.
 
 ---
 
+## El panel
+
+Se entra por la misma puerta que los clientes, en la página principal: el
+servidor mira el email y decide el rol. `ADMIN_EMAIL` y `ADMIN_PASSWORD`.
+
+Adentro hay seis secciones:
+
+- **Catálogo** — traer la planilla de STOCKER, y editar cada producto: título,
+  precio, categoría, descripción, hasta **20 fotos** (con color asignado, para
+  que se muestren al elegirlo) y su **guía de talles**.
+- **Colores** — el cuadrito que ve el cliente, elegido con un selector de color.
+  Para **unir** dos colores repetidos, se renombra uno con el nombre del otro.
+- **Talles** — separados en adulto y niño.
+- **Precios en masa** — subir un porcentaje o fijar un precio sobre un filtro
+  (categoría, producto, color, talle). Muestra a cuántas variantes toca **antes**
+  de aplicar y cuántas cambió después.
+- **Pedidos** — el historial completo, con filtros por fecha, estado y cliente,
+  los totales de lo filtrado, y el detalle de cada uno con sus dos PDF.
+- **Clientes** — quiénes se registraron y activar o desactivar el acceso.
+
+**El catálogo ya no se edita por planilla.** La planilla sirve para TRAER los
+productos de STOCKER; de ahí en adelante todo se toca acá, donde se ve el efecto
+en el momento. Lo que edites en el panel —fotos, guía, descripción— sobrevive a
+la próxima importación; el precio no, porque viene de la planilla.
+
+## La guía de talles
+
+Es de **cada producto**, no una tabla general: un talle M no mide lo mismo en
+una remera que en una campera, y una tabla general sirve para adivinar y no
+para decidir antes de pedir cincuenta unidades.
+
+Se carga en el panel eligiendo qué se mide (ancho, largo, lo que sea) y
+completando por talle. El cliente la ve con un botón dentro del producto.
+
 ## La planilla de STOCKER
 
 Se exporta desde **Stock → Productos → Exportar**. El importador lee las

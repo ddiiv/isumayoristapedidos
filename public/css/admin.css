@@ -34,3 +34,68 @@ table.datos input[type="number"], table.datos input[type="text"] {
 .entrar { max-width: 380px; margin: 60px auto; }
 .subida { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .subida input[type="file"] { font-size: 13px; }
+
+/* ── Piezas del panel ───────────────────────────────────────────── */
+.tarjeta h4 { margin: 0 0 6px; font-size: 13px; color: var(--azul); }
+.acciones {
+  display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 14px;
+}
+.tarjeta textarea {
+  width: 100%; font: inherit; font-size: 14px; padding: 9px 11px;
+  border: 1px solid var(--linea); border-radius: 8px; resize: vertical;
+}
+
+/* Fotos: cuadrícula con lo justo para decidir cuál es cuál. */
+.fotos-grilla {
+  list-style: none; margin: 14px 0 0; padding: 0;
+  display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+}
+.foto-item {
+  border: 1px solid var(--linea); border-radius: 9px; overflow: hidden; background: #fff;
+}
+.foto-item.principal { border-color: var(--verde); box-shadow: 0 0 0 1px var(--verde); }
+.foto-item img { width: 100%; aspect-ratio: 3/4; object-fit: cover; display: block; }
+.foto-item select { width: 100%; border: 0; border-top: 1px solid var(--linea); border-radius: 0; }
+.foto-acciones {
+  display: flex; justify-content: space-between; align-items: center;
+  gap: 6px; padding: 5px 8px; border-top: 1px solid var(--linea);
+}
+.foto-acciones .btn { padding: 3px 4px; font-size: 11px; }
+.quitar { color: var(--rojo); }
+
+/* El cuadrito de color: `input type=color` para elegirlo mirándolo, que es la
+   única forma sensata. Un campo de texto con "#1a2b3c" es adivinar. */
+.pastilla-color {
+  width: 46px; height: 34px; padding: 2px; cursor: pointer;
+  border: 1px solid var(--linea); border-radius: 7px; background: #fff;
+}
+.nombre-color {
+  font: inherit; font-size: 13px; padding: 6px 9px; width: 100%; min-width: 130px;
+  border: 1px solid var(--linea); border-radius: 6px;
+}
+input.medida {
+  font: inherit; font-size: 13px; padding: 5px 8px; width: 82px;
+  border: 1px solid var(--linea); border-radius: 6px;
+}
+
+.totales-fila {
+  display: flex; gap: 12px; flex-wrap: wrap; margin: 16px 0 6px;
+}
+.totales-fila > div {
+  flex: 1; min-width: 120px; background: var(--azul-claro);
+  border-radius: 9px; padding: 10px 14px;
+}
+.totales-fila b { display: block; font-size: 18px; color: var(--azul); }
+
+.subida input[type="color"] { width: 46px; height: 34px; padding: 2px; border: 1px solid var(--linea); border-radius: 7px; }
+.subida input[name="nombre"] {
+  font: inherit; font-size: 14px; padding: 8px 10px;
+  border: 1px solid var(--linea); border-radius: 7px; min-width: 170px;
+}
+
+@media (max-width: 640px) {
+  .tabs { overflow-x: auto; }
+  .tabs button { white-space: nowrap; }
+  .totales-fila > div { min-width: 96px; padding: 8px 10px; }
+  .totales-fila b { font-size: 15px; }
+}
