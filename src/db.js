@@ -270,6 +270,30 @@ asegurarColumna('pedidos', 'actualizado_en', 'TEXT');
 asegurarColumna('fotos', 'miniatura', 'TEXT');
 
 /*
+ * Correcciones de color hechas en el panel, que la planilla no deshace.
+ *
+ * El importador vuelve a escribir el color de cada variante con lo que dice
+ * STOCKER. Si en el panel se corrigió "Azul" por "Verde" porque la planilla
+ * estaba mal, la próxima importación lo devolvería a "Azul" sin avisar. Una
+ * variante con el color puesto a mano no se pisa.
+ */
+asegurarColumna('variantes', 'color_manual', 'INTEGER NOT NULL DEFAULT 0');
+
+/*
+ * Las variantes quitadas desde el panel, para que la planilla no las reviva.
+ *
+ * El importador crea lo que falta: un color quitado a mano volvería en la
+ * próxima importación porque STOCKER lo sigue teniendo. Se anota el SKU y el
+ * importador lo saltea.
+ */
+db.exec(`CREATE TABLE IF NOT EXISTS variantes_quitadas (
+  sku         TEXT PRIMARY KEY,
+  producto_id INTEGER,
+  color       TEXT,
+  quitada_en  TEXT NOT NULL
+)`);
+
+/*
  * Orden de talles.
  *
  * Ordenar alfabéticamente pone "10" antes que "2" y "XS" después de "XL". En

@@ -504,6 +504,149 @@ r.post('/variantes/contar', (req, res) => {
  *
  * Vacío o nulo = vuelve a seguir el precio del producto.
  */
+// ── Los colores de un producto ───────────────────────────────────
+/*
+ * Cambiar, agregar o quitar un color de UN producto, con todos sus talles.
+ *
+ * La planilla a veces trae un color mal cargado —la remera verde como "azul"—
+ * y corregirlo variante por variante son nueve cambios por color, de los que
+ * alguno se olvida y queda un talle suelto del color equivocado. Acá se toca el
+ * color entero del producto de una vez.
+ *
+ * Y tiene que sobrevivir a la próxima importación, porque la planilla sigue
+ * diciendo lo que decía: un color cambiado queda marcado como puesto a mano y
+ * el importador no lo pisa; uno quitado queda anotado y no se vuelve a crear.
+ */
+const productoPorSku = (sku) => db.prepare('SELECT * FROM productos WHERE sku_agrupador = ?').get(sku);
+const colorPorId = (id) => db.prepare('SELECT * FROM colores WHERE id = ?').get(Number(id));
+const variantesDelColor = (productoId, colorId) => db.prepare(`
+  SELECT v.*, COALESCE(t.nombre, v.talle) AS talle_nombre
+  FROM variantes v LEFT JOIN talles t ON t.id = v.talle_id
+  WHERE v.producto_id = ? AND v.color_id = ?`).all(productoId, colorId);
+
+/*
+ * Las fotos de un color que se mueve van con él, hasta las cinco que admite
+ * un color. Las que no entran —o todas, si el color se quita— pasan a
+ * generales: se siguen viendo en "todas" y no se pierde ninguna.
+ */
+function moverFotosDeColor(productoId, desde, hacia) {
+  const fotos = db.prepare('SELECT id FROM fotos WHERE producto_id = ? AND color_id = ? ORDER BY orden')
+    .all(productoId, desde);
+  let lugar = hacia ? MAX_POR_COLOR - fotosDelColor(productoId, hacia) : 0;
+  const poner = db.prepare('UPDATE fotos SET color_id = ? WHERE id = ?');
+  const resultado = { movidas: 0, generales: 0 };
+  for (const f of fotos) {
+    if (lugar > 0) { poner.run(hacia, f.id); lugar -= 1; resultado.movidas += 1; } else { poner.run(null, f.id); resultado.generales += 1; }
+  }
+  return resultado;
+}
+
+// El SKU de una variante creada acá, con la misma forma que los de STOCKER: ISUABEPAN + AZU + L.
+const codigoDeColor = (nombre) => String(nombre).normalize('NFD').replace(/[̀-ͯ]/g, '')
+  .replace(/[^A-Za-z]/g, '').toUpperCase().slice(0, 3) || 'COL';
+
+// PUT /api/admin/productos/:sku/colores/:colorId — { nuevoColorId }: el color entero pasa a otro.
+r.put('/productos/:sku/colores/:colorId', (req, res) => {
+  const producto = productoPorSku(req.params.sku);
+  if (!producto) return res.status(404).json({ message: 'No existe ese producto.' });
+  const actual = colorPorId(req.params.colorId);
+  const nuevo = colorPorId(req.body?.nuevoColorId);
+  if (!actual || !nuevo) return res.status(400).json({ message: 'Elegí a qué color cambiarlo.' });
+  if (actual.id === nuevo.id) return res.status(400).json({ message: 'Es el mismo color.' });
+
+  const mover = variantesDelColor(producto.id, actual.id);
+  if (!mover.length) return res.status(404).json({ message: 'Este producto no tiene ese color.' });
+
+  /*
+   * Si el color nuevo ya está en el producto con alguno de esos talles, se
+   * frena: quedarían dos variantes del mismo color y talle, dos SKU para lo
+   * mismo, y el pedido no sabría cuál descontar.
+   */
+  const yaEstan = new Set(variantesDelColor(producto.id, nuevo.id).map((v) => v.talle_nombre));
+  const choque = mover.filter((v) => yaEstan.has(v.talle_nombre)).map((v) => v.talle_nombre);
+  if (choque.length) {
+    return res.status(409).json({
+      message: `El producto ya tiene ${nuevo.nombre} en ${choque.join(', ')}. Quitá uno de los dos antes, así no quedan dos variantes del mismo color y talle.`,
+    });
+  }
+
+  const fotos = db.transaction(() => {
+    db.prepare('UPDATE variantes SET color_id = ?, color = ?, color_manual = 1 WHERE producto_id = ? AND color_id = ?')
+      .run(nuevo.id, nuevo.nombre, producto.id, actual.id);
+    return moverFotosDeColor(producto.id, actual.id, nuevo.id);
+  })();
+  res.json({ ok: true, variantes: mover.length, fotos });
+});
+
+// POST /api/admin/productos/:sku/colores — { colorId, talles? }: un color nuevo en el producto.
+r.post('/productos/:sku/colores', (req, res) => {
+  const producto = productoPorSku(req.params.sku);
+  if (!producto) return res.status(404).json({ message: 'No existe ese producto.' });
+  const color = colorPorId(req.body?.colorId);
+  if (!color) return res.status(400).json({ message: 'Elegí qué color agregar.' });
+  if (variantesDelColor(producto.id, color.id).length) {
+    return res.status(409).json({ message: `El producto ya tiene ${color.nombre}.` });
+  }
+
+  /*
+   * Una variante por talle del producto, con el precio que ese talle ya tiene
+   * en los otros colores: si del 3XL para arriba sale más caro, el color nuevo
+   * también. Un precio vacío sigue siendo "el del producto".
+   */
+  const porTalle = new Map();
+  for (const v of db.prepare(`
+    SELECT v.*, COALESCE(t.nombre, v.talle) AS talle_nombre
+    FROM variantes v LEFT JOIN talles t ON t.id = v.talle_id
+    WHERE v.producto_id = ? ORDER BY v.id`).all(producto.id)) {
+    if (!porTalle.has(v.talle_nombre)) porTalle.set(v.talle_nombre, v);
+  }
+  const pedidos = Array.isArray(req.body?.talles) && req.body.talles.length ? req.body.talles.map(String) : [...porTalle.keys()];
+  const talles = pedidos.filter((t) => porTalle.has(t));
+  if (!talles.length) return res.status(400).json({ message: 'Elegí al menos un talle de los que tiene el producto.' });
+
+  const existe = db.prepare('SELECT 1 FROM variantes WHERE sku = ?');
+  const yaNoQuitada = db.prepare('DELETE FROM variantes_quitadas WHERE sku = ?');
+  const insertar = db.prepare(`
+    INSERT INTO variantes (producto_id, sku, color, talle, orden_talle, precio, color_id, talle_id, color_manual)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)`);
+  const codigo = codigoDeColor(color.nombre);
+  db.transaction(() => {
+    for (const t of talles) {
+      const base = porTalle.get(t);
+      const raiz = `${producto.sku_agrupador}${codigo}${String(t).toUpperCase().replace(/\s+/g, '')}`;
+      let sku = raiz;
+      for (let n = 2; existe.get(sku); n += 1) sku = `${raiz}-${n}`;
+      yaNoQuitada.run(sku);   // si se había quitado antes y se vuelve a agregar, deja de estar quitada
+      insertar.run(producto.id, sku, color.nombre, base.talle, base.orden_talle, base.precio, color.id, base.talle_id);
+    }
+  })();
+  res.status(201).json({ ok: true, creadas: talles.length, talles });
+});
+
+// DELETE /api/admin/productos/:sku/colores/:colorId — el color sale del producto, con todos sus talles.
+r.delete('/productos/:sku/colores/:colorId', (req, res) => {
+  const producto = productoPorSku(req.params.sku);
+  if (!producto) return res.status(404).json({ message: 'No existe ese producto.' });
+  const color = colorPorId(req.params.colorId);
+  const quitar = color ? variantesDelColor(producto.id, color.id) : [];
+  if (!quitar.length) return res.status(404).json({ message: 'Este producto no tiene ese color.' });
+
+  const otros = db.prepare('SELECT COUNT(DISTINCT color_id) n FROM variantes WHERE producto_id = ? AND color_id <> ?')
+    .get(producto.id, color.id).n;
+  if (!otros) {
+    return res.status(409).json({ message: 'Es el único color del producto. Si no se vende, ocultá el producto en vez de quitarle el color.' });
+  }
+
+  const fotos = db.transaction(() => {
+    const anotar = db.prepare('INSERT OR REPLACE INTO variantes_quitadas (sku, producto_id, color, quitada_en) VALUES (?, ?, ?, ?)');
+    const ahora = new Date().toISOString();
+    for (const v of quitar) anotar.run(v.sku, producto.id, color.nombre, ahora);
+    db.prepare('DELETE FROM variantes WHERE producto_id = ? AND color_id = ?').run(producto.id, color.id);
+    return moverFotosDeColor(producto.id, color.id, null);
+  })();
+  res.json({ ok: true, variantes: quitar.length, fotosAGenerales: fotos.generales });
+});
+
 r.put('/variantes/:id', (req, res) => {
   const variante = db.prepare('SELECT * FROM variantes WHERE id = ?').get(Number(req.params.id));
   if (!variante) return res.status(404).json({ message: 'No existe esa variante.' });

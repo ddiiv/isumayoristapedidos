@@ -301,6 +301,80 @@ const mover = (numero, estado, nota) => pedir(
   chk('y sin sesión de administrador no se ve', true,
     [401, 403].includes((await pedir(`/api/admin/grilla/${encodeURIComponent(paraSumar.sku)}`)).status));
 
+  tit('9c. LOS COLORES DE UN PRODUCTO SE CORRIGEN ENTEROS');
+  {   // en su propio bloque: sus nombres no chocan con los del resto de la suite
+    /*
+     * Un color mal cargado se corrige con todos sus talles de una vez, y la
+     * corrección tiene que sobrevivir a la próxima importación de la planilla:
+     * STOCKER sigue diciendo lo que decía. Cambia la base de datos: correr contra
+     * una copia.
+     */
+    const API9 = process.env.API || 'http://localhost:8090';
+    const reimportar = async () => {
+      const fd = new FormData();
+      fd.append('planilla', new Blob([require('node:fs').readFileSync(require('node:path').join(__dirname, 'catalogo-isuwaya.xlsx'))]), 'catalogo.xlsx');
+      return (await fetch(`${API9}/api/admin/importar`, { method: 'POST', headers: { Cookie: cookies.admin }, body: fd })).status;
+    };
+    const catalogoDe = async (sku) => (await pedir('/api/catalogo')).json.productos.find((x) => x.sku === sku);
+    const cuantosColores = (x) => new Set(x.combinaciones.map((c) => c.color)).size;
+    const elProducto = (await pedir('/api/catalogo')).json.productos.reduce((a, b) => (cuantosColores(b) > cuantosColores(a) ? b : a));
+    const rutaProd = `/api/admin/productos/${encodeURIComponent(elProducto.sku)}`;
+    const det9 = (await pedir(rutaProd, { como: 'admin' })).json;
+    const paleta = (await pedir('/api/admin/colores', { como: 'admin' })).json.colores;
+    const suyos = new Set(det9.colores.map((c) => c.id));
+    const ajeno = paleta.find((c) => !suyos.has(c.id));
+    const origen = det9.colores.find((c) => det9.fotos.some((f) => f.color_id === c.id)) || det9.colores[0];
+    const tallesOrigen = det9.variantes.filter((v) => v.color_id === origen.id).length;
+    const fotosOrigen = det9.fotos.filter((f) => f.color_id === origen.id).length;
+    const de = (prod, nombre) => prod.combinaciones.filter((c) => c.color === nombre).length;
+
+    const cambio = await pedir(`${rutaProd}/colores/${origen.id}`, { metodo: 'PUT', cuerpo: { nuevoColorId: ajeno.id }, como: 'admin' });
+    chk('cambiar un color responde', 200, cambio.status);
+    chk('y se lleva todos sus talles', tallesOrigen, cambio.json?.variantes);
+    const cambiado = await catalogoDe(elProducto.sku);
+    chk('el cliente ya no ve el color viejo', 0, de(cambiado, origen.nombre));
+    chk('y ve el nuevo en los mismos talles', tallesOrigen, de(cambiado, ajeno.nombre));
+    chk('las fotos del color van con él', Math.min(fotosOrigen, 5), (cambiado.fotos || []).filter((f) => f.color === ajeno.nombre).length);
+
+    const [uno, otro] = det9.colores.filter((c) => c.id !== origen.id);
+    const choque = await pedir(`${rutaProd}/colores/${uno.id}`, { metodo: 'PUT', cuerpo: { nuevoColorId: otro.id }, como: 'admin' });
+    chk('pasar un color a otro que ya tiene esos talles rebota', 409, choque.status);
+
+    chk('se vuelve a importar la planilla', 200, await reimportar());
+    const trasImportar = await catalogoDe(elProducto.sku);
+    chk('y el color corregido a mano sigue corregido', [0, tallesOrigen], [de(trasImportar, origen.nombre), de(trasImportar, ajeno.nombre)]);
+
+    const generalesAntes = (trasImportar.fotos || []).filter((f) => !f.color).length;
+    const quitar = await pedir(`${rutaProd}/colores/${ajeno.id}`, { metodo: 'DELETE', como: 'admin' });
+    chk('quitar un color responde', 200, quitar.status);
+    chk('y se lleva todas sus variantes', tallesOrigen, quitar.json?.variantes);
+    const sinEl = await catalogoDe(elProducto.sku);
+    chk('el cliente ya no lo ve', 0, de(sinEl, ajeno.nombre));
+    chk('y sus fotos pasan a generales, no se pierden', Math.min(fotosOrigen, 5), (sinEl.fotos || []).filter((f) => !f.color).length - generalesAntes);
+    chk('se vuelve a importar', 200, await reimportar());
+    const trasOtra = await catalogoDe(elProducto.sku);
+    chk('y lo quitado a mano no vuelve con la planilla', [0, 0], [de(trasOtra, origen.nombre), de(trasOtra, ajeno.nombre)]);
+
+    const agregar = await pedir(`${rutaProd}/colores`, { metodo: 'POST', cuerpo: { colorId: origen.id }, como: 'admin' });
+    chk('agregar un color responde', 201, agregar.status);
+    const conNuevo = await catalogoDe(elProducto.sku);
+    const tallesDelProducto = new Set(conNuevo.combinaciones.map((c) => c.talle)).size;
+    chk('aparece en todos los talles del producto', tallesDelProducto, de(conNuevo, origen.nombre));
+    chk('con el precio que cada talle ya tenía', true, conNuevo.combinaciones.filter((c) => c.color === origen.nombre)
+      .every((c) => conNuevo.combinaciones.some((o) => o.color !== origen.nombre && o.talle === c.talle && o.precio === c.precio)));
+    chk('agregar un color que ya está rebota', 409,
+      (await pedir(`${rutaProd}/colores`, { metodo: 'POST', cuerpo: { colorId: origen.id }, como: 'admin' })).status);
+    chk('otra importación más', 200, await reimportar());
+    chk('y lo agregado a mano sigue ahí', tallesDelProducto, de(await catalogoDe(elProducto.sku), origen.nombre));
+
+    const deUnColor = (await pedir('/api/catalogo')).json.productos.find((x) => cuantosColores(x) === 1);
+    if (deUnColor) {
+      const detUno = (await pedir(`/api/admin/productos/${encodeURIComponent(deUnColor.sku)}`, { como: 'admin' })).json;
+      chk('el único color de un producto no se quita', 409,
+        (await pedir(`/api/admin/productos/${encodeURIComponent(deUnColor.sku)}/colores/${detUno.colores[0].id}`, { metodo: 'DELETE', como: 'admin' })).status);
+    }
+  }
+
   tit('10. LAS ESTADÍSTICAS CIERRAN');
   const est = (await pedir('/api/admin/estadisticas', { como: 'admin' })).json;
   chk('responde con período', true, Boolean(est.periodo?.desde && est.periodo?.hasta));

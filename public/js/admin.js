@@ -238,6 +238,8 @@ function vistaProducto() {
         </div>` : ''}
     </div>
 
+    ${vistaColoresDelProducto()}
+
     <div class="tarjeta">
       <h3>Variantes <span class="apagado">(${detalle.variantes.length})</span></h3>
       <p class="sub">
@@ -260,6 +262,69 @@ function vistaProducto() {
             </tr>`).join('')}</tbody>
         </table>
       </div>
+    </div>`;
+}
+
+/*
+ * Los colores de este producto, para corregirlos enteros.
+ *
+ * Cambiar un color toca todos sus talles de una vez y se lleva sus fotos;
+ * quitarlo pasa las fotos a generales; agregarlo lo crea en los talles que se
+ * marquen, con el precio que cada talle ya tiene. Todo queda firme aunque se
+ * vuelva a importar la planilla de STOCKER.
+ */
+function vistaColoresDelProducto() {
+  const porColor = new Map();
+  for (const v of detalle.variantes) {
+    if (!v.color_id) continue;
+    if (!porColor.has(v.color_id)) porColor.set(v.color_id, { id: v.color_id, nombre: v.color, hex: v.hex, talles: 0 });
+    porColor.get(v.color_id).talles += 1;
+  }
+  const fotosDelColor = (id) => detalle.fotos.filter((f) => f.color_id === id).length;
+  const otros = datos.colores.filter((c) => !porColor.has(c.id));
+  const talles = [...new Set(detalle.variantes.map((v) => v.talle))];
+
+  const filas = [...porColor.values()].map((c) => `
+    <tr>
+      <td><span class="muestra"><i data-hex="${esc(c.hex)}"></i>${esc(c.nombre)}</span></td>
+      <td class="chico">${c.talles} ${c.talles === 1 ? 'talle' : 'talles'} · ${fotosDelColor(c.id)} fotos</td>
+      <td class="acciones-color">
+        <select class="select-mini" data-cambiar-a="${c.id}" aria-label="Cambiar ${esc(c.nombre)} por otro color">
+          <option value="">Cambiar a…</option>
+          ${datos.colores.filter((x) => x.id !== c.id).map((x) => `<option value="${x.id}">${esc(x.nombre)}</option>`).join('')}
+        </select>
+        <button class="btn borde btn-mini" data-cambiar-color="${c.id}" data-nombre="${esc(c.nombre)}">Cambiar</button>
+        ${porColor.size > 1
+          ? `<button class="btn texto quitar" data-quitar-color="${c.id}" data-nombre="${esc(c.nombre)}">Quitar</button>`
+          : ''}
+      </td>
+    </tr>`).join('');
+
+  return `
+    <div class="tarjeta">
+      <h3>Colores de este producto <span class="apagado">(${porColor.size})</span></h3>
+      <p class="sub">
+        Cada cambio toca el color entero —todos sus talles— y queda firme aunque se
+        vuelva a importar la planilla. Las fotos de un color van con él.
+      </p>
+      <div class="envoltorio-tabla">
+        <table class="datos">
+          <thead><tr><th>Color</th><th>Qué tiene</th><th></th></tr></thead>
+          <tbody>${filas}</tbody>
+        </table>
+      </div>
+      ${otros.length ? `
+        <h4>Agregar un color</h4>
+        <div class="agregar-color">
+          <select id="agregar-color" class="nombre-color" aria-label="Color para agregar">
+            <option value="">Elegí un color…</option>
+            ${otros.map((c) => `<option value="${c.id}">${esc(c.nombre)}</option>`).join('')}
+          </select>
+          <div class="talles-a-agregar" role="group" aria-label="Talles del color nuevo">
+            ${talles.map((t) => `<label><input type="checkbox" class="talle-nuevo-color" value="${esc(t)}" checked> ${esc(t)}</label>`).join('')}
+          </div>
+          <button class="btn" data-agregar-color>Agregar en esos talles</button>
+        </div>` : ''}
     </div>`;
 }
 
@@ -1238,6 +1303,55 @@ raiz.addEventListener('click', (e) => conError(async () => {
     });
     detalle = await api(`/productos/${encodeURIComponent(vista.sku)}`);
     mensaje(`Listo: ${r.cambiadas} variantes ${limpiar ? 'vuelven al precio del producto' : 'con precio propio'}.`);
+    pintar();
+    return;
+  }
+
+  // ── Los colores del producto
+  const cambiarColor = t.closest('[data-cambiar-color]');
+  if (cambiarColor) {
+    const id = cambiarColor.dataset.cambiarColor;
+    const destino = raiz.querySelector(`[data-cambiar-a="${id}"]`);
+    if (!destino?.value) { mensaje('Elegí a qué color cambiarlo.', 'error'); pintar(); return; }
+    const nombreNuevo = destino.selectedOptions[0].textContent;
+    // Toca todos los talles de una vez: se pregunta antes, no se deshace con un clic.
+    if (!window.confirm(`¿Cambiar ${cambiarColor.dataset.nombre} por ${nombreNuevo} en todos los talles de este producto?`)) return;
+    const r = await api(`/productos/${encodeURIComponent(vista.sku)}/colores/${id}`, {
+      method: 'PUT', body: JSON.stringify({ nuevoColorId: Number(destino.value) }),
+    });
+    detalle = await api(`/productos/${encodeURIComponent(vista.sku)}`);
+    await cargar();
+    mensaje(`Listo: ${r.variantes} variantes pasaron a ${nombreNuevo}`
+      + (r.fotos.movidas ? `, con ${r.fotos.movidas} fotos` : '')
+      + (r.fotos.generales ? `. ${r.fotos.generales} fotos pasaron a generales porque ${nombreNuevo} ya tenía cinco` : '') + '.');
+    pintar();
+    return;
+  }
+  const quitarColor = t.closest('[data-quitar-color]');
+  if (quitarColor) {
+    const nombre = quitarColor.dataset.nombre;
+    if (!window.confirm(`¿Quitar ${nombre} de este producto, con todos sus talles? Sus fotos pasan a generales.`)) return;
+    const r = await api(`/productos/${encodeURIComponent(vista.sku)}/colores/${quitarColor.dataset.quitarColor}`, { method: 'DELETE' });
+    detalle = await api(`/productos/${encodeURIComponent(vista.sku)}`);
+    await cargar();
+    mensaje(`Listo: se quitó ${nombre} (${r.variantes} variantes)`
+      + (r.fotosAGenerales ? ` y sus ${r.fotosAGenerales} fotos pasaron a generales` : '')
+      + '. No vuelve aunque se importe la planilla.');
+    pintar();
+    return;
+  }
+  if (t.closest('[data-agregar-color]')) {
+    const elegido = el('#agregar-color');
+    if (!elegido?.value) { mensaje('Elegí qué color agregar.', 'error'); pintar(); return; }
+    const nombre = elegido.selectedOptions[0].textContent;
+    const talles = [...raiz.querySelectorAll('.talle-nuevo-color:checked')].map((i) => i.value);
+    if (!talles.length) { mensaje('Marcá al menos un talle.', 'error'); pintar(); return; }
+    const r = await api(`/productos/${encodeURIComponent(vista.sku)}/colores`, {
+      method: 'POST', body: JSON.stringify({ colorId: Number(elegido.value), talles }),
+    });
+    detalle = await api(`/productos/${encodeURIComponent(vista.sku)}`);
+    await cargar();
+    mensaje(`Listo: ${nombre} agregado en ${r.creadas} ${r.creadas === 1 ? 'talle' : 'talles'}.`);
     pintar();
     return;
   }

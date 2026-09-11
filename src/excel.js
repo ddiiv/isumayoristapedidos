@@ -148,8 +148,13 @@ async function importarPlanilla(buffer) {
     INSERT INTO variantes (producto_id, sku, color, talle, orden_talle, precio)
     VALUES (@productoId, @sku, @color, @talle, @ordenTalle, @precio)
     ON CONFLICT(sku) DO UPDATE SET
-      producto_id = excluded.producto_id, color = excluded.color,
+      producto_id = excluded.producto_id,
+      -- Un color corregido a mano en el panel no lo pisa la planilla.
+      color = CASE WHEN variantes.color_manual = 1 THEN variantes.color ELSE excluded.color END,
       talle = excluded.talle, orden_talle = excluded.orden_talle, precio = excluded.precio`);
+
+  // Lo que se quitó a mano en el panel no vuelve con la planilla.
+  const quitada = db.prepare('SELECT 1 FROM variantes_quitadas WHERE sku = ?');
 
   const vistos = new Set();
 
@@ -190,6 +195,8 @@ async function importarPlanilla(buffer) {
 
       const { color, talle, porPosicion } = repartirAtributos(fila, cols);
       if (porPosicion) resumen.atributosPorPosicion += 1;
+
+      if (quitada.get(skuVariante)) { resumen.quitadasSalteadas = (resumen.quitadasSalteadas || 0) + 1; return; }
 
       upsertVariante.run({
         productoId: producto.id,

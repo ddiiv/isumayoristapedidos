@@ -155,6 +155,22 @@ productos de STOCKER; de ahí en adelante todo se toca acá, donde se ve el efec
 en el momento. Lo que edites en el panel —fotos, guía, descripción— sobrevive a
 la próxima importación; el precio no, porque viene de la planilla.
 
+### Corregir los colores de un producto
+
+En el detalle de cada producto, **Colores de este producto** permite corregir un
+color entero —todos sus talles de una vez—:
+
+- **Cambiar** un color por otro: las variantes y sus fotos pasan al nuevo. Si
+  el producto ya tiene ese color en alguno de esos talles, se frena para que no
+  queden dos variantes del mismo color y talle.
+- **Quitar** un color: se van sus variantes y sus fotos pasan a generales. El
+  único color de un producto no se quita: para eso está ocultar el producto.
+- **Agregar** un color en los talles que se marquen, con el precio que cada
+  talle ya tiene en los otros colores.
+
+Todo queda firme aunque se vuelva a importar la planilla de STOCKER: un color
+corregido no se pisa y uno quitado no se vuelve a crear.
+
 ## Los colores
 
 Son **veinte**, con la ortografía que usa el negocio en STOCKER: `Beish` y no
