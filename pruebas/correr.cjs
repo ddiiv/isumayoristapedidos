@@ -10,9 +10,30 @@
 const path = require('node:path');
 const fs = require('node:fs');
 
+/*
+ * Las credenciales salen del .env, nunca de acá.
+ *
+ * Este archivo se commitea. La contraseña del administrador estuvo escrita
+ * como valor por defecto y eso alcanzaba para entrar al panel de producción;
+ * peor todavía, el secreto con el que se firman las sesiones se derivaba de
+ * ella, así que con leer el repo se podía falsificar la sesión de cualquier
+ * cliente y los enlaces de descarga de cualquier pedido.
+ *
+ * Sin credenciales las pruebas no corren y lo dicen. Un valor por defecto que
+ * "funciona igual" es justo lo que hace que nadie se entere.
+ */
+require('../src/entorno').cargarEnv();
+
 const API = process.env.API || 'http://localhost:8090';
 const CLAVE_ADMIN = process.env.ADMIN_PASSWORD;
-const EMAIL_ADMIN = process.env.ADMIN_EMAIL || 'ruthtintaya9@gmail.com';
+const EMAIL_ADMIN = process.env.ADMIN_EMAIL;
+
+if (!CLAVE_ADMIN || !EMAIL_ADMIN) {
+  console.error('\n  Faltan ADMIN_EMAIL y ADMIN_PASSWORD.'
+    + '\n  Ponelas en el .env o pasalas por delante:'
+    + '\n    ADMIN_EMAIL=… ADMIN_PASSWORD=… node pruebas/correr.cjs\n');
+  process.exit(1);
+}
 
 let ok = 0, ko = 0;
 const chk = (t, esperado, obtenido) => {
@@ -158,22 +179,38 @@ const CLIENTE_OK = {
   chk('con número de pedido', true, /^ISU-\d{6}$/.test(confirmado.json?.numero || ''));
   chk('el total no cambió entre la previa y la confirmación', esperadoTotal, confirmado.json?.total);
 
-  tit('7. LOS DOS PDF SE GENERAN Y SON PDF DE VERDAD');
+  tit('7. EL REMITO SE GENERA Y ES UN PDF DE VERDAD');
   const numero = confirmado.json.numero;
-  for (const doc of ['pedido', 'rotulo']) {
-    const r = await pedir(`/api/pedidos/${numero}/${doc}.pdf`, { crudo: true });
-    chk(`${doc}.pdf responde`, 200, r.status);
-    chk(`${doc}.pdf es application/pdf`, true, String(r.tipo).includes('application/pdf'));
-    // Los cuatro primeros bytes de un PDF son %PDF. Un 200 con un HTML de error
-    // adentro también "descarga bien" y se ve recién al abrirlo.
-    chk(`${doc}.pdf empieza con %PDF`, '%PDF', r.buffer.subarray(0, 4).toString());
-    chk(`${doc}.pdf no está vacío`, true, r.buffer.length > 800);
-  }
+  const firma = confirmado.json.token;
+  chk('al confirmar viene la firma para bajarlo', true, typeof firma === 'string' && firma.length > 20);
+
+  const remito = await pedir(`/api/pedidos/${numero}/pedido.pdf?t=${encodeURIComponent(firma)}`, { crudo: true });
+  chk('pedido.pdf responde', 200, remito.status);
+  chk('pedido.pdf es application/pdf', true, String(remito.tipo).includes('application/pdf'));
+  // Los cuatro primeros bytes de un PDF son %PDF. Un 200 con un HTML de error
+  // adentro también "descarga bien" y se ve recién al abrirlo.
+  chk('pedido.pdf empieza con %PDF', '%PDF', remito.buffer.subarray(0, 4).toString());
+  chk('pedido.pdf no está vacío', true, remito.buffer.length > 800);
 
   const inexistente = await pedir('/api/pedidos/ISU-999999/pedido.pdf');
   chk('un pedido que no existe da 404', 404, inexistente.status);
   const docRaro = await pedir(`/api/pedidos/${numero}/factura.pdf`);
   chk('un documento que no existe da 404', 404, docRaro.status);
+
+  tit('7b. EL PEDIDO DE OTRO NO SE BAJA PROBANDO NÚMEROS');
+  /*
+   * Los números son correlativos. Sin nada que verificar, ISU-000001 en la
+   * barra de direcciones entregaba el remito de ese pedido —con el nombre, el
+   * CUIT, el teléfono y la dirección de quien lo hizo—.
+   */
+  const ajeno = await pedir(`/api/pedidos/${numero}/pedido.pdf`);
+  chk('sin la firma no se baja', 404, ajeno.status);
+  const firmaFalsa = await pedir(`/api/pedidos/${numero}/pedido.pdf?t=lacomoquiera`);
+  chk('con una firma inventada tampoco', 404, firmaFalsa.status);
+  chk('y contesta lo mismo que si no existiera', ajeno.status, inexistente.status);
+
+  const rotuloDeCliente = await pedir(`/api/pedidos/${numero}/rotulo.pdf?t=${encodeURIComponent(firma)}`);
+  chk('el rótulo no lo baja el cliente ni con su firma', 403, rotuloDeCliente.status);
 
   tit('8. EL PANEL NO SE ABRE SIN CONTRASEÑA');
   cookieAdmin = '';
@@ -423,15 +460,34 @@ const planilla = path.join(__dirname, 'catalogo-isuwaya.xlsx');
   chk('los talles también, y ordenados', true,
     detalleProd.talles.every((t, i, a) => i === 0 || a[i - 1].orden <= t.orden));
 
-  tit('15d. LOS VEINTE COLORES OFICIALES');
+  tit('15d. LOS COLORES OFICIALES');
   const paleta = (await pedir('/api/admin/colores', { admin: true })).json;
-  chk('la lista oficial tiene veinte', 20, paleta.oficiales.length);
+  chk('la lista oficial tiene veintidós', 22, paleta.oficiales.length);
   chk('están todos cargados', true,
     paleta.oficiales.every((o) => paleta.colores.some((c) => c.nombre === o)));
   chk('con la ortografía del negocio', true,
     ['Beish', 'Melang', 'Bordo', 'Salmon', 'Aero'].every((n) => paleta.colores.some((c) => c.nombre === n)));
-  chk('y los que no están en la lista quedan marcados', true,
-    paleta.colores.some((c) => !c.oficial));
+  chk('las uniones del STOCKER no dejaron ninguno afuera', 0,
+    paleta.colores.filter((c) => !c.oficial).length);
+  chk('y no volvieron los repetidos', 0,
+    paleta.colores.filter((c) => ['Moliné', 'Gris', 'Camel Claro', 'Crema', 'Cielo'].includes(c.nombre)).length);
+
+  /*
+   * El marcador de "fuera de la lista" se prueba a propósito.
+   *
+   * Antes lo probaba el dato sucio del STOCKER, pero ahora el importador une
+   * los repetidos solo y no queda ninguno marcado. Si el test siguiera
+   * apoyado en eso, el día que alguien rompa el marcador nadie se entera.
+   */
+  await pedir('/api/admin/colores', {
+    metodo: 'POST', admin: true, cuerpo: { nombre: 'Fucsia QA', hex: '#FF00AA' },
+  });
+  const conIntruso = (await pedir('/api/admin/colores', { admin: true })).json;
+  const intruso = conIntruso.colores.find((c) => c.nombre === 'Fucsia QA');
+  chk('un color que no está en la lista entra marcado', false, intruso?.oficial);
+  await pedir(`/api/admin/colores/${intruso?.id}`, { metodo: 'DELETE', admin: true });
+  const limpio = (await pedir('/api/admin/colores', { admin: true })).json;
+  chk('y el test se lleva su basura', 22, limpio.colores.length);
 
   tit('16. EL HISTORIAL RESPONDE PREGUNTAS');
   const historial = await pedir('/api/admin/pedidos', { admin: true });
@@ -444,6 +500,139 @@ const planilla = path.join(__dirname, 'catalogo-isuwaya.xlsx');
   const futuro = await pedir('/api/admin/pedidos?desde=2099-01-01', { admin: true });
   chk('un filtro de fecha que no alcanza a nada da cero', 0, futuro.json.totales.pedidos);
 
+  tit('17. LO QUE SE VE ADENTRO NO SOBREVIVE A LA SESIÓN');
+  /*
+   * El navegador congela la página al salir de ella y el botón Atrás la
+   * devuelve pintada sin ejecutar una línea: sin `no-store`, cerrar sesión en
+   * una computadora compartida dejaba el panel —clientes y pedidos incluidos—
+   * a un Atrás de distancia del que se sentaba después.
+   *
+   * El otro medio del arreglo vive en el navegador (pagehide/pageshow) y no se
+   * puede probar desde acá; esto cubre la mitad que sí sirve el servidor.
+   */
+  const cabeceras = async (ruta) => (await fetch(`${API}${ruta}`)).headers.get('cache-control') || '';
+  chk('el panel se sirve sin guardarse', true, (await cabeceras('/admin.html')).includes('no-store'));
+  chk('la tienda también',                true, (await cabeceras('/')).includes('no-store'));
+  chk('pero el CSS se sigue cacheando',   false, (await cabeceras('/css/estilos.css')).includes('no-store'));
+  chk('y el JavaScript también',          false, (await cabeceras('/js/admin.js')).includes('no-store'));
+
+  const panelSinCookie = await fetch(`${API}/api/admin/clientes`);
+  chk('sin sesión el panel no da ni un cliente', 401, panelSinCookie.status);
+
+  tit('19. LA CURVA DE UN COLOR SOLO');
+  /*
+   * La curva entera obliga a llevarse todos los colores. Quien se quedó sin
+   * negro y quiere reponer nada más que eso pide una unidad de cada talle,
+   * pero de un color.
+   */
+  const conVariosColores = productos.find((x) => new Set(x.combinaciones.map((c) => c.color)).size > 2);
+  const colorElegido = [...new Set(conVariosColores.combinaciones.map((c) => c.color))][1];
+  const combosDelColor = conVariosColores.combinaciones.filter((c) => c.color === colorElegido);
+
+  const curvaColor = await pedir('/api/pedidos/previsualizar', {
+    metodo: 'POST',
+    cuerpo: {
+      cliente: CLIENTE_OK,
+      carrito: [{ skuAgrupador: conVariosColores.sku, curvas: 0, curvasPorColor: { [colorElegido]: 2 }, cantidades: {} }],
+    },
+  });
+  chk('se previsualiza', 200, curvaColor.status);
+  chk('trae una unidad de cada talle de ese color, por cada curva',
+    combosDelColor.length * 2, curvaColor.json?.unidades);
+  chk('y cuesta lo que suman esos talles',
+    combosDelColor.reduce((t, c) => t + c.precio, 0) * 2, curvaColor.json?.total);
+  chk('el desglose es de ese color y de ningún otro',
+    [colorElegido], curvaColor.json?.items?.[0]?.detalle?.map((d) => d.color));
+
+  /*
+   * El nombre del color que ve el cliente y el que llega al depósito tienen
+   * que ser el mismo. En la base conviven veintinueve escrituras del mismo
+   * color; armando el pedido con el texto crudo, se pedía "Melang" y salía
+   * "Moline".
+   */
+  const nombresDelCatalogo = new Set(conVariosColores.combinaciones.map((c) => c.color));
+  chk('y con el nombre que muestra el catálogo, no el de la planilla', true,
+    curvaColor.json?.items?.[0]?.detalle?.every((d) => nombresDelCatalogo.has(d.color)));
+
+  const mezcla = await pedir('/api/pedidos/previsualizar', {
+    metodo: 'POST',
+    cuerpo: {
+      cliente: CLIENTE_OK,
+      carrito: [{
+        skuAgrupador: conVariosColores.sku,
+        curvas: 1,
+        curvasPorColor: { [colorElegido]: 1 },
+        cantidades: { [combosDelColor[0].sku]: 5 },
+      }],
+    },
+  });
+  chk('curva entera, curva de color y sueltas se suman sin pisarse',
+    conVariosColores.unidadesPorCurva + combosDelColor.length + 5, mezcla.json?.unidades);
+  chk('y el importe también',
+    conVariosColores.precioPorCurva
+      + combosDelColor.reduce((t, c) => t + c.precio, 0)
+      + combosDelColor[0].precio * 5,
+    mezcla.json?.total);
+
+  const colorFalso = await pedir('/api/pedidos/previsualizar', {
+    metodo: 'POST',
+    cuerpo: {
+      cliente: CLIENTE_OK,
+      carrito: [{ skuAgrupador: conVariosColores.sku, curvas: 0, curvasPorColor: { 'Fucsia Inventado': 4 }, cantidades: {} }],
+    },
+  });
+  chk('un color que no existe no entra de contrabando', true,
+    (colorFalso.json?.errores || []).some((e) => e.includes('Fucsia Inventado')));
+  chk('y no suma ni una unidad', 0, colorFalso.json?.unidades || 0);
+
+  const curvaNegativa = await pedir('/api/pedidos/previsualizar', {
+    metodo: 'POST',
+    cuerpo: {
+      cliente: CLIENTE_OK,
+      carrito: [{ skuAgrupador: conVariosColores.sku, curvas: 0, curvasPorColor: { [colorElegido]: -3 }, cantidades: {} }],
+    },
+  });
+  chk('una curva negativa no descuenta nada', 0, curvaNegativa.json?.unidades || 0);
+
+  const exagerado = await pedir('/api/pedidos/previsualizar', {
+    metodo: 'POST',
+    cuerpo: {
+      cliente: CLIENTE_OK,
+      carrito: [{ skuAgrupador: conVariosColores.sku, curvas: 0, cantidades: { [combosDelColor[0].sku]: 999999 } }],
+    },
+  });
+  chk('un cero de más en una cantidad se avisa, no se cobra', 0, exagerado.json?.unidades || 0);
+  chk('y se dice por qué', true,
+    (exagerado.json?.errores || []).some((e) => e.includes('demasiado')));
+
+  tit('20. LOS TALLES SALEN EN EL ORDEN DEL NEGOCIO');
+  /*
+   * "2XL" y "XXL" son el mismo talle escrito de dos formas. Con una lista fija
+   * de nombres, la forma que faltaba caía en el cajón de lo desconocido y se
+   * iba al final: las columnas salían XS S M L XL 4XL 5XL 2XL 3XL, con los dos
+   * talles más pedidos al final de todo.
+   */
+  const conTallesGrandes = productos.find((x) => x.talles.includes('2XL') && x.talles.includes('4XL'));
+  if (conTallesGrandes) {
+    const orden = conTallesGrandes.talles;
+    chk('2XL viene antes que 3XL', true, orden.indexOf('2XL') < orden.indexOf('3XL'));
+    chk('3XL antes que 4XL',       true, orden.indexOf('3XL') < orden.indexOf('4XL'));
+    chk('y XL antes que 2XL',      true, orden.indexOf('XL') < orden.indexOf('2XL'));
+  }
+  const conTallesDeNino = productos.find((x) => x.talles.every((t) => /^\d+$/.test(t)) && x.talles.length > 2);
+  if (conTallesDeNino) {
+    const nums = conTallesDeNino.talles.map(Number);
+    chk('los talles de niño van por número', true, nums.every((n, i) => i === 0 || nums[i - 1] < n));
+  }
+
+  tit('18. EL RÓTULO ES DE QUIEN DESPACHA');
+  const rotuloAdmin = await pedir(`/api/pedidos/${numero}/rotulo.pdf`, { admin: true, crudo: true });
+  chk('el administrador sí lo baja', 200, rotuloAdmin.status);
+  chk('y es un PDF de verdad', '%PDF', rotuloAdmin.buffer.subarray(0, 4).toString());
+  chk('de 10×15, así que pesa menos que el A4', true, rotuloAdmin.buffer.length > 800);
+  const remitoAdmin = await pedir(`/api/pedidos/${numero}/pedido.pdf`, { admin: true, crudo: true });
+  chk('el remito también, sin firma', 200, remitoAdmin.status);
+
   tit('11. LAS RESPUESTAS QUE NO EXISTEN SON HONESTAS');
   const apiRara = await pedir('/api/lo-que-sea');
   chk('un endpoint inventado da 404 en JSON', 404, apiRara.status);
@@ -451,6 +640,23 @@ const planilla = path.join(__dirname, 'catalogo-isuwaya.xlsx');
 
   const archivoRaro = await pedir('/no-existe.js', { crudo: true });
   chk('un archivo que no está da 404, no el index', 404, archivoRaro.status);
+
+  tit('21. CONFIRMAR PEDIDOS TIENE UN TECHO POR IP');
+  /*
+   * Va última a propósito: deja la IP frenada un minuto, así que cualquier
+   * prueba de pedidos que viniera después mediría el limitador y no lo suyo.
+   *
+   * Confirmar es anónimo —no se le pide cuenta a nadie para comprar— y cada
+   * llamada guarda una fila, arma dos PDF y le manda un mail y un WhatsApp al
+   * dueño. Sin techo, un script con CUITs generados le llena la casilla.
+   */
+  let frenado = 0;
+  for (let i = 0; i < 14; i += 1) {
+    const r = await pedir('/api/pedidos', { metodo: 'POST', cuerpo: { cliente: {}, carrito: [] } });
+    if (r.status === 429) frenado += 1;
+  }
+  chk('a la ráfaga la corta', true, frenado > 0);
+  chk('y con 429, no con un error inventado', true, frenado > 0);
 
   console.log(`\n\x1b[1m─────────────────────────────\x1b[0m\n  \x1b[32mPasaron: ${ok}\x1b[0m   \x1b[31mFallaron: ${ko}\x1b[0m`);
   process.exit(ko ? 1 : 0);

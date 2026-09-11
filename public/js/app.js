@@ -15,6 +15,7 @@ export const estado = {
   categorias: [],
   productos: [],
   categoriaActiva: null,
+  busqueda: '',
   /*
    * El carrito, por SKU de producto padre.
    *
@@ -58,6 +59,24 @@ export function cuentaDeEntrada(sku, entrada) {
   if (curvas > 0) {
     unidades += curvas * producto.unidadesPorCurva;
     subtotal += curvas * producto.precioPorCurva;
+  }
+
+  /*
+   * Las curvas de un color solo se cuentan combinación por combinación.
+   *
+   * No alcanza con multiplicar por un precio de curva: cada color tiene los
+   * talles que tiene, y los talles grandes pueden costar distinto. La cuenta
+   * que vale es la del servidor; ésta tiene que dar lo mismo o el total salta
+   * entre el carrito y la confirmación.
+   */
+  for (const [color, valor] of Object.entries(entrada.curvasPorColor || {})) {
+    const n = Number(valor) || 0;
+    if (n <= 0) continue;
+    for (const c of producto.combinaciones) {
+      if (c.color !== color) continue;
+      unidades += n;
+      subtotal += n * c.precio;
+    }
   }
   for (const [skuVar, n] of Object.entries(entrada.cantidades || {})) {
     const cant = Number(n) || 0;
@@ -181,15 +200,56 @@ export function fotosDe(producto) {
   return lista;
 }
 
+/*
+ * Comparar sin tildes y sin mayúsculas.
+ *
+ * Nadie escribe "pantalón" con tilde en un buscador, y media planilla viene
+ * escrita en mayúsculas. Sin esto, buscar "pantalon" no encuentra "Pantalón" y
+ * la conclusión de quien busca es que el producto no está.
+ */
+const plano = (v) => String(v ?? '')
+  .normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+
+/*
+ * Buscar por título, por categoría o por código.
+ *
+ * Se parte en palabras y tienen que estar TODAS, en cualquier orden y en
+ * cualquiera de los tres campos: "remera negro" y "negro remera" encuentran lo
+ * mismo. Buscar la frase entera obligaría a acertar el orden en que está
+ * escrito el título, que nadie recuerda.
+ *
+ * El código entra porque está a la vista en cada fila y quien repone lo tiene
+ * anotado del pedido anterior.
+ */
+function coincide(producto, palabras) {
+  const categoria = estado.categorias.find((c) => c.id === producto.categoriaId)?.nombre || '';
+  const donde = plano(`${producto.titulo} ${categoria} ${producto.sku} ${producto.modelo || ''}`);
+  return palabras.every((w) => donde.includes(w));
+}
+
 export function pintarCatalogo() {
   const cont = el('#catalogo');
-  const visibles = estado.categoriaActiva
+  const palabras = plano(estado.busqueda).split(/\s+/).filter(Boolean);
+
+  /*
+   * Buscando se mira todo el catálogo, no la categoría abierta.
+   *
+   * Si la búsqueda quedara encerrada en la categoría activa, escribir algo que
+   * está en otra da cero resultados y parece que el producto no existe.
+   */
+  const enCategoria = estado.categoriaActiva && !palabras.length
     ? estado.productos.filter((p) => p.categoriaId === estado.categoriaActiva)
     : estado.productos;
+  const visibles = palabras.length
+    ? enCategoria.filter((p) => coincide(p, palabras))
+    : enCategoria;
 
   if (!visibles.length) {
-    cont.innerHTML = `<div class="vacio"><h3>No hay productos acá</h3>
-      <p>Probá con otra categoría.</p></div>`;
+    cont.innerHTML = palabras.length
+      ? `<div class="vacio"><h3>Nada con “${esc(estado.busqueda)}”</h3>
+          <p>Probá con menos palabras, o con el nombre de la categoría.</p></div>`
+      : `<div class="vacio"><h3>No hay productos acá</h3>
+          <p>Probá con otra categoría.</p></div>`;
     return;
   }
 
@@ -202,7 +262,11 @@ export function pintarCatalogo() {
   }
 
   const nombre = (id) => estado.categorias.find((c) => c.id === id)?.nombre || 'Sin categoría';
-  cont.innerHTML = [...porCategoria.entries()]
+  const encabezado = palabras.length
+    ? `<p class="resultado-busqueda">${visibles.length} ${visibles.length === 1 ? 'producto' : 'productos'}`
+      + ` con “${esc(estado.busqueda.trim())}”</p>`
+    : '';
+  cont.innerHTML = encabezado + [...porCategoria.entries()]
     .map(([id, items]) => `
       <h2 class="titulo-categoria">${esc(nombre(id))} <small>${items.length}</small></h2>
       <div class="lista">${items.map(filaProducto).join('')}</div>`)
@@ -287,10 +351,46 @@ el('#categorias').addEventListener('click', (e) => {
   const b = e.target.closest('button[data-cat]');
   if (!b) return;
   estado.categoriaActiva = b.dataset.cat ? Number(b.dataset.cat) : null;
+  /*
+   * Elegir una categoría borra la búsqueda.
+   *
+   * Buscando se mira todo el catálogo, así que si el texto quedara puesto, la
+   * categoría recién tocada no cambiaría nada en pantalla y parecería que el
+   * botón no anda.
+   */
+  if (estado.busqueda) { estado.busqueda = ''; el('#buscar').value = ''; el('#buscar-limpiar').hidden = true; }
   pintarCategorias();
   pintarCatalogo();
   window.scrollTo({ top: 0, behavior: 'smooth' });
 });
+
+/*
+ * La búsqueda se repinta mientras se escribe, sin esperar a Enter.
+ *
+ * El catálogo son ochenta productos que ya están en memoria: filtrar es
+ * instantáneo y no hay ningún pedido al servidor que convenga demorar. Poner
+ * un retraso acá sólo agregaría una espera que nadie pidió.
+ */
+const campoBuscar = el('#buscar');
+campoBuscar.addEventListener('input', () => {
+  estado.busqueda = campoBuscar.value;
+  el('#buscar-limpiar').hidden = !campoBuscar.value;
+  pintarCatalogo();
+});
+
+// Escape borra lo escrito sin sacar la mano del teclado.
+campoBuscar.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && campoBuscar.value) { e.stopPropagation(); limpiarBusqueda(); }
+});
+
+el('#buscar-limpiar').addEventListener('click', () => { limpiarBusqueda(); campoBuscar.focus(); });
+
+function limpiarBusqueda() {
+  estado.busqueda = '';
+  campoBuscar.value = '';
+  el('#buscar-limpiar').hidden = true;
+  pintarCatalogo();
+}
 
 el('#catalogo').addEventListener('click', (e) => {
   /*

@@ -41,28 +41,71 @@ nada puesto.
 
 ## Desplegar en Railway
 
-1. **Creá el servicio** apuntando a este repositorio. Railway detecta Node y
-   corre `npm start`.
+### 1. El servicio
 
-2. **Montá un volumen** y poné el punto de montaje en `/data`.
-   Es lo único que hay que hacer bien: sin volumen, la base y las fotos viven en
-   el disco efímero del contenedor y **se pierden en cada deploy**.
+**New Project → Deploy from GitHub repo** → este repositorio. Railway detecta
+Node, instala las dependencias y arranca con `npm start`. No hay paso de build.
 
-3. **Cargá las variables** (`.env.example` las tiene todas):
+### 2. El volumen — lo único que no puede salir mal
 
-   | Variable | Para qué |
-   |---|---|
-   | `DATA_DIR` | `/data` — la carpeta del volumen |
-   | `ADMIN_PASSWORD` | Sin esto el panel no abre. No tiene valor por defecto a propósito. |
-   | `PEDIDOS_EMAIL` | A dónde llega cada pedido con los PDF adjuntos |
-   | `PEDIDOS_WHATSAPP` | A qué número llega el aviso |
-   | `MAIL_HOST` `MAIL_PORT` `MAIL_USER` `MAIL_PASS` `MAIL_FROM` | Envío de correo |
-   | `WHATSAPP_META_TOKEN` `WHATSAPP_META_PHONE_NUMBER_ID` | WhatsApp (opcional) |
-   | `WHATSAPP_TEMPLATE_NAME` `WHATSAPP_TEMPLATE_LANG` | Plantilla aprobada de Meta |
+Sin volumen, la base y las fotos viven en el disco efímero del contenedor y
+**se borran en cada deploy**, sin ningún error que lo avise.
 
-   `PORT` la pone Railway sola.
+1. En el lienzo del proyecto: **clic derecho → Volume** (o `⌘K` → *Volume*) y
+   elegí este servicio.
+2. **Mount path: `/data`**. Es una ruta absoluta dentro del contenedor.
+   - **Nunca `/app`**: ahí está el código. Un volumen montado en `/app` lo tapa
+     entero y la app no arranca (`Cannot find module` en los logs).
+3. No hace falta ninguna variable: Railway le pasa a la app
+   `RAILWAY_VOLUME_MOUNT_PATH` y la app guarda ahí sola. `DATA_DIR` sólo si
+   querés otra carpeta — y si la ponés, que esté **dentro** del volumen.
+4. Redeploy. En **Deploy Logs** tiene que decir `datos en /data`.
 
-4. **Entrá al panel** en `/admin.html` y subí la planilla.
+El volumen se monta al arrancar, no durante el build: por eso la base se crea
+en el primer arranque y no antes.
+
+### 3. Las variables
+
+En **Variables** del servicio (`.env.example` las tiene todas comentadas):
+
+| Variable | Para qué |
+|---|---|
+| `ADMIN_EMAIL` `ADMIN_PASSWORD` | La cuenta del panel. Sin contraseña el panel no abre: no hay valor por defecto a propósito. |
+| `PEDIDOS_EMAIL` `PEDIDOS_WHATSAPP` | A dónde llega cada pedido |
+| `MAIL_HOST` `MAIL_PORT` `MAIL_USER` `MAIL_PASS` `MAIL_FROM` | Envío de correo |
+| `WHATSAPP_META_TOKEN` `WHATSAPP_META_PHONE_NUMBER_ID` `WHATSAPP_TEMPLATE_NAME` `WHATSAPP_TEMPLATE_LANG` | WhatsApp (opcional) |
+| `SESSION_SECRET` | Opcional. Si no está, la app genera una y la guarda en el volumen. |
+
+**No cargues `PORT` ni `DATA_DIR`.** Si pegás en el editor *Raw* el `.env` de tu
+máquina, sacale esas dos líneas: el `PORT` de tu máquina no es el que espera el
+dominio de Railway, y el sitio contesta *Application failed to respond* con la
+app andando.
+
+### 4. El dominio
+
+**Settings → Networking → Generate Domain**. Si pide un puerto, poné el que
+aparece en los logs (`escuchando en el puerto …`).
+
+### 5. La primera carga
+
+**No hay que correr ningún comando.** Las tablas se crean solas en el primer
+arranque. Entrá a `/admin.html` con `ADMIN_EMAIL` y `ADMIN_PASSWORD` →
+**Catálogo → Traer catálogo de STOCKER** → subí el `.xlsx`. Los colores
+repetidos, los talles y las categorías se ordenan solos al importar.
+
+### Si Railway dice «Application failed to respond»
+
+Es un 502: el proxy de Railway no pudo hablar con la app. El motivo está en
+**Deployments → el último → Deploy Logs**:
+
+| En los logs | Qué pasa | Qué hacer |
+|---|---|---|
+| `No puedo escribir en la carpeta de datos` | El volumen está mal montado o sin permisos | Mount path `/data`. Si sigue, variable `RAILWAY_RUN_UID=0` |
+| `Cannot find module …` | El volumen está montado en `/app` y tapa el código | Cambiá el mount path a `/data` |
+| `escuchando en el puerto X` y el dominio apunta a otro | Hay un `PORT` cargado a mano | Borrá la variable `PORT`, o poné ese mismo puerto en *Networking* |
+| `⚠ … NO está dentro del volumen` | `DATA_DIR` apunta afuera del volumen | Borrá `DATA_DIR` |
+| `⚠ no hay volumen montado` | No hay volumen | Paso 2 |
+| La app arranca bien y se cae sola al rato | Mirá el error de abajo de todo en el log | — |
 
 ### Sobre el correo
 

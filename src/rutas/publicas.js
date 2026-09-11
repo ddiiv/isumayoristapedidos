@@ -8,6 +8,45 @@ const auth = require('../auth');
 const r = express.Router();
 
 /*
+ * Un techo por IP para lo que cuesta caro y no pide cuenta.
+ *
+ * Confirmar un pedido es anónimo a propósito —no se le pide cuenta a nadie
+ * para comprar—, pero cada llamada guarda una fila, arma dos PDF y le manda un
+ * mail y un WhatsApp al dueño. Con CUIT válido, que es fácil de generar, un
+ * script le llena la casilla y el WhatsApp (que además tiene tope y costo por
+ * número en Meta) y engorda la base sin freno.
+ *
+ * No pretende ser un limitador serio —para eso hay que guardar estado afuera—,
+ * pero corta el caso que importa. Los números son holgados: una persona
+ * confirmando un pedido nunca los toca.
+ */
+function limitador(porMinuto) {
+  const visto = new Map();
+  return (req) => {
+    const ip = req.ip || 'sin-ip';
+    const ahora = Date.now();
+    // La lista se limpia sola: sin esto, cada IP que alguna vez pasó queda
+    // guardada para siempre y el proceso crece sin techo.
+    if (visto.size > 5000) visto.clear();
+
+    const ventana = visto.get(ip);
+    if (!ventana || ahora - ventana.desde > 60_000) {
+      visto.set(ip, { desde: ahora, cuantos: 1 });
+      return false;
+    }
+    ventana.cuantos += 1;
+    return ventana.cuantos > porMinuto;
+  };
+}
+
+const demasiadosPedidos = limitador(10);
+const demasiadosPapeles = limitador(60);
+
+const frenar = (mirar) => (req, res, next) => (mirar(req)
+  ? res.status(429).json({ message: 'Estás yendo muy rápido. Esperá un momento y probá de nuevo.' })
+  : next());
+
+/*
  * GET /api/catalogo
  *
  * Todo el catálogo en un solo pedido.
@@ -99,7 +138,7 @@ r.get('/catalogo', (req, res) => {
 });
 
 // POST /api/pedidos/previsualizar — valoriza sin guardar nada.
-r.post('/pedidos/previsualizar', (req, res) => {
+r.post('/pedidos/previsualizar', frenar(demasiadosPapeles), (req, res) => {
   const { cliente, errores: erroresCliente } = validarCliente(req.body?.cliente);
   const { items, total, unidades, errores } = armarPedido(req.body?.carrito);
 
@@ -116,7 +155,7 @@ r.post('/pedidos/previsualizar', (req, res) => {
  * aparte, el papel que el cliente descarga y el que llega al depósito pueden
  * decir cosas distintas, y nadie lo nota hasta que hay un reclamo.
  */
-r.post('/pedidos/pdf', async (req, res, next) => {
+r.post('/pedidos/pdf', frenar(demasiadosPapeles), async (req, res, next) => {
   try {
     const { cliente } = validarCliente(req.body?.cliente);
     const { items, total, unidades } = armarPedido(req.body?.carrito);
@@ -132,7 +171,7 @@ r.post('/pedidos/pdf', async (req, res, next) => {
 });
 
 // POST /api/pedidos — confirma, guarda y avisa.
-r.post('/pedidos', async (req, res, next) => {
+r.post('/pedidos', frenar(demasiadosPedidos), async (req, res, next) => {
   try {
     const { cliente, errores: erroresCliente } = validarCliente(req.body?.cliente);
     if (Object.keys(erroresCliente).length) {
@@ -173,20 +212,52 @@ r.post('/pedidos', async (req, res, next) => {
       total: pedido.total,
       unidades: pedido.unidades,
       avisos,
+      /*
+       * La firma para bajar el remito. Quien pidió sin cuenta no tiene otra
+       * forma de probar que el pedido es suyo.
+       */
+      token: auth.firmarDocumento(pedido.numero),
     });
   } catch (e) { next(e); }
 });
 
-// GET /api/pedidos/:numero/pedido.pdf | rotulo.pdf
+/*
+ * GET /api/pedidos/:numero/pedido.pdf | rotulo.pdf
+ *
+ * Quién puede bajar qué:
+ *  · el rótulo, sólo el administrador. Es la etiqueta que se pega en el bulto
+ *    y la usa quien despacha, no quien compra;
+ *  · el remito, el administrador, el cliente dueño del pedido, y quien traiga
+ *    la firma de ese número —que es la forma que tiene de bajarlo quien pidió
+ *    sin cuenta—.
+ *
+ * Antes no se pedía nada. Con números correlativos eso alcanzaba para bajar el
+ * remito de cualquier cliente probando ISU-000001, ISU-000002 y así.
+ */
 r.get('/pedidos/:numero/:documento.pdf', async (req, res, next) => {
   try {
-    const pedido = leerPedido(req.params.numero);
-    if (!pedido) return res.status(404).json({ message: 'No existe ese pedido.' });
-
     const cual = req.params.documento;
     if (cual !== 'pedido' && cual !== 'rotulo') {
       return res.status(404).json({ message: 'Ese documento no existe.' });
     }
+
+    const esAdmin = req.sesion?.rol === 'admin';
+    if (cual === 'rotulo' && !esAdmin) {
+      return res.status(403).json({ message: 'El rótulo lo descarga ISUWAYA cuando prepara el envío.' });
+    }
+
+    const pedido = leerPedido(req.params.numero);
+    if (!pedido) return res.status(404).json({ message: 'No existe ese pedido.' });
+
+    const esSuyo = req.sesion?.rol === 'cliente' && pedido.cliente_id === req.sesion.cliente.id;
+    if (!esAdmin && !esSuyo && !auth.documentoFirmado(pedido.numero, req.query.t)) {
+      /*
+       * Se contesta lo mismo exista o no el pedido de otro: un 404 acá y un
+       * 403 allá le dice a quien prueba números cuáles existen.
+       */
+      return res.status(404).json({ message: 'No existe ese pedido.' });
+    }
+
     const pdf = cual === 'rotulo' ? await pdfRotulo(pedido) : await pdfPedido(pedido);
     res.type('application/pdf')
       .setHeader('Content-Disposition', `attachment; filename="${pedido.numero}-${cual}.pdf"`);

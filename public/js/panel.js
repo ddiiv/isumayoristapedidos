@@ -25,6 +25,36 @@ const telon = el('#telon');
 
 const clonar = (o) => JSON.parse(JSON.stringify(o));
 
+/*
+ * El cuadro de talles se ve entero o no se ve.
+ *
+ * Antes el cajón medía 480px fijos y el cuadro se deslizaba adentro: en una
+ * pantalla de 1440 sobraban 960px al costado y aun así había que arrastrar
+ * para llegar al 5XL, sin ninguna señal de que hubiera algo más a la derecha.
+ * Lo que no se ve, no se pide.
+ *
+ * Así que el cajón se estira hasta donde el cuadro entra —midiendo, no
+ * adivinando— y cuando ni estirándose entra, que es lo que pasa con nueve
+ * talles en un teléfono, el cuadro se apila: un bloque por color con sus
+ * talles envueltos. Se baja, que es el gesto que ya se está haciendo, y no se
+ * arrastra para el costado, que es el que se pierde.
+ */
+const ANCHO_COLOR = 136;    // la columna del nombre del color
+const ANCHO_CELDA = 68;     // cada columna de talle
+const ANCHO_BORDES = 38;    // el padding del contenido del cajón
+
+/*
+ * La cuenta de acá es sólo para decidir la forma ANTES de pintar; el ancho
+ * exacto se mide después sobre la tabla ya armada. Estimar y creerse la
+ * estimación fue el primer intento y quedó 33px corto —el padding del
+ * envoltorio no estaba contado y las celdas miden más que su mínimo—, así que
+ * conviene que peque de generosa: si sobra, la medición lo corrige.
+ */
+const anchoQueNecesita = (talles) => ANCHO_COLOR + talles * ANCHO_CELDA + ANCHO_BORDES;
+const entraElCuadro = (talles) => window.innerWidth >= anchoQueNecesita(talles);
+
+let formaForzada = null;   // 'apilada' cuando la medición dice que la tabla no entra
+
 export function abrirPanel(sku) {
   const producto = productoPorSku(sku);
   if (!producto) return;
@@ -33,7 +63,9 @@ export function abrirPanel(sku) {
   actual = producto;
   borrador = clonar(estado.carrito[sku] || { curvas: 0, cantidades: {} });
   borrador.cantidades = borrador.cantidades || {};
-  modo = borrador.curvas > 0 ? 'curva' : 'talles';
+  borrador.curvasPorColor = borrador.curvasPorColor || {};
+  const hayCurvasDeColor = Object.values(borrador.curvasPorColor).some((n) => Number(n) > 0);
+  modo = (borrador.curvas > 0 || hayCurvasDeColor) ? 'curva' : 'talles';
 
   el('#panel-titulo').textContent = producto.titulo;
   el('#panel-sku').textContent = `${producto.sku}${producto.modelo ? ` · ${producto.modelo}` : ''}`;
@@ -45,6 +77,8 @@ export function abrirPanel(sku) {
     panel.focus();
   });
   document.body.style.overflow = 'hidden';
+  formaForzada = null;
+  entrabaElCuadro = entraElCuadro(producto.talles.filter(Boolean).length);
   pintar();
 }
 
@@ -76,6 +110,56 @@ export function cerrarPanel() {
  */
 function vistaMatriz() {
   const talles = actual.talles.filter(Boolean);
+  const enTabla = formaForzada !== 'apilada' && entraElCuadro(talles.length);
+  return enTabla ? matrizEnTabla(talles) : matrizApilada(talles);
+}
+
+/*
+ * Un bloque por color, con los talles envueltos.
+ *
+ * Los casilleros van en una grilla que se acomoda sola al ancho, así que todos
+ * los bloques quedan con la misma cantidad de columnas y los talles siguen
+ * alineados de un color al otro: se lee como el cuadro, pero entra.
+ */
+function matrizApilada(talles) {
+  const colores = actual.colores.filter((c) => c.nombre);
+  const porCruce = new Map(actual.combinaciones.map((c) => [`${c.color}|${c.talle}`, c]));
+
+  const bloques = colores.map((color) => {
+    const celdas = talles.map((talle) => {
+      const combo = porCruce.get(`${color.nombre}|${talle}`);
+      if (!combo) {
+        return `<div class="celda agotada">
+          <span class="talle">${esc(talle)}</span><span class="sin">Agotado</span>
+        </div>`;
+      }
+      const valor = enteroPositivo(borrador.cantidades[combo.sku]) || '';
+      return `<label class="celda">
+        <span class="talle">${esc(talle)}</span>
+        <input type="number" min="0" inputmode="numeric" data-sku="${esc(combo.sku)}"
+               value="${valor}" placeholder="0"
+               aria-label="${esc(talle)} en ${esc(color.nombre)}">
+      </label>`;
+    }).join('');
+
+    const enColor = actual.combinaciones
+      .filter((c) => c.color === color.nombre)
+      .reduce((t, c) => t + enteroPositivo(borrador.cantidades[c.sku]), 0);
+
+    return `<section class="bloque-color" data-color="${esc(color.nombre)}">
+      <header>
+        <span class="cuadro" data-hex="${esc(color.hex)}"></span>
+        <span class="nombre">${esc(color.nombre)}</span>
+        ${enColor ? `<span class="cuenta-color">${enColor}</span>` : ''}
+      </header>
+      <div class="celdas">${celdas}</div>
+    </section>`;
+  }).join('');
+
+  return `<div class="matriz-apilada">${bloques}</div>`;
+}
+
+function matrizEnTabla(talles) {
   const colores = actual.colores.filter((c) => c.nombre);
   const porCruce = new Map(actual.combinaciones.map((c) => [`${c.color}|${c.talle}`, c]));
 
@@ -131,16 +215,62 @@ function vistaCurva() {
       × ${actual.talles.length} ${actual.talles.length === 1 ? 'talle' : 'talles'}),
       <b>${pesos(actual.precioPorCurva)}</b> cada una.
     </div>
-    <p class="rotulo">CUÁNTAS CURVAS</p>
+    <p class="rotulo">CURVA COMPLETA</p>
     <div class="fila-talle">
-      <span class="talle">Curvas completas</span>
+      <span class="talle">Todos los colores</span>
       <span class="contador">
         <button data-curva="-1" aria-label="Una curva menos">−</button>
         <input type="number" min="0" inputmode="numeric" id="curvas"
                value="${borrador.curvas || ''}" placeholder="0" aria-label="Cantidad de curvas">
         <button data-curva="1" aria-label="Una curva más">+</button>
       </span>
-    </div>`;
+    </div>
+    ${curvasPorColor()}`;
+}
+
+/*
+ * Curvas de un color solo.
+ *
+ * La curva entera obliga a llevarse los doce colores. Al que se le terminó el
+ * negro y quiere reponer nada más que eso, la curva completa no le sirve: le
+ * entra mercadería que no pidió. Acá pide una unidad de cada talle, pero del
+ * color que elija.
+ *
+ * Cada color muestra cuántos talles tiene de verdad y cuánto sale su curva:
+ * no todos los colores llegan en todos los talles, así que "una curva de
+ * negro" y "una curva de salmón" pueden ser cantidades y precios distintos, y
+ * eso tiene que verse antes de cargar y no en el total.
+ */
+function curvasPorColor() {
+  const colores = actual.colores.filter((c) => c.nombre);
+  if (colores.length < 2) return '';
+
+  const filas = colores.map((color) => {
+    const combos = actual.combinaciones.filter((c) => c.color === color.nombre);
+    if (!combos.length) return '';
+    const precio = combos.reduce((t, c) => t + c.precio, 0);
+    const puestas = enteroPositivo(borrador.curvasPorColor?.[color.nombre]);
+
+    return `
+      <div class="fila-talle fila-curva-color" data-color="${esc(color.nombre)}">
+        <span class="talle">
+          <span class="cuadro" data-hex="${esc(color.hex)}"></span>
+          ${esc(color.nombre)}
+          <span class="precio-unit">${combos.length} ${combos.length === 1 ? 'talle' : 'talles'} · ${pesos(precio)}</span>
+        </span>
+        <span class="contador">
+          <button data-curva-color="${esc(color.nombre)}" data-paso-curva="-1"
+                  aria-label="Una curva menos de ${esc(color.nombre)}">−</button>
+          <input type="number" min="0" inputmode="numeric" data-curva-color-input="${esc(color.nombre)}"
+                 value="${puestas || ''}" placeholder="0"
+                 aria-label="Curvas de ${esc(color.nombre)}">
+          <button data-curva-color="${esc(color.nombre)}" data-paso-curva="1"
+                  aria-label="Una curva más de ${esc(color.nombre)}">+</button>
+        </span>
+      </div>`;
+  }).join('');
+
+  return `<p class="rotulo separado-arriba">CURVA POR COLOR</p>${filas}`;
 }
 
 function pintar() {
@@ -158,6 +288,12 @@ function pintar() {
     ? `<button class="btn borde ver-guia" type="button">Ver guía de talles</button>`
     : '';
 
+  /*
+   * El ancho se fija por producto y no por modo: cambiar entre talles y curva
+   * no tiene que hacer saltar el cajón de ancho debajo del dedo.
+   */
+  panel.style.setProperty('--ancho-cuadro', `${anchoQueNecesita(actual.talles.filter(Boolean).length)}px`);
+
   el('#panel-contenido').innerHTML = `
     ${carrusel}
     ${actual.descripcion ? `<p class="descripcion">${esc(actual.descripcion)}</p>` : ''}
@@ -167,6 +303,22 @@ function pintar() {
     </div>
     ${modo === 'curva' ? vistaCurva() : vistaMatriz()}
     ${guia}`;
+
+  /*
+   * Con la tabla ya armada se mide lo que de verdad ocupa y se ajusta el
+   * cajón. La tabla se dibuja a `max-content`, así que su ancho no depende del
+   * cajón y una sola medición alcanza: no hay ida y vuelta entre los dos.
+   *
+   * Y si ni así entra en la pantalla, se repinta apilada en vez de dejar el
+   * cuadro cortado. Es la única forma de estar seguros, porque cuánto mide una
+   * celda lo decide el texto que le tocó adentro.
+   */
+  const tabla = panel.querySelector('table.matriz-talles');
+  if (tabla) {
+    const necesita = Math.ceil(tabla.getBoundingClientRect().width) + ANCHO_BORDES;
+    if (necesita > window.innerWidth) { formaForzada = 'apilada'; pintar(); return; }
+    panel.style.setProperty('--ancho-cuadro', `${necesita}px`);
+  }
 
   pintarMuestras(el('#panel-contenido'));
   refrescarPie();
@@ -204,6 +356,18 @@ el('#panel-contenido').addEventListener('click', (e) => {
   if (b.dataset.curva) {
     borrador.curvas = enteroPositivo(borrador.curvas + Number(b.dataset.curva));
     el('#curvas').value = borrador.curvas || '';
+    refrescarPie();
+    return;
+  }
+
+  if (b.dataset.curvaColor) {
+    const color = b.dataset.curvaColor;
+    const n = enteroPositivo(enteroPositivo(borrador.curvasPorColor[color]) + Number(b.dataset.pasoCurva));
+    if (n) borrador.curvasPorColor[color] = n; else delete borrador.curvasPorColor[color];
+    // Se toca sólo el casillero de esa fila: repintar le sacaría el foco a
+    // quien está cargando.
+    const campo = el(`[data-curva-color-input="${CSS.escape(color)}"]`, el('#panel-contenido'));
+    if (campo) campo.value = n || '';
     refrescarPie();
     return;
   }
@@ -259,6 +423,14 @@ el('#panel-contenido').addEventListener('input', (e) => {
     refrescarPie();
     return;
   }
+  const colorCurva = input.dataset?.curvaColorInput;
+  if (colorCurva) {
+    const n = enteroPositivo(input.value);
+    if (n) borrador.curvasPorColor[colorCurva] = n; else delete borrador.curvasPorColor[colorCurva];
+    refrescarPie();
+    return;
+  }
+
   const sku = input.dataset?.sku;
   if (!sku) return;
   const n = enteroPositivo(input.value);
@@ -275,7 +447,8 @@ el('#panel-contenido').addEventListener('input', (e) => {
  * que es lo único que cambió.
  */
 function actualizarCuentaDeFila(input) {
-  const fila = input.closest('tr[data-color]');
+  // Sirve para las dos formas: la fila de la tabla y el bloque apilado.
+  const fila = input.closest('[data-color]');
   if (!fila) return;
   const color = fila.dataset.color;
   const n = actual.combinaciones
@@ -287,16 +460,38 @@ function actualizarCuentaDeFila(input) {
   if (!cuenta) {
     cuenta = document.createElement('span');
     cuenta.className = 'cuenta-color';
-    fila.querySelector('.col-color').append(cuenta);
+    fila.querySelector('.col-color, header').append(cuenta);
   }
   cuenta.textContent = n;
 }
+
+/*
+ * Al cambiar el tamaño de la ventana se repinta sólo si cambia la forma.
+ *
+ * Girar el teléfono puede hacer que el cuadro pase a entrar, o al revés.
+ * Repintar en cada píxel del arrastre le sacaría el foco a quien está
+ * escribiendo una cantidad, así que se mira si la decisión cambió y recién
+ * ahí se rehace.
+ */
+let entrabaElCuadro = null;
+window.addEventListener('resize', () => {
+  if (!actual) return;
+  const ahora = entraElCuadro(actual.talles.filter(Boolean).length);
+  if (ahora === entrabaElCuadro) return;
+  entrabaElCuadro = ahora;
+  formaForzada = null;
+  pintar();
+});
 
 el('#panel-agregar').addEventListener('click', () => {
   if (!actual) return;
   const c = cuentaDeEntrada(actual.sku, borrador);
   if (c.unidades > 0) {
-    estado.carrito[actual.sku] = { curvas: borrador.curvas || 0, cantidades: borrador.cantidades };
+    estado.carrito[actual.sku] = {
+      curvas: borrador.curvas || 0,
+      curvasPorColor: borrador.curvasPorColor || {},
+      cantidades: borrador.cantidades,
+    };
   } else {
     delete estado.carrito[actual.sku];
   }

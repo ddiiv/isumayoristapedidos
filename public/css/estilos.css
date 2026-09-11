@@ -140,7 +140,16 @@ main { max-width: 1200px; margin: 0 auto; padding: 22px 20px 120px; }
 .telon.abierto { opacity: 1; pointer-events: auto; }
 
 .panel {
-  position: fixed; top: 0; right: 0; bottom: 0; width: min(480px, 100%);
+  /*
+   * El cajón se estira hasta donde entra el cuadro de talles.
+   *
+   * Con 480px fijos, un producto de nueve talles obligaba a arrastrar el
+   * cuadro para el costado incluso en una pantalla de 1440, donde sobraban
+   * novecientos píxeles al lado. `--ancho-cuadro` lo pone el panel al abrir
+   * cada producto, midiendo cuántas columnas tiene.
+   */
+  position: fixed; top: 0; right: 0; bottom: 0;
+  width: min(100%, max(480px, var(--ancho-cuadro, 480px)));
   background: var(--papel); z-index: 45; display: flex; flex-direction: column;
   transform: translateX(100%); transition: transform .22s ease;
   box-shadow: -8px 0 30px rgba(1, 49, 122, .16);
@@ -194,6 +203,31 @@ main { max-width: 1200px; margin: 0 auto; padding: 22px 20px 120px; }
 }
 .modos button[aria-pressed="true"] { background: var(--azul); color: #fff; }
 
+/* ── Buscador ─────────────────────────────────────────────────── */
+.buscador { background: var(--papel); padding: 10px 16px 0; }
+.campo-buscar {
+  display: flex; align-items: center; gap: 8px;
+  border: 1px solid var(--linea); border-radius: 10px;
+  background: #fff; padding: 0 10px; max-width: 620px; margin: 0 auto;
+}
+.campo-buscar:focus-within { border-color: var(--azul); box-shadow: 0 0 0 3px rgba(1, 49, 122, .12); }
+.campo-buscar .lupa { color: var(--tinta-suave); font-size: 19px; line-height: 1; flex: 0 0 auto; }
+.campo-buscar input {
+  flex: 1; border: 0; outline: 0; background: transparent;
+  font: inherit; font-size: 15px; height: 42px; min-width: 0; color: var(--tinta);
+}
+/* La cruz propia de Chrome duplicaría el botón de limpiar que ya está al lado */
+.campo-buscar input::-webkit-search-cancel-button { -webkit-appearance: none; }
+.campo-buscar .limpiar {
+  border: 0; background: transparent; color: var(--tinta-suave);
+  font-size: 14px; line-height: 1; padding: 6px; flex: 0 0 auto; border-radius: 6px;
+}
+.campo-buscar .limpiar:hover { background: var(--azul-claro); color: var(--azul); }
+.resultado-busqueda {
+  font-size: 12.5px; color: var(--tinta-suave); font-weight: 600;
+  margin: 0 0 4px; padding: 0 2px;
+}
+
 .matriz { display: grid; gap: 8px; }
 .fila-talle {
   display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 12px;
@@ -213,6 +247,15 @@ main { max-width: 1200px; margin: 0 auto; padding: 22px 20px 120px; }
   border: 1px solid var(--linea); border-left: 0; border-right: 0; -moz-appearance: textfield;
 }
 .contador input::-webkit-outer-spin-button, .contador input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+
+/* Una curva de un color solo: el cuadrito tiene que estar, es lo que se elige */
+.fila-curva-color .talle { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.fila-curva-color .cuadro {
+  width: 22px; height: 22px; border-radius: 5px; flex: 0 0 auto;
+  border: 1px solid rgba(0, 0, 0, .18);
+}
+.fila-curva-color .precio-unit { margin-left: 0; width: 100%; }
+.rotulo.separado-arriba { margin-top: 20px; }
 
 .aviso-curva {
   background: var(--verde-claro); border: 1px solid #bcdcc0; border-radius: 8px;
@@ -513,9 +556,72 @@ main { max-width: 1200px; margin: 0 auto; padding: 22px 20px 120px; }
  * queda fija al desplazar a lo ancho — con seis talles, sin eso se termina
  * cargando un número sin saber de qué color es.
  */
+/*
+ * Queda como red: con el cajón dimensionado, el cuadro entra siempre. Si
+ * algún día un producto tuviera más talles que los que caben en la pantalla
+ * más ancha, es preferible que se pueda arrastrar antes que se corte.
+ */
 .matriz-envoltorio { overflow-x: auto; margin: 0 -18px; padding: 0 18px; }
 
-table.matriz-talles { border-collapse: separate; border-spacing: 0; width: 100%; }
+/* ── El cuadro apilado: un bloque por color, para pantallas angostas ── */
+.matriz-apilada { display: grid; gap: 10px; }
+.bloque-color { border: 1px solid var(--linea); border-radius: 10px; overflow: hidden; }
+.bloque-color > header {
+  display: flex; align-items: center; gap: 8px; padding: 8px 11px;
+  background: var(--azul-claro); border-bottom: 1px solid var(--azul-borde);
+}
+.bloque-color > header .cuadro {
+  width: 24px; height: 24px; border-radius: 5px; flex: 0 0 auto;
+  border: 1px solid rgba(0, 0, 0, .18);
+}
+.bloque-color > header .nombre { flex: 1; font-size: 13px; font-weight: 700; color: var(--azul); }
+.bloque-color > header .cuenta-color {
+  background: var(--verde); color: #fff; border-radius: 20px;
+  font-size: 10.5px; font-weight: 700; padding: 2px 8px; flex: 0 0 auto;
+}
+/*
+ * `auto-fill` con un mínimo hace que todos los bloques queden con la misma
+ * cantidad de columnas, así los talles siguen alineados de un color al otro y
+ * se lee como el cuadro aunque esté envuelto.
+ */
+.bloque-color .celdas {
+  /*
+   * 54px de mínimo y no 62: con 62 entraban cuatro talles por fila en un
+   * teléfono y nueve talles se iban a tres filas por color. Con doce colores
+   * eso son seiscientos píxeles de más para bajar. A 54 entran cinco, que es
+   * el ancho más chico donde un número de tres dígitos sigue leyéndose.
+   */
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(54px, 1fr));
+  gap: 7px; padding: 10px;
+}
+.celda { display: grid; gap: 3px; margin: 0; }
+.celda .talle {
+  font-size: 11px; font-weight: 700; color: var(--azul);
+  text-align: center; letter-spacing: .3px;
+}
+.celda input {
+  width: 100%; height: 42px; text-align: center; font: inherit;
+  font-size: 15px; font-weight: 600; border: 1px solid var(--linea);
+  border-radius: 7px; background: #fff; -moz-appearance: textfield;
+}
+.celda input::-webkit-outer-spin-button,
+.celda input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.celda input:focus { outline: 2px solid var(--azul); outline-offset: -1px; }
+.celda .sin {
+  display: grid; place-items: center; height: 42px;
+  font-size: 10.5px; font-weight: 600; color: var(--tinta-suave);
+  background: #f1f3f6; border-radius: 7px;
+}
+
+/*
+ * `max-content` y no 100%: la tabla se dibuja del ancho que necesita y recién
+ * ahí se le puede preguntar cuánto mide para estirar el cajón. Con 100% se
+ * mediría a sí misma contra el cajón y las dos medidas se perseguirían.
+ */
+table.matriz-talles {
+  border-collapse: separate; border-spacing: 0;
+  width: max-content; min-width: 100%;
+}
 table.matriz-talles th, table.matriz-talles td {
   padding: 7px 6px; text-align: center; vertical-align: middle;
 }

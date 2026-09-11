@@ -107,3 +107,140 @@ input.medida {
   font-size: 13px; font-weight: 600; cursor: pointer; background: #fff;
 }
 .chip-check input { margin: 0; }
+
+/* ══ Seguimiento del pedido ═══════════════════════════════════════ */
+/*
+ * El estado se lee por color antes que por texto.
+ *
+ * En una tabla de doscientos pedidos, buscar los que faltan enviar leyendo
+ * palabra por palabra es lo que hace que se saltee uno. El ámbar del
+ * modificado no es de la marca a propósito: es el único estado que obliga a
+ * hacer algo —hay que avisarle al cliente— y tiene que saltar del azul.
+ */
+.estado-pastilla {
+  display: inline-block; font-size: 11px; font-weight: 700;
+  padding: 2px 9px; border-radius: 20px; white-space: nowrap;
+}
+.estado-pastilla.es-confirmado { background: var(--azul-claro); color: var(--azul); }
+.estado-pastilla.es-modificado { background: #fff3e0; color: #9a5b00; }
+.estado-pastilla.es-enviado    { background: #e7edf7; color: var(--azul); }
+.estado-pastilla.es-entregado  { background: var(--verde-claro); color: var(--verde); }
+.estado-pastilla.es-cancelado  { background: #fdeceb; color: var(--rojo); }
+.tarjeta h3 .estado-pastilla { margin-left: 6px; vertical-align: middle; }
+
+.linea-tiempo { list-style: none; margin: 4px 0 0; padding: 0; }
+.linea-tiempo > li {
+  position: relative; padding: 0 0 16px 24px;
+  border-left: 2px solid var(--linea); margin-left: 6px;
+}
+.linea-tiempo > li:last-child { border-left-color: transparent; padding-bottom: 0; }
+.linea-tiempo > li .hito {
+  position: absolute; left: -8px; top: 1px;
+  width: 14px; height: 14px; border-radius: 50%; background: #fff;
+  border: 2px solid var(--azul);
+}
+.linea-tiempo > li.paso-modificado .hito { border-color: #9a5b00; }
+.linea-tiempo > li.paso-entregado .hito { border-color: var(--verde); background: var(--verde); }
+.linea-tiempo > li.paso-cancelado .hito { border-color: var(--rojo); background: var(--rojo); }
+.titulo-paso { font-size: 13.5px; font-weight: 700; color: var(--tinta); }
+.nota-paso { margin: 5px 0 0; font-size: 12.5px; line-height: 1.5; }
+
+.cambios-caja {
+  margin-top: 7px; padding: 8px 11px; border-radius: 8px;
+  background: #fff8ee; border: 1px solid #f0d9b5;
+}
+.cambios-caja ul { list-style: none; margin: 0; padding: 0; }
+.cambios-caja li { font-size: 12px; line-height: 1.5; }
+.cambios-caja .antes { text-decoration: line-through; color: var(--tinta-suave); }
+.cambios-caja .despues { font-weight: 700; }
+.cambios-caja .quitado .despues { color: var(--rojo); }
+.cambios-caja .sumado .despues { color: var(--verde); }
+.cambios-caja p.chico { margin: 6px 0 0; }
+
+.original-caja {
+  margin-top: 12px; padding: 10px 12px;
+  border: 1px dashed var(--linea); border-radius: 8px; background: #fbfcfd;
+}
+.original-caja h4 { color: var(--tinta-suave); }
+.btn.peligro { color: var(--rojo); border-color: #f3c6c3; }
+
+/* ── El cuadro para rearmar el pedido ───────────────────────────── */
+.editor-grilla th { font-size: 11.5px; font-weight: 700; color: var(--tinta); }
+.editor-grilla tbody th { text-align: left; white-space: nowrap; padding: 6px 10px 6px 0; }
+.editor-grilla td { padding: 4px; text-align: center; }
+table.datos.editor-grilla input[type="number"] { width: 58px; text-align: center; }
+/* El cruce que el producto no tiene: gris y sin casillero, para que se vea que
+   no es que está en cero — es que no existe. */
+.editor-grilla td.sin-cruce { color: var(--linea); font-weight: 700; }
+
+/* ══ Estadísticas ═════════════════════════════════════════════════ */
+.tarjetas-numero {
+  display: grid; gap: 10px; margin: 14px 0 4px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+.tarjetas-numero > div {
+  background: var(--azul-claro); border-radius: 9px; padding: 11px 14px;
+}
+.tarjetas-numero span { font-size: 10px; font-weight: 700; letter-spacing: .4px; color: var(--tinta-suave); }
+.tarjetas-numero b { display: block; font-size: 21px; color: var(--azul); line-height: 1.2; margin: 2px 0; }
+.tarjetas-numero small { font-size: 11px; color: var(--tinta-suave); }
+.tarjetas-numero .verde { background: var(--verde-claro); }
+.tarjetas-numero .verde b { color: var(--verde); }
+.tarjetas-numero .ambar { background: #fff3e0; }
+.tarjetas-numero .ambar b { color: #9a5b00; }
+.tarjetas-numero .rojo { background: #fdeceb; }
+.tarjetas-numero .rojo b { color: var(--rojo); }
+
+/* Cuánto de lo facturado está cobrado, en una sola línea. */
+.barra-compuesta {
+  display: flex; height: 12px; border-radius: 20px; overflow: hidden;
+  background: #f1f3f6; margin: 14px 0 4px;
+}
+.barra-compuesta i { display: block; height: 100%; }
+.barra-compuesta .cobrado { background: var(--verde); }
+.barra-compuesta .pendiente { background: var(--azul-borde); }
+
+.barras { list-style: none; margin: 8px 0 0; padding: 0; }
+.barras li {
+  display: grid; grid-template-columns: minmax(96px, 1.5fr) 2.2fr auto;
+  gap: 9px; align-items: center; padding: 3px 0; font-size: 12px;
+}
+.barras .etq { color: var(--tinta); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.barras .pista { background: #f1f3f6; border-radius: 20px; height: 9px; overflow: hidden; }
+.barras .pista i { display: block; height: 100%; background: var(--azul); border-radius: 20px; }
+.barras .val { color: var(--tinta-suave); white-space: nowrap; font-size: 11.5px; }
+
+/*
+ * La curva del período, en columnas.
+ *
+ * Se desplaza a lo ancho en vez de apretar noventa barras en la pantalla: una
+ * columna de un píxel no se puede ni mirar ni tocar, y en el celular menos.
+ */
+.grafico { overflow-x: auto; padding-bottom: 4px; }
+.grafico .columnas {
+  list-style: none; margin: 12px 0 0; padding: 0;
+  display: flex; align-items: flex-end; gap: 4px; height: 150px;
+}
+.grafico .columnas li {
+  flex: 1 0 26px; display: flex; flex-direction: column;
+  justify-content: flex-end; height: 100%; min-width: 26px;
+}
+.grafico .col {
+  display: block; width: 100%; background: var(--azul);
+  border-radius: 4px 4px 0 0; min-height: 2px;
+}
+.grafico .pie {
+  font-size: 9.5px; color: var(--tinta-suave); text-align: center;
+  margin-top: 5px; height: 12px; white-space: nowrap;
+}
+
+.dos-columnas {
+  display: grid; gap: 4px 26px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+@media (max-width: 640px) {
+  .tarjetas-numero { grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); }
+  .tarjetas-numero b { font-size: 18px; }
+  .barras li { grid-template-columns: minmax(78px, 1.4fr) 1.6fr auto; font-size: 11.5px; }
+  table.datos.editor-grilla input[type="number"] { width: 50px; }
+}

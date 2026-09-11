@@ -27,26 +27,37 @@
  */
 const OFICIALES = [
   'Beish', 'Negro', 'Verde', 'Rojo', 'Blanco', 'Melang', 'Topo', 'Violeta',
-  'Chocolate', 'Bordo', 'Amarillo', 'Crema', 'Azul', 'Dulce de Leche', 'Uva',
+  'Chocolate', 'Bordo', 'Amarillo', 'Azul', 'Dulce de Leche', 'Uva',
   'Salmon', 'Olivo', 'Celeste', 'Aero', 'Naranja',
+  // Los tres que el negocio decidió conservar aparte al depurar la paleta.
+  'Francia', 'Rosa', 'Único',
 ];
 
-// canónico → [hex provisorio, ...alias]
+/*
+ * canónico → [hex, ...alias]
+ *
+ * Los alias son la parte que sostiene todo: la planilla de STOCKER vuelve a
+ * traer "Azul Marino", "Gris Topo" y "Crema" en cada exportación, porque en
+ * STOCKER siguen siendo valores distintos. Sin tenerlos acá, cada importación
+ * recrearía los dieciséis colores que se depuraron a mano y habría que volver
+ * a unirlos uno por uno.
+ */
 const CANON = {
-  // ── Los veinte oficiales
   'Negro':            ['#111111', 'negra', 'nero', 'nego'],
   'Blanco':           ['#FFFFFF', 'blanca'],
-  'Crema':            ['#F3EADA'],
-  'Beish':            ['#E4D5BE', 'beis', 'beige'],
-  'Topo':             ['#8C8075'],
-  'Melang':           ['#B5B5B5', 'melange'],
+  // Beish se queda con los cremas y los beiges: es el mismo tono cargado con
+  // tres nombres distintos según quién completó la planilla.
+  'Beish':            ['#E4D5BE', 'beis', 'beige', 'crema'],
+  'Topo':             ['#8C8075', 'gris topo'],
+  // Melang absorbe los grises: en el catálogo se venían usando como sinónimos.
+  'Melang':           ['#B5B5B5', 'melange', 'moline', 'moliné', 'gris', 'gri', 'gris claro', 'gris perla', 'perla'],
   'Chocolate':        ['#4E342A', 'choco'],
-  'Dulce de Leche':   ['#C08A55'],
-  'Azul':             ['#2F5597'],
-  'Celeste':          ['#8FC1E3'],
+  'Dulce de Leche':   ['#C08A55', 'camel claro', 'tostado'],
+  'Azul':             ['#2F5597', 'azul marino', 'azul granito'],
+  'Celeste':          ['#8FC1E3', 'cielo'],
   'Aero':             ['#7B8FA8', 'aereo'],
-  'Verde':            ['#3F6B45'],
-  'Olivo':            ['#6E6B3C'],
+  'Verde':            ['#3F6B45', 'verde granito'],
+  'Olivo':            ['#6E6B3C', 'verde militar'],
   'Violeta':          ['#6B4E9B'],
   'Uva':              ['#4A2B4E'],
   'Bordo':            ['#6E1F2C', 'bordó'],
@@ -54,31 +65,8 @@ const CANON = {
   'Salmon':           ['#E9A08B', 'salmón'],
   'Naranja':          ['#D9772F'],
   'Amarillo':         ['#E8C547', 'amarilla'],
-
-  /*
-   * ── Los que existen en el catálogo pero NO están en la lista de veinte.
-   *
-   * No se unen solos a ninguno de los oficiales: "Azul Marino" no es "Azul" y
-   * "Gris Topo" no es "Topo". Unirlos por parecido sería decidir por el negocio
-   * qué color le está mandando al cliente. Quedan marcados en el panel como
-   * fuera de la lista, para que se decidan ahí a la vista.
-   */
-  'Perla':            ['#EDE7DC'],
-  'Gris':             ['#9A9A9A', 'gri'],
-  'Gris Claro':       ['#C4C4C4'],
-  'Gris Perla':       ['#D6D3CD'],
-  'Gris Topo':        ['#7D766D'],
-  'Moliné':           ['#A8A29B', 'moline'],
-  'Camel Claro':      ['#C9A277'],
-  'Tostado':          ['#A9743F'],
-  'Habano':           ['#8B6A4F'],
-  'Azul Marino':      ['#1B2A4A'],
-  'Azul Granito':     ['#42556B'],
-  'Cielo':            ['#A9CFE8'],
+  // Se conservan aparte por decisión del negocio.
   'Francia':          ['#3A5FA8'],
-  'Verde Militar':    ['#4A5240'],
-  'Verde Granito':    ['#6B7A63'],
-  'Sage':             ['#A8B5A3'],
   'Rosa':             ['#E6A8BE'],
   'Único':            ['#D8D8D8', 'unico'],
 };

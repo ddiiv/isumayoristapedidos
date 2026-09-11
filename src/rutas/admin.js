@@ -3,11 +3,14 @@ const path = require('node:path');
 const fs = require('node:fs');
 const express = require('express');
 const multer = require('multer');
-const { db, FOTOS_DIR, ordenDeTalle } = require('../db');
+const {
+  db, FOTOS_DIR, ordenDeTalle,
+  ESTADOS, normalizarEstado, puedePasar, registrarEstado, historialDePedido,
+} = require('../db');
 const { importarPlanilla } = require('../excel');
 const { ordenarCatalogo } = require('../normalizar');
 const paleta = require('../colores');
-const { leerPedido } = require('../pedidos');
+const { leerPedido, armarPedido } = require('../pedidos');
 const auth = require('../auth');
 
 const r = express.Router();
@@ -31,6 +34,20 @@ r.use(auth.exigirAdmin);
 const subirPlanilla = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 15 * 1024 * 1024 },
+  /*
+   * Sólo .xlsx, y se mira antes de cargarlo en memoria.
+   *
+   * Sin esto se aceptaba cualquier archivo de hasta quince megas y recién
+   * exceljs, al no poder abrirlo, avisaba que no era una planilla: para ese
+   * momento ya estaba entero en la memoria del proceso. Es una ruta del
+   * administrador, así que no es una puerta abierta, pero un archivo
+   * equivocado —un PDF, un .zip de fotos— no tiene por qué llegar tan lejos.
+   * La prueba de que es una planilla de verdad la sigue haciendo exceljs.
+   */
+  fileFilter: (req, file, listo) => {
+    if (/\.xlsx$/i.test(file.originalname || '')) return listo(null, true);
+    listo(Object.assign(new Error('Tiene que ser el .xlsx que exporta STOCKER.'), { status: 400 }));
+  },
 });
 
 r.post('/importar', subirPlanilla.single('planilla'), async (req, res, next) => {
@@ -496,7 +513,7 @@ r.get('/colores', (req, res) => {
     SELECT c.*, (SELECT COUNT(*) FROM variantes v WHERE v.color_id = c.id) AS variantes
     FROM colores c ORDER BY c.provisorio DESC, variantes DESC, c.nombre`).all();
   /*
-   * Se marca cuáles están fuera de los veinte oficiales.
+   * Se marca cuáles están fuera de la lista oficial.
    *
    * No se unen solos: "Azul Marino" no es "Azul" y "Gris Topo" no es "Topo".
    * Unirlos por parecido sería decidir por el negocio qué color le llega al
@@ -671,7 +688,17 @@ r.get('/pedidos', (req, res) => {
   // Hasta el FINAL del día pedido: con `<= '2026-03-15'` no entra ningún
   // pedido de ese día, porque todos tienen hora después de medianoche.
   if (req.query.hasta) { condiciones.push('creado_en <= ?'); params.push(`${String(req.query.hasta)}T23:59:59.999Z`); }
-  if (req.query.estado) { condiciones.push('estado = ?'); params.push(String(req.query.estado)); }
+  if (req.query.estado) {
+    /*
+     * Filtrar por "confirmado" tiene que traer también los pedidos viejos, que
+     * en la base dicen 'nuevo' o 'preparando'. Sin esto, el filtro más usado
+     * del panel devuelve vacío sobre datos que están ahí.
+     */
+    const pedido = normalizarEstado(req.query.estado);
+    const equivalentes = pedido === 'confirmado' ? ['confirmado', 'nuevo', 'preparando'] : [pedido];
+    condiciones.push(`estado IN (${equivalentes.map(() => '?').join(',')})`);
+    params.push(...equivalentes);
+  }
   if (req.query.clienteId) { condiciones.push('cliente_id = ?'); params.push(Number(req.query.clienteId)); }
   if (req.query.buscar) {
     // Busca en el número y en los datos del cliente, que es como se acuerda
@@ -685,7 +712,7 @@ r.get('/pedidos', (req, res) => {
 
   const filas = db.prepare(`
     SELECT id, numero, cliente, items, total, unidades, estado, creado_en,
-           aviso_mail, aviso_whatsapp, cliente_id
+           aviso_mail, aviso_whatsapp, cliente_id, original, ajuste, actualizado_en
     FROM pedidos WHERE ${donde} ORDER BY id DESC LIMIT ${limite}`).all(...params);
 
   const totales = db.prepare(`
@@ -698,24 +725,575 @@ r.get('/pedidos', (req, res) => {
       ...f,
       cliente: JSON.parse(f.cliente),
       items: JSON.parse(f.items),
+      estado: normalizarEstado(f.estado),
+      ajuste: f.ajuste ? JSON.parse(f.ajuste) : null,
+      original: f.original ? JSON.parse(f.original) : null,
+      historial: historialDePedido(f),
     })),
     totales,
   });
 });
 
+/** El pedido con todo lo que hace falta para seguirlo: por dónde pasó y qué cambió. */
 r.get('/pedidos/:numero', (req, res) => {
   const pedido = leerPedido(req.params.numero);
   if (!pedido) return res.status(404).json({ message: 'No existe ese pedido.' });
-  res.json({ pedido });
+  res.json({ pedido: conSeguimiento(pedido) });
 });
 
-r.put('/pedidos/:numero', (req, res) => {
-  const estados = ['nuevo', 'preparando', 'enviado', 'cancelado'];
-  const estado = String(req.body?.estado || '');
-  if (!estados.includes(estado)) return res.status(400).json({ message: 'Ese estado no existe.' });
-  const info = db.prepare('UPDATE pedidos SET estado = ? WHERE numero = ?').run(estado, req.params.numero);
-  if (!info.changes) return res.status(404).json({ message: 'No existe ese pedido.' });
-  res.json({ ok: true });
+/*
+ * PUT /api/admin/pedidos/:numero/estado — mover el pedido.
+ *
+ * El paso se valida acá y no sólo escondiendo el botón: la pantalla decide qué
+ * es cómodo, el servidor decide qué es posible. Un pedido entregado que vuelve
+ * a "confirmado" desde una consola abierta deja el historial mintiendo, y el
+ * historial es lo único que queda cuando hay que discutir un reclamo.
+ */
+r.put('/pedidos/:numero/estado', (req, res) => {
+  const fila = db.prepare('SELECT * FROM pedidos WHERE numero = ?').get(req.params.numero);
+  if (!fila) return res.status(404).json({ message: 'No existe ese pedido.' });
+
+  const destino = String(req.body?.estado || '').trim().toLowerCase();
+  if (!ESTADOS[destino]) return res.status(400).json({ message: 'Ese estado no existe.' });
+
+  const actual = normalizarEstado(fila.estado);
+  if (destino === actual) return res.status(409).json({ message: `El pedido ya está ${ESTADOS[actual].etiqueta.toLowerCase()}.` });
+  if (destino === 'modificado') {
+    return res.status(409).json({
+      message: 'A "modificado" se llega editando los artículos del pedido, no eligiéndolo de la lista.',
+    });
+  }
+  if (!puedePasar(actual, destino)) {
+    return res.status(409).json({
+      message: `Un pedido ${ESTADOS[actual].etiqueta.toLowerCase()} no puede pasar a ${ESTADOS[destino].etiqueta.toLowerCase()}.`,
+    });
+  }
+
+  registrarEstado(fila.id, destino, { nota: limpiarNota(req.body?.nota) });
+  res.json({ pedido: conSeguimiento(leerPedido(fila.numero)) });
 });
+
+/*
+ * GET /api/admin/pedidos/:numero/editor — la grilla para rearmar el pedido.
+ *
+ * Lo guardado dice "Negro, L: 4"; para volver a valorizarlo hace falta el SKU
+ * de ese cruce, que es lo único que el servidor acepta como entrada. La
+ * traducción de nombre a SKU se hace acá, con la base al lado, y no en el
+ * navegador adivinando.
+ */
+r.get('/pedidos/:numero/editor', (req, res) => {
+  const pedido = leerPedido(req.params.numero);
+  if (!pedido) return res.status(404).json({ message: 'No existe ese pedido.' });
+
+  const pedidos = new Map();   // skuAgrupador -> Map("color|talle" -> cantidad)
+  for (const it of pedido.items) {
+    if (!pedidos.has(it.skuAgrupador)) pedidos.set(it.skuAgrupador, new Map());
+    const cruces = pedidos.get(it.skuAgrupador);
+    for (const d of it.detalle) {
+      for (const t of d.talles) cruces.set(`${d.color || ''}|${t.talle}`, t.cantidad);
+    }
+  }
+
+  const lineas = [];
+  for (const [sku, cruces] of pedidos) {
+    const grilla = grillaDeProducto(sku);
+    if (!grilla) {
+      // El producto se borró del catálogo después del pedido: se muestra lo
+      // pedido para poder sacarlo, y nada más — no hay grilla que ofrecer.
+      lineas.push({
+        skuAgrupador: sku, titulo: sku, categoria: '', combinaciones: [],
+        huerfanos: [...cruces].map(([k, cantidad]) => ({ color: k.split('|')[0], talle: k.split('|')[1], cantidad })),
+      });
+      continue;
+    }
+    const vistos = new Set();
+    grilla.combinaciones = grilla.combinaciones.map((c) => {
+      const clave = `${c.color}|${c.talle}`;
+      vistos.add(clave);
+      return { ...c, cantidad: cruces.get(clave) || 0 };
+    });
+    grilla.huerfanos = [...cruces]
+      .filter(([k]) => !vistos.has(k))
+      .map(([k, cantidad]) => ({ color: k.split('|')[0], talle: k.split('|')[1], cantidad }));
+    lineas.push(grilla);
+  }
+
+  res.json({
+    numero: pedido.numero,
+    estado: normalizarEstado(pedido.estado),
+    ajuste: pedido.ajuste ? JSON.parse(pedido.ajuste) : null,
+    lineas,
+  });
+});
+
+/** La grilla de un producto suelto, para sumarlo a un pedido que se está rearmando. */
+r.get('/grilla/:sku', (req, res) => {
+  const grilla = grillaDeProducto(req.params.sku);
+  if (!grilla) return res.status(404).json({ message: 'No existe ese producto.' });
+  grilla.combinaciones = grilla.combinaciones.map((c) => ({ ...c, cantidad: 0 }));
+  res.json({ linea: grilla });
+});
+
+/*
+ * PUT /api/admin/pedidos/:numero/items — el pedido se rearma y queda "modificado".
+ *
+ * Es el caso que pidió el dueño: no hay todo para enviar, se arreglan otros
+ * artículos y otro precio. Tres cosas que no se negocian acá:
+ *
+ *  · el total lo calcula el servidor sumando los ítems que él mismo valorizó.
+ *    Lo que llega del navegador son SKU y cantidades — nunca importes. Es la
+ *    misma regla del pedido original y por el mismo motivo;
+ *  · el descuento o recargo acordado entra como instrucción ("-10 %", "-35000"),
+ *    no como resultado: la cuenta la hace el servidor y queda escrita por qué
+ *    el total no es la suma;
+ *  · lo que el cliente confirmó se copia entero antes de tocar nada. Sin eso,
+ *    a la semana no hay forma de mostrarle qué pidió él y qué se despachó.
+ */
+r.put('/pedidos/:numero/items', (req, res) => {
+  const fila = db.prepare('SELECT * FROM pedidos WHERE numero = ?').get(req.params.numero);
+  if (!fila) return res.status(404).json({ message: 'No existe ese pedido.' });
+
+  const actual = normalizarEstado(fila.estado);
+  if (actual !== 'confirmado' && actual !== 'modificado') {
+    return res.status(409).json({
+      message: `Un pedido ${ESTADOS[actual].etiqueta.toLowerCase()} ya no se edita. Lo que salió del depósito no cambia.`,
+    });
+  }
+
+  const { items, total: base, unidades, errores } = armarPedido(req.body?.carrito);
+  if (!items.length) {
+    return res.status(400).json({
+      message: 'Un pedido modificado no puede quedar vacío. Si no va a salir, cancelalo.', errores,
+    });
+  }
+
+  let calculado;
+  try { calculado = aplicarAjuste(base, req.body?.ajuste); } catch (e) {
+    return res.status(400).json({ message: e.message });
+  }
+
+  const antes = { items: JSON.parse(fila.items), total: fila.total, unidades: fila.unidades };
+  const guardar = db.transaction(() => {
+    if (!fila.original) {
+      db.prepare('UPDATE pedidos SET original = ? WHERE id = ?')
+        .run(JSON.stringify({ ...antes, fecha: fila.creado_en }), fila.id);
+    }
+    db.prepare('UPDATE pedidos SET items = ?, total = ?, unidades = ?, ajuste = ? WHERE id = ?')
+      .run(JSON.stringify(items), calculado.total, unidades, calculado.ajuste ? JSON.stringify(calculado.ajuste) : null, fila.id);
+    registrarEstado(fila.id, 'modificado', {
+      nota: limpiarNota(req.body?.nota),
+      cambios: {
+        ...compararItems(antes.items, items),
+        totalAntes: antes.total, totalDespues: calculado.total,
+        unidadesAntes: antes.unidades, unidadesDespues: unidades,
+        base: calculado.base, ajuste: calculado.ajuste,
+      },
+    });
+  });
+  guardar();
+
+  res.json({ pedido: conSeguimiento(leerPedido(fila.numero)), errores });
+});
+
+/*
+ * ══ Estadísticas ═══════════════════════════════════════════════════
+ *
+ * GET /api/admin/estadisticas?desde=&hasta=
+ *
+ * Lo que se mira para decidir qué producir y qué reponer, no un muro de
+ * números: cuánto entró y cuánto de eso ya se cobró, qué se vende, y dónde
+ * está pidiendo la gente algo que la grilla no tiene.
+ *
+ * Se calcula en JavaScript sobre los pedidos del período y no en SQL: el
+ * detalle vive como JSON adentro de la fila, y desarmarlo con json_each deja
+ * consultas que nadie vuelve a poder leer para un catálogo de este tamaño.
+ */
+r.get('/estadisticas', (req, res) => {
+  const { desde, hasta } = periodo(req.query);
+
+  const filas = db.prepare(`
+    SELECT id, numero, cliente, items, total, unidades, estado, creado_en, cliente_id
+    FROM pedidos WHERE creado_en >= ? AND creado_en <= ? ORDER BY creado_en`).all(desde, hasta);
+
+  const pedidos = filas.map((f) => ({
+    ...f,
+    cliente: JSON.parse(f.cliente),
+    items: JSON.parse(f.items),
+    estado: normalizarEstado(f.estado),
+  }));
+  const vivos = pedidos.filter((p) => p.estado !== 'cancelado');
+  const cancelados = pedidos.filter((p) => p.estado === 'cancelado');
+
+  const suma = (lista, campo) => lista.reduce((t, p) => t + (Number(p[campo]) || 0), 0);
+  const facturado = suma(vivos, 'total');
+  /*
+   * Cobrado = entregado.
+   *
+   * No hay estados de pago en el portal: lo que el sistema sabe con certeza es
+   * qué llegó a destino, y este negocio cobra contra entrega. Se lo llama por
+   * su nombre en la pantalla —"cobrado (entregados)"— para que nadie lo lea
+   * como una conciliación bancaria que acá no existe.
+   */
+  const cobrado = suma(vivos.filter((p) => p.estado === 'entregado'), 'total');
+
+  const porEstado = Object.keys(ESTADOS).map((estado) => {
+    const suyos = pedidos.filter((p) => p.estado === estado);
+    return { estado, pedidos: suyos.length, importe: suma(suyos, 'total'), unidades: suma(suyos, 'unidades') };
+  });
+
+  res.json({
+    periodo: { desde, hasta, dias: Math.max(1, Math.round((Date.parse(hasta) - Date.parse(desde)) / 86400000)) },
+    resumen: {
+      pedidos: vivos.length,
+      unidades: suma(vivos, 'unidades'),
+      facturado,
+      cobrado,
+      porCobrar: facturado - cobrado,
+      cancelados: cancelados.length,
+      importeCancelado: suma(cancelados, 'total'),
+      ticket: vivos.length ? Math.round(facturado / vivos.length) : 0,
+      unidadesPorPedido: vivos.length ? Math.round((suma(vivos, 'unidades') / vivos.length) * 10) / 10 : 0,
+      clientes: new Set(vivos.map((p) => p.cliente_id || p.cliente?.cuit || p.numero)).size,
+    },
+    porEstado,
+    evolucion: evolucion(vivos, desde, hasta),
+    ranking: ranking(vivos),
+    clientes: rankingClientes(vivos),
+    faltantes: faltantes(vivos, desde, hasta),
+  });
+});
+
+// ── Las cuentas de las estadísticas ───────────────────────────────
+function periodo(query) {
+  const hoy = new Date();
+  // Sin `hasta`, hasta este momento. Un fin de día en UTC se pasaría de largo
+  // o se quedaría corto según la hora, y eso mueve los totales sin motivo.
+  const hasta = String(query.hasta || '').trim()
+    ? `${String(query.hasta).slice(0, 10)}T23:59:59.999Z`
+    : hoy.toISOString();
+  const desde = String(query.desde || '').trim()
+    ? `${String(query.desde).slice(0, 10)}T00:00:00.000Z`
+    // Sin filtro, los últimos noventa días: alcanza para ver una temporada y no
+    // obliga a elegir fechas para empezar a mirar.
+    : new Date(hoy.getTime() - 90 * 86400000).toISOString().slice(0, 10) + 'T00:00:00.000Z';
+  return { desde, hasta };
+}
+
+/*
+ * La evolución se agrupa por día o por mes según lo que se pidió.
+ *
+ * Un año en barras diarias son trescientas sesenta y cinco rayitas de un
+ * píxel: la forma de la curva se pierde justo cuando el período es largo, que
+ * es cuando se la mira para ver una tendencia.
+ */
+function evolucion(pedidos, desde, hasta) {
+  const dias = (Date.parse(hasta) - Date.parse(desde)) / 86400000;
+  const porMes = dias > 92;
+  const cubos = new Map();
+
+  for (const p of pedidos) {
+    const clave = porMes ? p.creado_en.slice(0, 7) : p.creado_en.slice(0, 10);
+    if (!cubos.has(clave)) cubos.set(clave, { clave, pedidos: 0, unidades: 0, importe: 0 });
+    const c = cubos.get(clave);
+    c.pedidos += 1; c.unidades += p.unidades; c.importe += p.total;
+  }
+  return { porMes, puntos: [...cubos.values()].sort((a, b) => a.clave.localeCompare(b.clave)) };
+}
+
+/*
+ * Qué se vende, por producto, categoría, color y talle.
+ *
+ * En plata sólo lo que la plata puede repartirse bien: el ítem guarda su
+ * subtotal, así que producto y categoría salen exactos. Un color o un talle
+ * sueltos no tienen importe propio —dentro de un ítem conviven varios precios—
+ * y se cuentan en unidades, que además es lo que se necesita para decidir qué
+ * cortar.
+ */
+function ranking(pedidos) {
+  const productos = new Map();
+  const categorias = new Map();
+  const colores = new Map();
+  const talles = new Map();
+
+  const sumar = (mapa, clave, extra = {}) => {
+    if (!mapa.has(clave)) mapa.set(clave, { clave, unidades: 0, pedidos: 0, ...extra });
+    return mapa.get(clave);
+  };
+
+  for (const p of pedidos) {
+    const vistosColor = new Set();
+    const vistosTalle = new Set();
+    for (const it of p.items) {
+      const prod = sumar(productos, it.skuAgrupador, { titulo: it.titulo, categoria: it.categoria, importe: 0 });
+      prod.unidades += it.unidades; prod.importe += it.subtotal; prod.pedidos += 1;
+
+      const cat = sumar(categorias, it.categoria || 'Sin categoría', { importe: 0 });
+      cat.unidades += it.unidades; cat.importe += it.subtotal; cat.pedidos += 1;
+
+      for (const d of it.detalle) {
+        const unidadesColor = d.talles.reduce((t, x) => t + x.cantidad, 0);
+        const color = sumar(colores, d.color || 'Único');
+        color.unidades += unidadesColor;
+        if (!vistosColor.has(d.color)) { color.pedidos += 1; vistosColor.add(d.color); }
+
+        for (const t of d.talles) {
+          const talle = sumar(talles, t.talle || 'Único');
+          talle.unidades += t.cantidad;
+          if (!vistosTalle.has(t.talle)) { talle.pedidos += 1; vistosTalle.add(t.talle); }
+        }
+      }
+    }
+  }
+
+  const ordenar = (mapa, por = 'unidades') => [...mapa.values()].sort((a, b) => b[por] - a[por]);
+  return {
+    productos: ordenar(productos, 'importe').slice(0, 20),
+    categorias: ordenar(categorias, 'importe'),
+    colores: ordenar(colores).slice(0, 15),
+    talles: ordenar(talles).slice(0, 20),
+  };
+}
+
+function rankingClientes(pedidos) {
+  const mapa = new Map();
+  for (const p of pedidos) {
+    // Sin cuenta, el CUIT es lo que identifica al mismo comprador entre pedidos.
+    const clave = p.cliente_id ? `c${p.cliente_id}` : `x${p.cliente?.cuit || p.numero}`;
+    if (!mapa.has(clave)) {
+      mapa.set(clave, { clave, nombre: p.cliente?.nombre || '—', conCuenta: Boolean(p.cliente_id), pedidos: 0, unidades: 0, importe: 0 });
+    }
+    const c = mapa.get(clave);
+    c.pedidos += 1; c.unidades += p.unidades; c.importe += p.total;
+  }
+  return [...mapa.values()].sort((a, b) => b.importe - a.importe).slice(0, 12);
+}
+
+/*
+ * "Cuántos piden y no hay".
+ *
+ * El catálogo no lleva stock, así que "no hay" es el cruce de color y talle que
+ * el producto no tiene en la grilla. Se contesta con dos cosas distintas y se
+ * dicen por separado, porque valen distinto:
+ *
+ *  · los intentos registrados: alguien tocó ese cruce y no había casillero.
+ *    Es el dato real, y sólo existe desde que la tienda empezó a avisarlo;
+ *  · los huecos con demanda al lado: el producto no tiene Negro en L, pero se
+ *    pidieron 40 unidades de Negro en otros talles y 30 de L en otros colores.
+ *    No prueba que alguien lo haya querido; señala dónde mirar, y se calcula
+ *    con lo que ya está guardado desde el primer día.
+ */
+function faltantes(pedidos, desde, hasta) {
+  const registrados = db.prepare(`
+    SELECT p.sku_agrupador AS sku, p.titulo, f.color, f.talle, COUNT(*) AS intentos
+    FROM faltantes f JOIN productos p ON p.id = f.producto_id
+    WHERE f.fecha >= ? AND f.fecha <= ?
+    GROUP BY f.producto_id, f.color, f.talle
+    ORDER BY intentos DESC LIMIT 25`).all(desde, hasta);
+
+  // Lo pedido en el período, por producto y cruce, para medir los vecinos.
+  const demanda = new Map();
+  for (const p of pedidos) {
+    for (const it of p.items) {
+      if (!demanda.has(it.skuAgrupador)) demanda.set(it.skuAgrupador, { colores: new Map(), talles: new Map() });
+      const d = demanda.get(it.skuAgrupador);
+      for (const linea of it.detalle) {
+        const n = linea.talles.reduce((t, x) => t + x.cantidad, 0);
+        d.colores.set(linea.color, (d.colores.get(linea.color) || 0) + n);
+        for (const t of linea.talles) d.talles.set(t.talle, (d.talles.get(t.talle) || 0) + t.cantidad);
+      }
+    }
+  }
+
+  const grilla = db.prepare(`
+    SELECT p.sku_agrupador AS sku, p.titulo,
+           COALESCE(c.nombre, v.color) AS color,
+           COALESCE(t.nombre, v.talle) AS talle,
+           COALESCE(t.orden, v.orden_talle) AS orden_talle
+    FROM variantes v
+    JOIN productos p ON p.id = v.producto_id
+    LEFT JOIN colores c ON c.id = v.color_id
+    LEFT JOIN talles  t ON t.id = v.talle_id
+    WHERE p.visible = 1`).all();
+
+  const porProducto = new Map();
+  for (const v of grilla) {
+    if (!porProducto.has(v.sku)) {
+      porProducto.set(v.sku, { sku: v.sku, titulo: v.titulo, colores: new Set(), talles: new Map(), cruces: new Set() });
+    }
+    const p = porProducto.get(v.sku);
+    p.colores.add(v.color);
+    p.talles.set(v.talle, v.orden_talle);
+    p.cruces.add(`${v.color}|${v.talle}`);
+  }
+
+  let crucesPosibles = 0;
+  let crucesQueFaltan = 0;
+  const conHuecos = [];
+
+  for (const p of porProducto.values()) {
+    const talles = [...p.talles.entries()].sort((a, b) => a[1] - b[1]).map(([t]) => t);
+    const d = demanda.get(p.sku) || { colores: new Map(), talles: new Map() };
+    const huecos = [];
+
+    for (const color of p.colores) {
+      for (const talle of talles) {
+        crucesPosibles += 1;
+        if (p.cruces.has(`${color}|${talle}`)) continue;
+        crucesQueFaltan += 1;
+        const vecina = (d.colores.get(color) || 0) + (d.talles.get(talle) || 0);
+        huecos.push({ color, talle, vecina });
+      }
+    }
+    if (!huecos.length) continue;
+    huecos.sort((a, b) => b.vecina - a.vecina);
+    conHuecos.push({
+      sku: p.sku,
+      titulo: p.titulo,
+      cruces: p.colores.size * talles.length,
+      faltan: huecos.length,
+      // Cuánto se pidió de los vecinos de TODOS sus huecos: lo que ordena la lista.
+      vecina: huecos.reduce((t, h) => t + h.vecina, 0),
+      huecos: huecos.slice(0, 8),
+    });
+  }
+
+  conHuecos.sort((a, b) => b.vecina - a.vecina || b.faltan - a.faltan);
+  return {
+    registrados,
+    hayRegistro: registrados.length > 0,
+    crucesPosibles,
+    crucesQueFaltan,
+    productosConHuecos: conHuecos.length,
+    productos: conHuecos.slice(0, 12),
+  };
+}
+
+// ── Piezas compartidas del seguimiento ────────────────────────────
+const limpiarNota = (v) => (String(v ?? '').trim().slice(0, 400) || null);
+
+/** El pedido con su línea de tiempo y lo que se le cambió. */
+function conSeguimiento(pedido) {
+  return {
+    ...pedido,
+    estado: normalizarEstado(pedido.estado),
+    ajuste: pedido.ajuste ? JSON.parse(pedido.ajuste) : null,
+    original: pedido.original ? JSON.parse(pedido.original) : null,
+    historial: historialDePedido(pedido),
+  };
+}
+
+/**
+ * El descuento o el recargo, aplicado por el servidor.
+ *
+ * Llega la instrucción —"-10 %", "-35000"— y no el resultado. Aceptar un total
+ * del navegador es la única forma de que el pedido termine valorizado en lo que
+ * alguien quiso, y esa puerta no se abre ni para el administrador.
+ */
+function aplicarAjuste(base, ajuste) {
+  const redondo = Math.round(base);
+  if (!ajuste || !ajuste.tipo) return { base: redondo, total: redondo, ajuste: null };
+
+  const valor = Number(ajuste.valor);
+  if (!Number.isFinite(valor)) throw new Error('El descuento o recargo tiene que ser un número.');
+
+  let total;
+  if (ajuste.tipo === 'porcentaje') {
+    if (valor < -100 || valor > 100) throw new Error('El porcentaje va entre -100 y 100.');
+    total = Math.round(redondo * (1 + valor / 100));
+  } else if (ajuste.tipo === 'monto') {
+    total = Math.round(redondo + valor);
+  } else {
+    throw new Error('El ajuste es por porcentaje o por monto.');
+  }
+
+  if (total < 0) throw new Error('Con ese descuento el pedido queda en negativo.');
+  return {
+    base: redondo, total,
+    ajuste: { tipo: ajuste.tipo, valor, motivo: limpiarNota(ajuste.motivo), importe: total - redondo },
+  };
+}
+
+/** La grilla vigente de un producto: cada cruce con su SKU y su precio del catálogo. */
+function grillaDeProducto(sku) {
+  const p = db.prepare(`
+    SELECT p.id, p.sku_agrupador, p.titulo, p.precio, c.nombre AS categoria
+    FROM productos p LEFT JOIN categorias c ON c.id = p.categoria_id
+    WHERE p.sku_agrupador = ?`).get(String(sku));
+  if (!p) return null;
+
+  const combinaciones = db.prepare(`
+    SELECT v.sku, v.precio,
+           COALESCE(co.nombre, v.color) AS color,
+           COALESCE(t.nombre, v.talle)  AS talle,
+           COALESCE(t.orden, v.orden_talle) AS orden_talle,
+           COALESCE(co.orden, 0) AS orden_color
+    FROM variantes v
+    LEFT JOIN colores co ON co.id = v.color_id
+    LEFT JOIN talles  t  ON t.id  = v.talle_id
+    WHERE v.producto_id = ?
+    ORDER BY orden_color, color, orden_talle`).all(p.id);
+
+  return {
+    skuAgrupador: p.sku_agrupador,
+    titulo: p.titulo,
+    categoria: p.categoria || 'Sin categoría',
+    /*
+     * Los colores y los talles ya ordenados, aparte de la lista de cruces.
+     *
+     * El cuadro se dibuja color por talle, y sacar las cabeceras de las
+     * combinaciones en el navegador obliga a reordenar los talles ahí —donde
+     * "10" va antes que "2" y XS después de XL—. El orden ya está resuelto en
+     * la base; se manda hecho.
+     */
+    colores: [...new Set(combinaciones.map((v) => v.color))],
+    talles: [...new Map(combinaciones.map((v) => [v.talle, v.orden_talle])).entries()]
+      .sort((a, b) => a[1] - b[1]).map(([t]) => t),
+    combinaciones: combinaciones.map((v) => ({
+      sku: v.sku, color: v.color, talle: v.talle, precio: v.precio ?? p.precio,
+    })),
+  };
+}
+
+/*
+ * Qué cambió, cruce por cruce.
+ *
+ * "Modificado" sin decir qué obliga a poner dos remitos uno al lado del otro y
+ * compararlos a ojo. Se guarda la diferencia por color y talle, que es como se
+ * explica: "no había negro en L, van cuatro azules".
+ */
+function compararItems(antes, despues) {
+  const aplanar = (items) => {
+    const m = new Map();
+    for (const it of items || []) {
+      for (const d of it.detalle || []) {
+        for (const t of d.talles || []) {
+          m.set(`${it.skuAgrupador}\u0000${d.color || ''}\u0000${t.talle}`, { titulo: it.titulo, color: d.color, talle: t.talle, cantidad: t.cantidad });
+        }
+      }
+    }
+    return m;
+  };
+
+  const a = aplanar(antes);
+  const b = aplanar(despues);
+  const lineas = [];
+  const linea = (v, antesN, despuesN) => ({ titulo: v.titulo, color: v.color, talle: v.talle, antes: antesN, despues: despuesN });
+
+  for (const [clave, v] of a) {
+    const nuevo = b.get(clave);
+    if (!nuevo) lineas.push(linea(v, v.cantidad, 0));
+    else if (nuevo.cantidad !== v.cantidad) lineas.push(linea(v, v.cantidad, nuevo.cantidad));
+  }
+  for (const [clave, v] of b) {
+    if (!a.has(clave)) lineas.push(linea(v, 0, v.cantidad));
+  }
+
+  return {
+    // Veinte líneas alcanzan para entender qué pasó; guardar el diff entero de
+    // un pedido de trescientos cruces engorda la fila sin que nadie lo lea.
+    lineas: lineas.slice(0, 20),
+    masLineas: Math.max(0, lineas.length - 20),
+  };
+}
 
 module.exports = { rutas: r };

@@ -25,6 +25,8 @@ const OPCIONALES = ['email', 'entreCalles'];
 
 const limpiar = (v) => String(v ?? '').trim();
 
+const TOPE_POR_RENGLON = 10_000;
+
 /*
  * El CUIT se valida de verdad, con su dígito verificador.
  *
@@ -84,7 +86,25 @@ function armarPedido(carrito = []) {
     SELECT p.*, c.nombre AS categoria
     FROM productos p LEFT JOIN categorias c ON c.id = p.categoria_id
     WHERE p.sku_agrupador = ?`);
-  const buscarVariantes = db.prepare('SELECT * FROM variantes WHERE producto_id = ?');
+  /*
+   * El color y el talle salen con el nombre que ve el cliente, no con el que
+   * trajo la planilla.
+   *
+   * En la base conviven veintinueve escrituras del mismo color —"Moline",
+   * "Gris", "Beis", "Crema"— que la pantalla muestra unificadas. Armando el
+   * pedido con el texto crudo, el cliente pedía "Melang" y al depósito le
+   * llegaba "Moline": el mismo pedido escrito de dos formas, y quien prepara
+   * el bulto tiene que adivinar si es el mismo color.
+   */
+  const buscarVariantes = db.prepare(`
+    SELECT v.*,
+           COALESCE(c.nombre, v.color) AS color,
+           COALESCE(t.nombre, v.talle) AS talle,
+           COALESCE(t.orden, v.orden_talle) AS orden_talle
+    FROM variantes v
+    LEFT JOIN colores c ON c.id = v.color_id
+    LEFT JOIN talles  t ON t.id = v.talle_id
+    WHERE v.producto_id = ?`);
 
   for (const entrada of Array.isArray(carrito) ? carrito : []) {
     const producto = buscarProducto.get(limpiar(entrada?.skuAgrupador));
@@ -103,9 +123,47 @@ function armarPedido(carrito = []) {
     const curvas = Math.max(0, Math.trunc(Number(entrada?.curvas) || 0));
     if (curvas > 0) for (const v of variantes) sumar(v.sku, curvas);
 
+    /*
+     * Curvas de un color solo.
+     *
+     * La curva entera trae una unidad de cada color, y para el que quiere
+     * reponer nada más que el negro eso lo obliga a llevarse los otros once.
+     * Acá se pide una unidad de cada talle, pero de un color elegido.
+     *
+     * Igual que la curva general: el navegador manda cuántas curvas y de qué
+     * color, y las cantidades las deduce el servidor mirando qué talles tiene
+     * ese color de verdad.
+     */
+    const curvasDeColorAplicadas = {};
+    const porColorPedido = entrada?.curvasPorColor;
+    if (porColorPedido && typeof porColorPedido === 'object') {
+      for (const [color, valor] of Object.entries(porColorPedido)) {
+        const n = Math.max(0, Math.trunc(Number(valor) || 0));
+        if (!n) continue;
+        const delColor = variantes.filter((v) => (v.color || '') === color);
+        if (!delColor.length) {
+          errores.push(`El color ${color} de "${producto.titulo}" ya no está.`);
+          continue;
+        }
+        for (const v of delColor) sumar(v.sku, n);
+        curvasDeColorAplicadas[color] = n;
+      }
+    }
+
     for (const [sku, valor] of Object.entries(entrada?.cantidades || {})) {
       const n = Math.max(0, Math.trunc(Number(valor) || 0));
       if (!n) continue;
+      /*
+       * Un techo por renglón.
+       *
+       * Diez mil unidades de un mismo talle y color no es un pedido mayorista,
+       * es un cero de más al tipear. Sin tope, el pedido se guarda valorizado
+       * en una cifra absurda y alguien tiene que darse cuenta a mano.
+       */
+      if (n > TOPE_POR_RENGLON) {
+        errores.push(`${n} unidades de un solo talle es demasiado. Revisá el número.`);
+        continue;
+      }
       if (!porSku.has(sku)) { errores.push(`Una talle/color de "${producto.titulo}" ya no existe.`); continue; }
       sumar(sku, n);
     }
@@ -141,6 +199,7 @@ function armarPedido(carrito = []) {
       categoria: producto.categoria || 'Sin categoría',
       precio: producto.precio,
       curvas,
+      curvasPorColor: curvasDeColorAplicadas,
       unidades: unidadesItem,
       subtotal,
       detalle,

@@ -14,7 +14,7 @@ const dialogo = el('#dialogo-cuenta');
 const cuerpo = el('#cuenta-cuerpo');
 const titulo = el('#cuenta-titulo');
 
-let vista = 'entrar';   // entrar | registro | cuenta | pedidos | password
+let vista = 'entrar';   // entrar | registro | cuenta | pedidos | seguimiento | password
 let errores = {};
 let mensaje = null;
 let ocupado = false;
@@ -162,7 +162,61 @@ function vistaPassword() {
     </form>`;
 }
 
+/*
+ * ── Mis pedidos, con el seguimiento adentro ──────────────────────
+ *
+ * Lo que el dueño pidió: que el cliente entre y vea en qué anda su pedido sin
+ * escribir preguntando. Un estado suelto contesta la mitad —"modificado" no
+ * dice qué cambió, y "enviado" no dice cuándo—, así que cada pedido muestra el
+ * camino recorrido y, adentro, la línea de tiempo con lo que pasó en cada paso.
+ */
 let misPedidos = null;
+let pedidoAbierto = null;
+
+const ETIQUETAS = {
+  confirmado: 'Confirmado', modificado: 'Modificado',
+  enviado: 'Enviado', entregado: 'Entregado', cancelado: 'Cancelado',
+};
+
+const cuando = (iso, conHora = false) => (iso
+  ? new Date(iso).toLocaleString('es-AR', conHora
+    ? { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }
+    : { day: '2-digit', month: '2-digit', year: 'numeric' })
+  : 'sin fecha registrada');
+
+/*
+ * El camino, con el paso "Modificado" sólo si de verdad lo hubo.
+ *
+ * Dibujarlo siempre le anuncia a todo el mundo que su pedido puede cambiar
+ * antes de que pase, que es preocupar sin motivo por una simetría de dibujo.
+ */
+function camino(p) {
+  if (p.estado === 'cancelado') {
+    return `<p class="seg-cortado">Este pedido está cancelado. Escribinos si lo querés rehacer.</p>`;
+  }
+  const pasos = ['confirmado'];
+  if (p.fueModificado || p.estado === 'modificado') pasos.push('modificado');
+  pasos.push('enviado', 'entregado');
+  const donde = Math.max(0, pasos.indexOf(p.estado));
+
+  return `<ol class="seg-camino" data-estado="${esc(p.estado)}">${pasos.map((paso, i) => {
+    const clases = [i <= donde ? 'hecho' : '', i === donde ? 'actual' : '', paso === 'modificado' ? 'aviso' : '']
+      .filter(Boolean).join(' ');
+    return `<li class="${clases}"><span class="punto"></span><span class="etq">${esc(ETIQUETAS[paso])}</span></li>`;
+  }).join('')}</ol>`;
+}
+
+const cabeceraDePedido = (p) => `
+  <div class="seg-cabeza">
+    <div>
+      <div class="numero">${esc(p.numero)}</div>
+      <div class="cuando">${cuando(p.creado_en)} · ${p.unidades} u.</div>
+    </div>
+    <div class="plata">
+      <b>${pesos(p.total)}</b>
+      <span class="seg-estado es-${esc(p.estado)}">${esc(ETIQUETAS[p.estado] || p.estado)}</span>
+    </div>
+  </div>`;
 
 function vistaPedidos() {
   if (!misPedidos) return '<p class="cargando">Buscando tus pedidos…</p>';
@@ -170,24 +224,110 @@ function vistaPedidos() {
     return `<div class="vacio"><h3>Todavía no hiciste pedidos</h3>
       <p>Cuando hagas el primero con la sesión abierta, va a aparecer acá.</p></div>`;
   }
-  return `<div class="envoltorio-tabla"><table class="datos">
-    <thead><tr><th>Pedido</th><th>U.</th><th>Total</th><th>Estado</th><th></th></tr></thead>
-    <tbody>${misPedidos.map((p) => `
-      <tr>
-        <td><b class="destacado">${esc(p.numero)}</b><br>
-          <span class="chico">
-            ${new Date(p.creado_en).toLocaleDateString('es-AR')}</span></td>
-        <td>${p.unidades}</td>
-        <td><b>${pesos(p.total)}</b></td>
-        <td><span class="pastilla ${p.estado === 'cancelado' ? 'no' : 'si'}">${esc(p.estado)}</span></td>
-        <td><a class="btn borde btn-mini mas-chico"
-               href="/api/pedidos/${encodeURIComponent(p.numero)}/pedido.pdf">PDF</a></td>
-      </tr>`).join('')}</tbody></table></div>`;
+
+  return misPedidos.map((p) => `
+    <article class="seg-pedido${p.estado === 'cancelado' ? ' es-cancelado' : ''}">
+      ${cabeceraDePedido(p)}
+      ${camino(p)}
+      ${p.fueModificado ? `<p class="seg-alerta">
+        <b>Este pedido se modificó.</b> Cambiaron artículos o el precio acordado.
+        Entrá al seguimiento para ver qué quedó.</p>` : ''}
+      <div class="seg-acciones">
+        <button class="btn borde btn-mini" data-seguir="${esc(p.numero)}">Ver seguimiento</button>
+        <a class="btn borde btn-mini mas-chico"
+           href="/api/pedidos/${encodeURIComponent(p.numero)}/pedido.pdf">Descargar PDF</a>
+      </div>
+    </article>`).join('');
+}
+
+/*
+ * Qué cambió, cruce por cruce.
+ *
+ * "Se modificó tu pedido" no sirve para nada si el cliente tiene que abrir dos
+ * PDF y compararlos a ojo. Acá está la diferencia escrita: qué había, qué va.
+ */
+function cambios(c) {
+  if (!c) return '';
+  const lineas = (c.lineas || []).map((l) => {
+    const clase = l.despues === 0 ? 'quitado' : (l.antes === 0 ? 'sumado' : '');
+    return `<li class="${clase}">${esc(l.titulo)} · ${esc(l.color || 'Único')} ${esc(l.talle)}:
+      <span class="antes">${l.antes}</span> → <span class="despues">${l.despues} u.</span></li>`;
+  }).join('');
+
+  const baja = c.totalDespues < c.totalAntes;
+  return `<div class="seg-cambios">
+    <h5>Qué cambió</h5>
+    ${lineas ? `<ul>${lineas}</ul>` : '<p class="resto">Cambió el precio acordado, no los artículos.</p>'}
+    ${c.masLineas ? `<p class="resto">y ${c.masLineas} cambio${c.masLineas === 1 ? '' : 's'} más</p>` : ''}
+    <div class="seg-plata">
+      <span class="${baja ? 'baja' : 'sube'}">Total: ${pesos(c.totalAntes)} → <b>${pesos(c.totalDespues)}</b></span>
+      <span>${c.unidadesAntes} → <b>${c.unidadesDespues} u.</b></span>
+      ${c.ajuste ? `<span>${c.ajuste.tipo === 'porcentaje'
+        ? `${c.ajuste.valor > 0 ? '+' : ''}${c.ajuste.valor} % acordado`
+        : `${pesos(c.ajuste.valor)} acordado`}${c.ajuste.motivo ? ` — ${esc(c.ajuste.motivo)}` : ''}</span>` : ''}
+    </div>
+  </div>`;
+}
+
+const detalleDeItems = (items) => items.map((it) => `
+  <div class="resumen-item">
+    <div class="encabezado">
+      <div><h4>${esc(it.titulo)}</h4><div class="categoria">${esc(it.categoria)} · ${it.unidades} u.</div></div>
+      <div class="importe">${pesos(it.subtotal)}</div>
+    </div>
+    <div class="lineas">${it.detalle.map((d) => `
+      <div><b>${esc(d.color || 'Único')}</b> · ${d.talles.map((t) => `${esc(t.talle)}×${t.cantidad}`).join('  ')}</div>`).join('')}</div>
+  </div>`).join('');
+
+function vistaSeguimiento() {
+  if (!pedidoAbierto) return '<p class="cargando">Buscando tu pedido…</p>';
+  const p = pedidoAbierto;
+
+  return `
+    <article class="seg-pedido${p.estado === 'cancelado' ? ' es-cancelado' : ''}">
+      ${cabeceraDePedido(p)}
+      ${camino({ ...p, fueModificado: Boolean(p.original) })}
+    </article>
+
+    <div class="seg-bloque">
+      <h4>Qué pasó con tu pedido</h4>
+      <ol class="seg-linea">${p.historial.map((h) => `
+        <li class="paso-${esc(h.estado)}">
+          <span class="hito"></span>
+          <div class="titulo">${esc(ETIQUETAS[h.estado] || h.estado)}</div>
+          <div class="cuando">${cuando(h.fecha, true)}</div>
+          ${h.nota ? `<p class="nota-paso">${esc(h.nota)}</p>` : ''}
+          ${cambios(h.cambios)}
+        </li>`).join('')}</ol>
+    </div>
+
+    <div class="seg-bloque">
+      <h4>${p.original ? 'Lo que va a salir' : 'Lo que pediste'}</h4>
+      ${detalleDeItems(p.items)}
+      <div class="seg-total">
+        <div>
+          <div class="u">${p.unidades} unidades</div>
+          ${p.ajuste ? `<div class="ajuste">${p.ajuste.tipo === 'porcentaje'
+            ? `${p.ajuste.valor > 0 ? '+' : ''}${p.ajuste.valor} % acordado`
+            : `${pesos(p.ajuste.valor)} acordado`}</div>` : ''}
+        </div>
+        <div class="n">${pesos(p.total)}</div>
+      </div>
+    </div>
+
+    ${p.original ? `
+      <div class="seg-original">
+        <h5>Lo que habías pedido el ${cuando(p.original.fecha || p.creado_en)}</h5>
+        <div class="lineas">${p.original.items.map((it) => `
+          <div>${esc(it.titulo)} · ${it.unidades} u. · ${pesos(it.subtotal)}</div>`).join('')}
+          <div><b>Total original: ${pesos(p.original.total)}</b> · ${p.original.unidades} u.</div>
+        </div>
+      </div>` : ''}`;
 }
 
 const TITULOS = {
   entrar: 'Entrar', registro: 'Crear cuenta', cuenta: 'Mi cuenta',
-  password: 'Cambiar la contraseña', pedidos: 'Mis pedidos',
+  password: 'Cambiar la contraseña', pedidos: 'Mis pedidos', seguimiento: 'Seguimiento del pedido',
 };
 
 const BOTONES = {
@@ -196,13 +336,14 @@ const BOTONES = {
   cuenta: '<button class="btn" data-hacer="guardar">Guardar cambios</button>',
   password: '<button class="btn texto" data-vista="cuenta">Volver</button><button class="btn" data-hacer="password">Cambiar</button>',
   pedidos: '<button class="btn azul" data-vista="cuenta">Volver</button>',
+  seguimiento: '<button class="btn azul" data-vista="pedidos">Volver a mis pedidos</button>',
 };
 
 function pintar() {
   titulo.textContent = TITULOS[vista];
   const vistas = {
     entrar: vistaEntrar, registro: vistaRegistro, cuenta: vistaCuenta,
-    password: vistaPassword, pedidos: vistaPedidos,
+    password: vistaPassword, pedidos: vistaPedidos, seguimiento: vistaSeguimiento,
   };
   cuerpo.innerHTML = (mensaje ? `<p class="mensaje ${mensaje.tipo}">${esc(mensaje.texto)}</p>` : '')
     + vistas[vista]();
@@ -274,6 +415,24 @@ async function hacer(accion) {
   }
 }
 
+/*
+ * Al volver de una página congelada se vuelve a preguntar quién sos.
+ *
+ * El navegador guarda la página entera al salir de ella y el botón Atrás la
+ * devuelve pintada, sin ejecutar nada. Acá no se recarga —eso perdería el
+ * pedido a medio cargar— pero sí se cierra el panel de la cuenta, que es lo
+ * que tiene datos personales, y se le pregunta al servidor si la sesión sigue
+ * abierta. Si no, la barra vuelve sola a decir «Entrar».
+ */
+window.addEventListener('pagehide', () => { cerrarCuenta(); });
+window.addEventListener('pageshow', (e) => {
+  if (!e.persisted) return;
+  const antes = sesion.rol;
+  cargarSesion().then(() => {
+    if (sesion.rol !== antes) document.dispatchEvent(new CustomEvent('sesion-cambio'));
+  });
+});
+
 // ── Eventos ───────────────────────────────────────────────────────
 el('#estado-sesion').addEventListener('click', async (e) => {
   const b = e.target.closest('[data-accion]');
@@ -296,9 +455,32 @@ dialogo.addEventListener('click', async (e) => {
     vista = cambio.dataset.vista;
     errores = {}; mensaje = null;
     if (vista === 'pedidos') {
+      /*
+       * Al volver de un seguimiento se vuelven a pedir los pedidos.
+       *
+       * Es la pantalla donde alguien se queda mirando si le cambió el estado, y
+       * una lista servida de memoria le muestra lo mismo aunque el pedido ya
+       * haya salido del depósito.
+       */
       misPedidos = null;
       pintar();
       try { misPedidos = (await api('/api/cuenta/pedidos')).pedidos; } catch { misPedidos = []; }
+    }
+    pintar();
+    return;
+  }
+
+  const seguir = e.target.closest('[data-seguir]');
+  if (seguir) {
+    vista = 'seguimiento';
+    pedidoAbierto = null;
+    errores = {}; mensaje = null;
+    pintar();
+    try {
+      pedidoAbierto = (await api(`/api/cuenta/pedidos/${encodeURIComponent(seguir.dataset.seguir)}`)).pedido;
+    } catch (err) {
+      vista = 'pedidos';
+      mensaje = { tipo: 'error', texto: err.message };
     }
     pintar();
     return;

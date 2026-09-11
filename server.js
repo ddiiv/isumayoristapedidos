@@ -1,27 +1,6 @@
+require('./src/entorno').cargarEnv();
+
 const path = require('node:path');
-const fs = require('node:fs');
-
-/*
- * Lee el .env local si existe.
- *
- * Doce líneas en vez de una dependencia: en Railway las variables las pone la
- * plataforma y este archivo no existe, así que `dotenv` sería un paquete que
- * sólo corre en la máquina de quien desarrolla.
- */
-(() => {
-  const archivo = path.join(__dirname, '.env');
-  if (!fs.existsSync(archivo)) return;
-  for (const linea of fs.readFileSync(archivo, 'utf8').split('\n')) {
-    const limpia = linea.trim();
-    if (!limpia || limpia.startsWith('#')) continue;
-    const i = limpia.indexOf('=');
-    if (i < 1) continue;
-    const clave = limpia.slice(0, i).trim();
-    if (process.env[clave] !== undefined) continue;  // lo de afuera manda
-    process.env[clave] = limpia.slice(i + 1).trim().replace(/^["']|["']$/g, '');
-  }
-})();
-
 const express = require('express');
 const { FOTOS_DIR, DATA_DIR } = require('./src/db');
 const publicas = require('./src/rutas/publicas');
@@ -58,6 +37,20 @@ app.use((req, res, next) => {
    * `img-src` acepta `data:` por el favicon embebido y `blob:` por la vista
    * previa de una foto antes de subirla en el panel.
    */
+  /*
+   * Una página HTML no se guarda en ningún cache.
+   *
+   * El panel y la tienda pintan datos de quien está adentro. Sin esto el
+   * navegador guarda el documento y lo devuelve con el botón Atrás después de
+   * cerrar sesión —sin volver a pedirle nada al servidor—, así que en una
+   * computadora compartida el que se sienta después ve lo del anterior. Los
+   * .js y .css no llevan la cabecera: no tienen datos de nadie y cachearlos
+   * es lo que hace que la página abra rápido.
+   */
+  if (!req.path.startsWith('/fotos/') && !/\.[a-z0-9]{1,8}$/i.test(req.path) || req.path.endsWith('.html')) {
+    res.setHeader('Cache-Control', 'no-store, must-revalidate');
+  }
+
   res.setHeader('Content-Security-Policy', [
     "default-src 'none'",
     "script-src 'self'",
@@ -119,9 +112,23 @@ app.use((err, req, res, next) => {
   res.status(500).json({ message: 'Algo falló de este lado. Probá de nuevo.' });
 });
 
-const server = app.listen(PORT, '::', () => {
+/*
+ * Sin host: Node escucha en todas las interfaces, IPv6 e IPv4.
+ *
+ * Estaba fijo en '::'. Railway documenta que hay que escuchar en 0.0.0.0 con
+ * el PORT que inyecta, y en un contenedor sin IPv6 abrir '::' falla: la app no
+ * arranca y lo único que se ve desde afuera es "Application failed to
+ * respond". Sin host, Node usa '::' cuando hay IPv6 —que en Linux también
+ * atiende IPv4— y 0.0.0.0 cuando no. Anda en los dos casos.
+ */
+const server = app.listen(PORT, () => {
   console.log(`\n  ISUWAYA MAYORISTA`);
-  console.log(`  escuchando en http://localhost:${PORT}`);
+  /*
+   * El puerto se escribe en el log a propósito: si el dominio de Railway
+   * apunta a otro puerto que éste, el sitio contesta "Application failed to
+   * respond" con la app andando perfecto, y es lo primero que hay que mirar.
+   */
+  console.log(`  escuchando en el puerto ${PORT}${process.env.PORT ? '' : ' (PORT no vino del entorno)'}`);
   console.log(`  datos en ${DATA_DIR}`);
   console.log(`  panel ${process.env.ADMIN_PASSWORD ? 'configurado' : '✖ SIN ADMIN_PASSWORD — no va a abrir'}\n`);
 });

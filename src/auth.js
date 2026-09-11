@@ -1,5 +1,5 @@
 const crypto = require('node:crypto');
-const { db } = require('./db');
+const { db, leerConfig, guardarConfig } = require('./db');
 
 /*
  * Quién sos: una sola puerta para los dos.
@@ -18,11 +18,46 @@ const { db } = require('./db');
 const COOKIE = 'isuwaya_sesion';
 const DURACION_MS = 12 * 60 * 60 * 1000;
 
+/*
+ * El secreto de firma NO es la contraseña del administrador.
+ *
+ * Antes se derivaba de ella, y eso ataba tres cosas que no tienen por qué
+ * estar atadas: quien conociera la contraseña podía además falsificar la
+ * cookie de cualquier cliente y los enlaces de descarga de cualquier pedido; y
+ * al revés, cambiar la contraseña dejaba afuera a todos los clientes con
+ * sesión abierta y rompía los enlaces ya entregados a quienes pidieron sin
+ * cuenta.
+ *
+ * Ahora sale de `SESSION_SECRET` si está puesta, y si no, de un valor
+ * aleatorio que se genera una vez y queda guardado en la base —que en Railway
+ * vive en el volumen, así que sobrevive a los reinicios y a los deploys—. No
+ * hay nada que configurar para que funcione bien.
+ */
+let secretoEnMemoria = null;
+
 const secretoDelServidor = () => {
-  const p = process.env.ADMIN_PASSWORD;
-  if (!p) return null;
-  return crypto.createHash('sha256').update(`isuwaya:sesion:${p}`).digest();
+  if (secretoEnMemoria) return secretoEnMemoria;
+
+  let semilla = process.env.SESSION_SECRET;
+  if (!semilla) {
+    semilla = leerConfig('secreto_sesion');
+    if (!semilla) {
+      semilla = crypto.randomBytes(32).toString('hex');
+      guardarConfig('secreto_sesion', semilla);
+    }
+  }
+  secretoEnMemoria = crypto.createHash('sha256').update(`isuwaya:sesion:${semilla}`).digest();
+  return secretoEnMemoria;
 };
+
+/*
+ * Que el panel se pueda abrir es otra pregunta, y se contesta aparte.
+ *
+ * Antes se respondía mirando si había secreto, que era lo mismo que preguntar
+ * por la contraseña. Ahora el secreto existe siempre, así que hay que
+ * preguntar por lo que de verdad importa: si hay con qué entrar.
+ */
+const panelConfigurado = () => Boolean(process.env.ADMIN_PASSWORD);
 
 // ── Contraseñas de los clientes ───────────────────────────────────
 /*
@@ -124,7 +159,7 @@ function conSesion(req, res, next) {
 }
 
 function exigirAdmin(req, res, next) {
-  if (!secretoDelServidor()) {
+  if (!panelConfigurado()) {
     return res.status(503).json({ message: 'El panel no está configurado: falta ADMIN_PASSWORD en el servidor.' });
   }
   if (req.sesion?.rol !== 'admin') return res.status(401).json({ message: 'Entrá como administrador.' });
@@ -134,6 +169,32 @@ function exigirAdmin(req, res, next) {
 function exigirCliente(req, res, next) {
   if (req.sesion?.rol !== 'cliente') return res.status(401).json({ message: 'Entrá a tu cuenta.' });
   next();
+}
+
+/*
+ * El permiso para bajar el PDF de un pedido, sin cuenta.
+ *
+ * Los números de pedido son correlativos: ISU-000124 existe si existe el 123.
+ * Sin nada que verificar, cualquiera baja el remito de cualquiera —con el
+ * nombre, el CUIT, el teléfono y la dirección de quien lo hizo— probando
+ * números a mano.
+ *
+ * Quien pide sin cuenta igual tiene que poder bajar el suyo, así que al
+ * confirmar se le devuelve una firma de SU número y el enlace la lleva. Es el
+ * mismo HMAC de la sesión: no hay tabla nueva ni nada que limpiar después.
+ */
+function firmarDocumento(numero) {
+  const s = secretoDelServidor();
+  if (!s) return null;
+  return crypto.createHmac('sha256', s).update(`documento:${numero}`).digest('base64url');
+}
+
+function documentoFirmado(numero, token) {
+  const esperado = firmarDocumento(numero);
+  if (!esperado || !token) return false;
+  const a = Buffer.from(String(token));
+  const b = Buffer.from(esperado);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
 /** Los datos del cliente en la forma que usa el formulario del pedido. */
@@ -158,5 +219,6 @@ const sinPassword = (c) => { const { password_hash, ...resto } = c; return resto
 module.exports = {
   hashear, verificar, ponerCookie, borrarCookie, leerCookie, leerToken,
   conSesion, exigirAdmin, exigirCliente, datosDePedido, sinPassword,
-  secretoDelServidor, COOKIE,
+  firmarDocumento, documentoFirmado,
+  secretoDelServidor, panelConfigurado, COOKIE,
 };

@@ -83,10 +83,13 @@ export function cerrarDialogo() {
  */
 function lineasDeEntrada(producto, entrada) {
   const curvas = Number(entrada.curvas) || 0;
+  const porColorCurvas = entrada.curvasPorColor || {};
   const porColor = new Map();
 
   for (const c of producto.combinaciones) {
-    const n = (Number(entrada.cantidades?.[c.sku]) || 0) + curvas;
+    const n = (Number(entrada.cantidades?.[c.sku]) || 0)
+      + curvas
+      + (Number(porColorCurvas[c.color]) || 0);
     if (!n) continue;
     if (!porColor.has(c.color)) porColor.set(c.color, []);
     porColor.get(c.color).push(`${esc(c.talle || 'Único')}×${n}`);
@@ -94,6 +97,24 @@ function lineasDeEntrada(producto, entrada) {
   return [...porColor.entries()]
     .map(([color, talles]) => `<div><b>${esc(color || 'Único')}</b> · ${talles.join('  ')}</div>`)
     .join('');
+}
+
+/*
+ * Las curvas de un color se muestran aparte de la curva entera.
+ *
+ * Las dos terminan sumando unidades a los mismos casilleros, así que sin este
+ * renglón el carrito diría "36 unidades" sin explicar de dónde salieron, y
+ * quien revisa antes de confirmar no puede saber si pidió lo que quería.
+ */
+function curvasDeColor(producto, entrada) {
+  const filas = Object.entries(entrada.curvasPorColor || {})
+    .filter(([, n]) => Number(n) > 0)
+    .map(([color, n]) => {
+      const combos = producto.combinaciones.filter((c) => c.color === color);
+      const unidades = Number(n) * combos.length;
+      return `${Number(n)} × curva de <b>${esc(color)}</b> · ${unidades} u.`;
+    });
+  return filas.length ? `<div class="curva">${filas.join('<br>')}</div>` : '';
 }
 
 function vistaCarrito() {
@@ -118,6 +139,7 @@ function vistaCarrito() {
           <div class="importe">${pesos(c.subtotal)}</div>
         </div>
         ${entrada.curvas ? `<div class="curva">${entrada.curvas} curva${entrada.curvas === 1 ? '' : 's'} completa${entrada.curvas === 1 ? '' : 's'} · ${entrada.curvas * producto.unidadesPorCurva} u.</div>` : ''}
+        ${curvasDeColor(producto, entrada)}
         <div class="lineas">${lineasDeEntrada(producto, entrada)}</div>
         <button class="quitar" data-quitar="${esc(sku)}">Quitar del pedido</button>
       </div>`;
@@ -253,8 +275,8 @@ function vistaConfirmado() {
         ${confirmado.unidades} unidades · ${pesos(confirmado.total)}
       </p>
       <div class="descargas">
-        <a class="btn azul" href="/api/pedidos/${encodeURIComponent(confirmado.numero)}/pedido.pdf">Descargar el pedido</a>
-        <a class="btn borde" href="/api/pedidos/${encodeURIComponent(confirmado.numero)}/rotulo.pdf">Descargar el rótulo</a>
+        <a class="btn azul" href="/api/pedidos/${encodeURIComponent(confirmado.numero)}/pedido.pdf${
+          confirmado.token ? `?t=${encodeURIComponent(confirmado.token)}` : ''}">Descargar el pedido</a>
       </div>
       <p class="chico-2 separado">
         Guardá el número por si necesitás consultarlo.
@@ -297,7 +319,10 @@ function cuerpoDelPedido() {
   return {
     cliente: datosCliente,
     carrito: Object.entries(estado.carrito).map(([sku, e]) => ({
-      skuAgrupador: sku, curvas: e.curvas || 0, cantidades: e.cantidades || {},
+      skuAgrupador: sku,
+      curvas: e.curvas || 0,
+      curvasPorColor: e.curvasPorColor || {},
+      cantidades: e.cantidades || {},
     })),
   };
 }
