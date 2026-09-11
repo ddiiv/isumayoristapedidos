@@ -641,6 +641,76 @@ const planilla = path.join(__dirname, 'catalogo-isuwaya.xlsx');
   const archivoRaro = await pedir('/no-existe.js', { crudo: true });
   chk('un archivo que no está da 404, no el index', 404, archivoRaro.status);
 
+  tit('22. LAS FOTOS DEL PANEL LLEGAN AL CATÁLOGO');
+  /*
+   * El panel guardaba las fotos en una tabla y el catálogo leía de otra: se
+   * podían subir veinte por producto, cada una con su color, y al cliente le
+   * llegaba sólo la principal. Se sube una general y una de un color, se mira
+   * que las dos lleguen con su color, y se borran.
+   */
+  /*
+   * Un producto SIN fotos: con las fotos reales cargadas, uno que ya tiene sus
+   * cinco por color rechazaría la de prueba y la prueba mediría el tope, no lo
+   * que dice que mide.
+   */
+  const conFoto = productos.find((x) => new Set(x.combinaciones.map((c) => c.color)).size > 1
+    && !(x.fotos || []).length) || p;
+  const rutaAdmin = `/api/admin/productos/${encodeURIComponent(conFoto.sku)}`;
+  const deAdmin = (await pedir(rutaAdmin, { admin: true })).json;
+  const colorDeFoto = (deAdmin.colores || []).find((c) => c.id && c.nombre);
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+  const subirFoto = async (colorId) => {
+    const fd = new FormData();
+    fd.append('foto', new Blob([png], { type: 'image/png' }), 'prueba.png');
+    if (colorId) fd.append('colorId', String(colorId));
+    return pedir(`${rutaAdmin}/fotos`, { metodo: 'POST', cuerpo: fd, admin: true });
+  };
+  const general = await subirFoto(null);
+  const deColor = await subirFoto(colorDeFoto?.id);
+  chk('las dos fotos se suben', [200, 200], [general.status, deColor.status]);
+
+  const conFotos = (await pedir('/api/catalogo')).json.productos.find((x) => x.sku === conFoto.sku);
+  const rutas = (conFotos.fotos || []).map((f) => f.ruta);
+  chk('el catálogo trae todas, no sólo la principal', true,
+    rutas.includes(general.json?.ruta) && rutas.includes(deColor.json?.ruta));
+  chk('cada una con su color', colorDeFoto?.nombre,
+    conFotos.fotos.find((f) => f.ruta === deColor.json?.ruta)?.color);
+  chk('la general sin color', null, conFotos.fotos.find((f) => f.ruta === general.json?.ruta)?.color);
+  chk('y la principal va primero', conFotos.foto, conFotos.fotos[0]?.ruta);
+
+  const nuestras = ((await pedir(rutaAdmin, { admin: true })).json.fotos || [])
+    .filter((f) => [general.json?.ruta, deColor.json?.ruta].includes(f.ruta));
+  for (const f of nuestras) await pedir(`/api/admin/fotos/${f.id}`, { metodo: 'DELETE', admin: true });
+  const despues = (await pedir('/api/catalogo')).json.productos.find((x) => x.sku === conFoto.sku);
+  chk('y se borran sin dejar rastro', 0,
+    (despues.fotos || []).filter((f) => [general.json?.ruta, deColor.json?.ruta].includes(f.ruta)).length);
+
+  tit('22b. HASTA CINCO FOTOS POR COLOR');
+  /*
+   * La regla del negocio: hasta cinco fotos por color, y el producto 20 o cinco
+   * por cada color que vende. Se suben seis del mismo color: la sexta rebota.
+   */
+  const seis = [];
+  for (let k = 0; k < 6; k += 1) seis.push(await subirFoto(colorDeFoto?.id));
+  chk('las cinco primeras de un color entran', [200, 200, 200, 200, 200], seis.slice(0, 5).map((x) => x.status));
+  chk('la sexta rebota', 400, seis[5].status);
+  const det22 = (await pedir(rutaAdmin, { admin: true })).json;
+  const coloresQueVende = new Set(conFoto.combinaciones.map((c) => c.color)).size;
+  chk('el tope del producto es 20, o cinco por color si da más', Math.max(20, 5 * coloresQueVende), det22.maxFotos);
+  /*
+   * Con cuatro colores o menos el tope da 20 igual, así que esa comprobación
+   * sola no distingue la regla nueva de la vieja. Se mira además el producto
+   * con más colores del catálogo, donde cinco por color tiene que dar más.
+   */
+  const cuantosColores = (x) => new Set(x.combinaciones.map((c) => c.color)).size;
+  const elDeMasColores = productos.reduce((a, b) => (cuantosColores(b) > cuantosColores(a) ? b : a));
+  const detMasColores = (await pedir(`/api/admin/productos/${encodeURIComponent(elDeMasColores.sku)}`, { admin: true })).json;
+  chk(`con muchos colores el tope crece (${elDeMasColores.sku}, ${cuantosColores(elDeMasColores)} colores)`,
+    5 * cuantosColores(elDeMasColores), detMasColores.maxFotos);
+  for (const f of (det22.fotos || []).filter((x) => seis.some((y) => y.json?.ruta === x.ruta))) {
+    await pedir(`/api/admin/fotos/${f.id}`, { metodo: 'DELETE', admin: true });
+  }
+
   tit('21. CONFIRMAR PEDIDOS TIENE UN TECHO POR IP');
   /*
    * Va última a propósito: deja la IP frenada un minuto, así que cualquier

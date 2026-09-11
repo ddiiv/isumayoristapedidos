@@ -135,19 +135,22 @@ function filaProducto(producto) {
   const fotos = fotosDe(producto);
 
   const carrusel = fotos.length
-    ? `<div class="carrusel" data-sku="${esc(producto.sku)}" data-foto="0">
-         <img src="${esc(fotos[0].ruta)}" alt="${esc(producto.titulo)}" loading="lazy">
-         ${fotos.length > 1 ? `
-           <button class="carrusel-ir antes" data-paso="-1" aria-label="Foto anterior">‹</button>
-           <button class="carrusel-ir despues" data-paso="1" aria-label="Foto siguiente">›</button>
-           <span class="carrusel-cuenta">1/${fotos.length}</span>` : ''}
-       </div>`
+    ? `<div class="carrusel" data-sku="${esc(producto.sku)}" data-foto="0" data-color="">${
+      carruselPorDentro(producto, '', 0)}</div>`
     : '<div class="carrusel vacio"><span class="sin-foto">SIN FOTO</span></div>';
 
-  const colores = producto.colores.filter((c) => c.nombre).map((c) => `
-    <span class="muestra" title="${esc(c.nombre)}">
-      <i data-hex="${esc(c.hex)}"></i>${esc(c.nombre)}
-    </span>`).join('');
+  /*
+   * Los colores que tienen fotos son botones: tocarlos deja en el carrusel las
+   * fotos de ese color. Los que no tienen quedan como etiqueta —un botón que
+   * no cambia nada invita a tocarlo y a pensar que la página no anda—.
+   */
+  const conFotos = new Set(coloresConFotos(producto));
+  const colores = producto.colores.filter((c) => c.nombre).map((c) => (conFotos.has(c.nombre)
+    ? `<button type="button" class="muestra con-fotos" data-color-foto="${esc(c.nombre)}"
+         aria-pressed="false" title="Ver las fotos en ${esc(c.nombre)}">
+         <i data-hex="${esc(c.hex)}"></i>${esc(c.nombre)}</button>`
+    : `<span class="muestra" title="${esc(c.nombre)}"><i data-hex="${esc(c.hex)}"></i>${esc(c.nombre)}</span>`
+  )).join('');
 
   const talles = producto.talles.filter(Boolean)
     .map((t) => `<span class="talle-chip">${esc(t)}</span>`).join('');
@@ -191,13 +194,45 @@ function filaProducto(producto) {
  * cargadas, la lista viene vacía y la fila muestra el hueco gris en vez de
  * romperse: el catálogo se usa antes de tener todas las fotos.
  */
-export function fotosDe(producto) {
-  const lista = [];
-  if (producto.foto) lista.push({ ruta: producto.foto, color: null });
-  for (const [color, ruta] of Object.entries(producto.fotosPorColor || {})) {
-    if (ruta && ruta !== producto.foto) lista.push({ ruta, color });
-  }
-  return lista;
+/*
+ * Las fotos de un producto: todas, o las de un color.
+ *
+ * Con un color, las de ese color y nada más: si el cliente tocó "Negro" y
+ * aparece una foto azul, deja de confiar en lo que está mirando. Las fotos sin
+ * color son las generales —el producto entero, un detalle— y van sólo en
+ * "todas".
+ */
+export function fotosDe(producto, color = null) {
+  const todas = producto?.fotos?.length
+    ? producto.fotos
+    : (producto?.foto ? [{ ruta: producto.foto, color: null }] : []);
+  if (!color) return todas;
+  const delColor = todas.filter((f) => f.color === color);
+  return delColor.length ? delColor : todas;
+}
+
+/** Los colores de este producto que tienen al menos una foto, en el orden del producto. */
+export function coloresConFotos(producto) {
+  const con = new Set(fotosDe(producto).map((f) => f.color).filter(Boolean));
+  return (producto?.colores || []).map((c) => c.nombre).filter((n) => con.has(n));
+}
+
+/*
+ * Lo de adentro del carrusel de la fila, para un color y una posición.
+ *
+ * Se rearma entero al cambiar de color en vez de tocar pieza por pieza: con
+ * un color de una sola foto las flechas sobran, y con "todas" vuelven.
+ */
+function carruselPorDentro(producto, color, i) {
+  const fotos = fotosDe(producto, color || null);
+  const k = Math.min(Math.max(0, i), fotos.length - 1);
+  const f = fotos[k];
+  return `<img src="${esc(f.ruta)}" alt="${esc(producto.titulo)}${f.color ? ` en ${esc(f.color)}` : ''}" loading="lazy">
+    ${fotos.length > 1 ? `
+      <button class="carrusel-ir antes" data-paso="-1" aria-label="Foto anterior">‹</button>
+      <button class="carrusel-ir despues" data-paso="1" aria-label="Foto siguiente">›</button>` : ''}
+    ${fotos.length > 1 || color
+      ? `<span class="carrusel-cuenta">${color ? `${esc(color)} · ` : ''}${k + 1}/${fotos.length}</span>` : ''}`;
 }
 
 /*
@@ -406,19 +441,68 @@ el('#catalogo').addEventListener('click', (e) => {
     moverCarrusel(flecha.closest('.carrusel'), Number(flecha.dataset.paso));
     return;
   }
+  const chip = e.target.closest('[data-color-foto]');
+  if (chip) { e.stopPropagation(); elegirColorEnFila(chip); return; }
+
+  // Un dedo que acaba de deslizar la foto no quiso abrir el producto.
+  if (Date.now() - deslizoHace < 500 && e.target.closest('.carrusel')) return;
+
   const fila = e.target.closest('.fila-producto[data-sku]');
   if (fila) abrirPanel(fila.dataset.sku);
 });
 
+/*
+ * Deslizar la foto con el dedo, en el teléfono.
+ *
+ * Las flechas del carrusel miden treinta píxeles: alcanzan para un mouse y no
+ * para un pulgar, y en el teléfono lo que la mano hace sola con una foto es
+ * arrastrarla. Tiene que ser más horizontal que vertical, o se comería el
+ * gesto de bajar por la página.
+ */
+let toque = null;
+let deslizoHace = 0;
+el('#catalogo').addEventListener('touchstart', (e) => {
+  const carrusel = e.target.closest('.carrusel[data-sku]');
+  toque = carrusel ? { carrusel, x: e.touches[0].clientX, y: e.touches[0].clientY } : null;
+}, { passive: true });
+el('#catalogo').addEventListener('touchend', (e) => {
+  if (!toque) return;
+  const dx = e.changedTouches[0].clientX - toque.x;
+  const dy = e.changedTouches[0].clientY - toque.y;
+  const { carrusel } = toque;
+  toque = null;
+  if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+    moverCarrusel(carrusel, dx < 0 ? 1 : -1);
+    deslizoHace = Date.now();
+  }
+}, { passive: true });
+
 function moverCarrusel(carrusel, paso) {
   const producto = productoPorSku(carrusel.dataset.sku);
-  const fotos = fotosDe(producto);
+  const color = carrusel.dataset.color || '';
+  const fotos = fotosDe(producto, color || null);
   if (fotos.length < 2) return;
-  const actual = Number(carrusel.dataset.foto) || 0;
-  const proxima = (actual + paso + fotos.length) % fotos.length;
+  const proxima = ((Number(carrusel.dataset.foto) || 0) + paso + fotos.length) % fotos.length;
   carrusel.dataset.foto = proxima;
-  carrusel.querySelector('img').src = fotos[proxima].ruta;
-  carrusel.querySelector('.carrusel-cuenta').textContent = `${proxima + 1}/${fotos.length}`;
+  carrusel.innerHTML = carruselPorDentro(producto, color, proxima);
+}
+
+/*
+ * Tocar un color deja en el carrusel sólo sus fotos; tocarlo de nuevo vuelve
+ * a todas. Así se ve cómo es cada color antes de abrir el producto.
+ */
+function elegirColorEnFila(boton) {
+  const fila = boton.closest('.fila-producto');
+  const carrusel = fila?.querySelector('.carrusel[data-sku]');
+  if (!carrusel) return;
+  const yaEstaba = boton.getAttribute('aria-pressed') === 'true';
+  const color = yaEstaba ? '' : boton.dataset.colorFoto;
+  for (const b of fila.querySelectorAll('[data-color-foto]')) {
+    b.setAttribute('aria-pressed', String(b === boton && !yaEstaba));
+  }
+  carrusel.dataset.color = color;
+  carrusel.dataset.foto = 0;
+  carrusel.innerHTML = carruselPorDentro(productoPorSku(carrusel.dataset.sku), color, 0);
 }
 
 el('#panel-cerrar').addEventListener('click', cerrarPanel);

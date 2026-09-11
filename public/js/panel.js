@@ -12,7 +12,7 @@
 import { el, esc, pesos, enteroPositivo } from './util.js';
 import {
   estado, productoPorSku, cuentaDeEntrada, guardarCarrito,
-  refrescarFlotante, pintarCatalogo, fotosDe, pintarMuestras,
+  refrescarFlotante, pintarCatalogo, fotosDe, coloresConFotos, pintarMuestras,
 } from './app.js';
 
 let actual = null;      // producto abierto
@@ -55,6 +55,10 @@ const entraElCuadro = (talles) => window.innerWidth >= anchoQueNecesita(talles);
 
 let formaForzada = null;   // 'apilada' cuando la medición dice que la tabla no entra
 
+// Qué fotos se están mirando en el panel: todas o las de un color, y cuál.
+let colorFoto = null;
+let idxFoto = 0;
+
 export function abrirPanel(sku) {
   const producto = productoPorSku(sku);
   if (!producto) return;
@@ -78,6 +82,8 @@ export function abrirPanel(sku) {
   });
   document.body.style.overflow = 'hidden';
   formaForzada = null;
+  colorFoto = null;
+  idxFoto = 0;
   entrabaElCuadro = entraElCuadro(producto.talles.filter(Boolean).length);
   pintar();
 }
@@ -146,7 +152,7 @@ function matrizApilada(talles) {
       .filter((c) => c.color === color.nombre)
       .reduce((t, c) => t + enteroPositivo(borrador.cantidades[c.sku]), 0);
 
-    return `<section class="bloque-color" data-color="${esc(color.nombre)}">
+    return `<section class="bloque-color${conFotos(color.nombre)}" data-color="${esc(color.nombre)}">
       <header>
         <span class="cuadro" data-hex="${esc(color.hex)}"></span>
         <span class="nombre">${esc(color.nombre)}</span>
@@ -183,7 +189,7 @@ function matrizEnTabla(talles) {
       .reduce((t, c) => t + enteroPositivo(borrador.cantidades[c.sku]), 0);
 
     return `<tr data-color="${esc(color.nombre)}">
-      <th class="col-color">
+      <th class="col-color${conFotos(color.nombre)}">
         <span class="cuadro" data-hex="${esc(color.hex)}"></span>
         <span class="nombre">${esc(color.nombre)}</span>
         ${enColor ? `<span class="cuenta-color">${enColor}</span>` : ''}
@@ -252,7 +258,7 @@ function curvasPorColor() {
     const puestas = enteroPositivo(borrador.curvasPorColor?.[color.nombre]);
 
     return `
-      <div class="fila-talle fila-curva-color" data-color="${esc(color.nombre)}">
+      <div class="fila-talle fila-curva-color${conFotos(color.nombre)}" data-color="${esc(color.nombre)}">
         <span class="talle">
           <span class="cuadro" data-hex="${esc(color.hex)}"></span>
           ${esc(color.nombre)}
@@ -274,15 +280,7 @@ function curvasPorColor() {
 }
 
 function pintar() {
-  const fotos = fotosDe(actual);
-  const carrusel = modo === 'curva' || !fotos.length ? '' : `
-    <div class="carrusel-panel" data-foto="0">
-      <img src="${esc(fotos[0].ruta)}" alt="${esc(actual.titulo)}">
-      ${fotos.length > 1 ? `
-        <button class="carrusel-ir antes" data-paso="-1" aria-label="Foto anterior">‹</button>
-        <button class="carrusel-ir despues" data-paso="1" aria-label="Foto siguiente">›</button>
-        <span class="carrusel-cuenta">${fotos[0].color ? esc(fotos[0].color) : '1'}/${fotos.length}</span>` : ''}
-    </div>`;
+  const carrusel = vistaFotos();
 
   const guia = actual.guiaTalles
     ? `<button class="btn borde ver-guia" type="button">Ver guía de talles</button>`
@@ -336,8 +334,30 @@ function refrescarPie() {
 // ── Interacción ───────────────────────────────────────────────────
 el('#panel-contenido').addEventListener('click', (e) => {
   if (!actual) return;
+
+  /*
+   * Tocar el nombre de un color en el cuadro muestra sus fotos.
+   *
+   * Es donde está la mano cuando aparece la duda —"¿el topo es gris o
+   * marrón?"—: tener que subir a buscar el filtro de fotos para enterarse
+   * corta la carga a la mitad. La foto sube sola a la vista.
+   */
+  const cabeza = e.target.closest('th.col-color, .bloque-color > header, .fila-curva-color .talle');
+  if (cabeza) {
+    const color = cabeza.closest('[data-color]')?.dataset.color;
+    if (color && coloresConFotos(actual).includes(color)) elegirColorFoto(color, { subir: true });
+    return;
+  }
+
   const b = e.target.closest('button');
   if (!b) return;
+
+  if (b.dataset.irFoto !== undefined) {
+    idxFoto = Number(b.dataset.irFoto) || 0;
+    repintarFotos(`[data-ir-foto="${idxFoto}"]`);
+    return;
+  }
+  if (b.dataset.colorFoto !== undefined) { elegirColorFoto(b.dataset.colorFoto); return; }
 
   if (b.dataset.modo) {
     /*
@@ -375,17 +395,100 @@ el('#panel-contenido').addEventListener('click', (e) => {
   if (b.classList.contains('ver-guia')) { abrirGuia(); }
 });
 
-function moverCarruselPanel(paso) {
-  const carrusel = el('.carrusel-panel');
-  const fotos = fotosDe(actual);
-  if (!carrusel || fotos.length < 2) return;
-  const actualIdx = Number(carrusel.dataset.foto) || 0;
-  const proxima = (actualIdx + paso + fotos.length) % fotos.length;
-  carrusel.dataset.foto = proxima;
-  carrusel.querySelector('img').src = fotos[proxima].ruta;
-  carrusel.querySelector('.carrusel-cuenta').textContent =
-    fotos[proxima].color ? fotos[proxima].color : `${proxima + 1}/${fotos.length}`;
+/*
+ * Las fotos del producto: la grande, las miniaturas y el filtro por color.
+ *
+ * Se ven en los dos modos. Antes la curva se cargaba sin fotos porque llevaba
+ * todos los colores a la vez; con la curva por color, ver el color que se está
+ * por pedir es justo lo que hace falta.
+ */
+const conFotos = (color) => (coloresConFotos(actual).includes(color) ? ' con-fotos' : '');
+
+function vistaFotos() {
+  const todas = fotosDe(actual);
+  if (!todas.length) return '';
+
+  const fotos = fotosDe(actual, colorFoto);
+  const i = Math.min(idxFoto, fotos.length - 1);
+  const f = fotos[i];
+
+  const miniaturas = fotos.length > 1 ? `
+    <div class="miniaturas" role="group" aria-label="Todas las fotos">${fotos.map((x, k) => `
+      <button type="button" data-ir-foto="${k}" aria-current="${k === i}" aria-label="Foto ${k + 1} de ${fotos.length}">
+        <img src="${esc(x.ruta)}" alt="" loading="lazy"></button>`).join('')}
+    </div>` : '';
+
+  const colores = coloresConFotos(actual);
+  const filtro = colores.length ? `
+    <div class="filtro-fotos" role="group" aria-label="Ver las fotos de un color">
+      <button type="button" data-color-foto="" aria-pressed="${!colorFoto}">Todas</button>
+      ${colores.map((c) => `
+        <button type="button" data-color-foto="${esc(c)}" aria-pressed="${colorFoto === c}">
+          <i data-hex="${esc(actual.colores.find((x) => x.nombre === c)?.hex || '#cccccc')}"></i>${esc(c)}
+        </button>`).join('')}
+    </div>` : '';
+
+  return `
+    <div class="fotos-producto">
+      <div class="carrusel-panel" tabindex="0" aria-label="Fotos del producto. Con las flechas del teclado se pasan.">
+        <img src="${esc(f.ruta)}" alt="${esc(actual.titulo)}${f.color ? ` en ${esc(f.color)}` : ''}">
+        ${fotos.length > 1 ? `
+          <button class="carrusel-ir antes" data-paso="-1" aria-label="Foto anterior">‹</button>
+          <button class="carrusel-ir despues" data-paso="1" aria-label="Foto siguiente">›</button>` : ''}
+        ${fotos.length > 1 || colorFoto
+          ? `<span class="carrusel-cuenta">${colorFoto ? `${esc(colorFoto)} · ` : ''}${i + 1}/${fotos.length}</span>` : ''}
+      </div>
+      ${miniaturas}
+      ${filtro}
+    </div>`;
 }
+
+/*
+ * Se rehacen sólo las fotos, no el panel entero: repintar todo le sacaría el
+ * foco y lo tipeado a quien está cargando cantidades más abajo.
+ */
+function repintarFotos(enfocar = null) {
+  const caja = el('.fotos-producto', el('#panel-contenido'));
+  if (!caja) return;
+  caja.outerHTML = vistaFotos();
+  const nueva = el('.fotos-producto', el('#panel-contenido'));
+  pintarMuestras(nueva);
+  if (enfocar) el(enfocar, nueva)?.focus({ preventScroll: true });
+  return nueva;
+}
+
+function moverCarruselPanel(paso, enfocar = null) {
+  const fotos = fotosDe(actual, colorFoto);
+  if (fotos.length < 2) return;
+  idxFoto = (Math.min(idxFoto, fotos.length - 1) + paso + fotos.length) % fotos.length;
+  repintarFotos(enfocar || (paso < 0 ? '.carrusel-panel .antes' : '.carrusel-panel .despues'));
+}
+
+function elegirColorFoto(color, { subir = false } = {}) {
+  colorFoto = color || null;
+  idxFoto = 0;
+  const nueva = repintarFotos(subir ? null : `[data-color-foto="${CSS.escape(color || '')}"]`);
+  if (subir) nueva?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+
+// Deslizar con el dedo y pasar con las flechas del teclado.
+let toquePanel = null;
+el('#panel-contenido').addEventListener('touchstart', (e) => {
+  toquePanel = e.target.closest('.carrusel-panel')
+    ? { x: e.touches[0].clientX, y: e.touches[0].clientY } : null;
+}, { passive: true });
+el('#panel-contenido').addEventListener('touchend', (e) => {
+  if (!toquePanel || !actual) return;
+  const dx = e.changedTouches[0].clientX - toquePanel.x;
+  const dy = e.changedTouches[0].clientY - toquePanel.y;
+  toquePanel = null;
+  if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy) * 1.5) moverCarruselPanel(dx < 0 ? 1 : -1, '.carrusel-panel');
+}, { passive: true });
+el('#panel-contenido').addEventListener('keydown', (e) => {
+  if (!actual || !e.target.closest('.carrusel-panel')) return;
+  if (e.key === 'ArrowRight') { e.preventDefault(); moverCarruselPanel(1, '.carrusel-panel'); }
+  if (e.key === 'ArrowLeft') { e.preventDefault(); moverCarruselPanel(-1, '.carrusel-panel'); }
+});
 
 /*
  * La guía de talles, con las medidas de ESTE producto.

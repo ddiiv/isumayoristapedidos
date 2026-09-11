@@ -692,3 +692,54 @@ td.agotado span {
   td.agotado span { padding: 13px 6px; }
   th.col-color { min-width: 118px; }
 }
+
+/* ═══ Fotos por color ════════════════════════════════════════════ */
+/*
+ * En la fila del catálogo, los colores que tienen fotos son botones. Se ven
+ * como las etiquetas pero con un borde que invita a tocarlos, y el elegido
+ * queda marcado: así se sabe de qué color es la foto de al lado.
+ */
+button.muestra { font: inherit; font-size: 11.5px; font-weight: 600; cursor: pointer; }
+.muestra.con-fotos { border-color: var(--azul-borde); }
+.muestra.con-fotos:hover { background: var(--azul-claro); }
+.muestra.con-fotos[aria-pressed="true"] { background: var(--azul); border-color: var(--azul); color: #fff; }
+.muestra.con-fotos[aria-pressed="true"] i { border-color: rgba(255, 255, 255, .75); }
+
+/* En el panel: la foto grande, las miniaturas y el filtro por color */
+.fotos-producto { margin-bottom: 16px; }
+.fotos-producto .carrusel-panel { margin-bottom: 8px; }
+.carrusel-panel:focus-visible { outline: 3px solid var(--azul); outline-offset: 2px; }
+.miniaturas { display: flex; gap: 6px; overflow-x: auto; padding: 2px 2px 6px; scrollbar-width: thin; }
+.miniaturas button {
+  flex: 0 0 auto; width: 48px; aspect-ratio: 3 / 4; padding: 0;
+  border: 2px solid transparent; border-radius: 7px; overflow: hidden;
+  background: var(--azul-claro); cursor: pointer; opacity: .7;
+}
+.miniaturas button:hover { opacity: 1; }
+.miniaturas button[aria-current="true"] { border-color: var(--azul); opacity: 1; }
+.miniaturas img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.filtro-fotos { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.filtro-fotos button {
+  display: inline-flex; align-items: center; gap: 5px;
+  font: inherit; font-size: 12px; font-weight: 600; color: var(--tinta);
+  background: #fff; border: 1px solid var(--linea); border-radius: 20px;
+  padding: 4px 10px 4px 5px; cursor: pointer;
+}
+.filtro-fotos button:first-child { padding-left: 10px; }
+.filtro-fotos button[aria-pressed="true"] { background: var(--azul); border-color: var(--azul); color: #fff; }
+.filtro-fotos i { width: 15px; height: 15px; border-radius: 50%; border: 1px solid rgba(0, 0, 0, .16); }
+
+/*
+ * En el cuadro de talles, el nombre de un color con fotos se puede tocar.
+ * Subrayado punteado y cursor de mano: lo justo para que se descubra sin
+ * llenar el cuadro de íconos.
+ */
+th.col-color.con-fotos, .bloque-color.con-fotos > header, .fila-curva-color.con-fotos .talle { cursor: pointer; }
+th.col-color.con-fotos .nombre, .bloque-color.con-fotos > header .nombre {
+  text-decoration: underline dotted; text-underline-offset: 3px;
+}
+
+@media (pointer: coarse), (max-width: 900px) {
+  .miniaturas button { width: 54px; }
+  .filtro-fotos button { padding-top: 7px; padding-bottom: 7px; }
+}

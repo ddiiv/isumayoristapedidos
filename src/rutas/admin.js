@@ -85,6 +85,27 @@ const TIPOS_FOTO = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.
  */
 const MAX_FOTOS = 20;
 
+/*
+ * Hasta cinco fotos por color, y el producto crece con sus colores.
+ *
+ * Veinte alcanza para un producto de pocos colores, pero una remera en doce
+ * colores quedaría con una o dos fotos por color, que no alcanza para ver cómo
+ * es cada uno. La regla del negocio es cinco por color: el tope del producto
+ * es 20, o cinco por cada color que vende si eso da más.
+ */
+const MAX_POR_COLOR = 5;
+
+function topeDeFotos(productoId) {
+  const colores = db.prepare(
+    'SELECT COUNT(DISTINCT color_id) n FROM variantes WHERE producto_id = ? AND color_id IS NOT NULL',
+  ).get(productoId).n;
+  return Math.max(MAX_FOTOS, MAX_POR_COLOR * colores);
+}
+
+const fotosDelColor = (productoId, colorId) => db.prepare(
+  'SELECT COUNT(*) n FROM fotos WHERE producto_id = ? AND color_id = ?',
+).get(productoId, colorId).n;
+
 const subirFoto = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 6 * 1024 * 1024 },
@@ -102,17 +123,24 @@ r.post('/productos/:sku/fotos', subirFoto.single('foto'), (req, res) => {
   if (!producto) return res.status(404).json({ message: 'No existe ese producto.' });
 
   const cuantas = db.prepare('SELECT COUNT(*) n FROM fotos WHERE producto_id = ?').get(producto.id).n;
-  if (cuantas >= MAX_FOTOS) {
+  const tope = topeDeFotos(producto.id);
+  if (cuantas >= tope) {
     return res.status(400).json({
-      message: `Este producto ya tiene ${MAX_FOTOS} fotos, que es el máximo. Borrá alguna antes de subir otra.`,
+      message: `Este producto ya tiene ${tope} fotos, que es el máximo. Borrá alguna antes de subir otra.`,
+    });
+  }
+
+  // Se mira antes de escribir el archivo: una foto rechazada no tiene que quedar ocupando el volumen.
+  const colorId = req.body?.colorId ? Number(req.body.colorId) : null;
+  if (colorId && fotosDelColor(producto.id, colorId) >= MAX_POR_COLOR) {
+    return res.status(400).json({
+      message: `Ese color ya tiene ${MAX_POR_COLOR} fotos. Borrá alguna o subila como foto general.`,
     });
   }
 
   const nombre = `${crypto.randomBytes(12).toString('hex')}${TIPOS_FOTO[req.file.mimetype]}`;
   fs.writeFileSync(path.join(FOTOS_DIR, nombre), req.file.buffer);
   const ruta = `/fotos/${nombre}`;
-
-  const colorId = req.body?.colorId ? Number(req.body.colorId) : null;
   const orden = db.prepare('SELECT COALESCE(MAX(orden), -1) + 1 AS n FROM fotos WHERE producto_id = ?')
     .get(producto.id).n;
   db.prepare('INSERT INTO fotos (producto_id, ruta, color_id, orden) VALUES (?,?,?,?)')
@@ -122,7 +150,7 @@ r.post('/productos/:sku/fotos', subirFoto.single('foto'), (req, res) => {
   // del catálogo, y sin una elegida la fila sale con el hueco gris.
   if (!cuantas) db.prepare('UPDATE productos SET foto = ? WHERE id = ?').run(ruta, producto.id);
 
-  res.json({ ok: true, ruta, quedan: MAX_FOTOS - cuantas - 1 });
+  res.json({ ok: true, ruta, quedan: tope - cuantas - 1 });
 });
 
 r.put('/fotos/:id', (req, res) => {
@@ -131,6 +159,10 @@ r.put('/fotos/:id', (req, res) => {
 
   if (req.body?.colorId !== undefined) {
     const colorId = req.body.colorId === null || req.body.colorId === '' ? null : Number(req.body.colorId);
+    // Cambiarle el color a una foto es la otra forma de pasarse de cinco en un color.
+    if (colorId && colorId !== foto.color_id && fotosDelColor(foto.producto_id, colorId) >= MAX_POR_COLOR) {
+      return res.status(400).json({ message: `Ese color ya tiene ${MAX_POR_COLOR} fotos.` });
+    }
     db.prepare('UPDATE fotos SET color_id = ? WHERE id = ?').run(colorId, foto.id);
   }
   if (req.body?.orden !== undefined) {
@@ -316,7 +348,7 @@ r.get('/productos/:sku', (req, res) => {
     fotos,
     colores: coloresDelProducto,
     talles: tallesDelProducto,
-    maxFotos: MAX_FOTOS,
+    maxFotos: topeDeFotos(p.id),
   });
 });
 

@@ -2,3 +2,5 @@ node_modules/
 .env
 datos/
 *.log
+herramientas/fotos/preparadas/
+__pycache__/

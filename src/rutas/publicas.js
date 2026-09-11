@@ -90,14 +90,25 @@ r.get('/catalogo', (req, res) => {
     WHERE p.visible = 1
     ORDER BY orden_color, color, orden_talle`).all();
 
-  const fotos = db.prepare('SELECT producto_id, color, ruta FROM fotos_color').all();
+  /*
+   * Todas las fotos de cada producto, con el color al que pertenecen.
+   *
+   * Antes el catálogo leía sólo la foto principal y una tabla vieja que ya no
+   * se llena: el panel deja subir veinte fotos por producto, cada una con su
+   * color, y al cliente no le llegaba ninguna más que la primera. Van en el
+   * orden en que las acomodó el panel.
+   */
+  const fotos = db.prepare(`
+    SELECT f.producto_id, f.ruta, c.nombre AS color
+    FROM fotos f LEFT JOIN colores c ON c.id = f.color_id
+    ORDER BY f.producto_id, f.orden, f.id`).all();
 
   const porProducto = new Map(productos.map((p) => [p.id, []]));
   for (const v of variantes) porProducto.get(v.producto_id)?.push(v);
   const fotosPorProducto = new Map();
   for (const f of fotos) {
-    if (!fotosPorProducto.has(f.producto_id)) fotosPorProducto.set(f.producto_id, {});
-    fotosPorProducto.get(f.producto_id)[f.color] = f.ruta;
+    if (!fotosPorProducto.has(f.producto_id)) fotosPorProducto.set(f.producto_id, []);
+    fotosPorProducto.get(f.producto_id).push({ ruta: f.ruta, color: f.color || null });
   }
 
   const salida = productos.map((p) => {
@@ -119,7 +130,7 @@ r.get('/catalogo', (req, res) => {
       modelo: p.modelo,
       genero: p.genero,
       foto: p.foto,
-      fotosPorColor: fotosPorProducto.get(p.id) || {},
+      fotos: conLaPrincipalPrimero(fotosPorProducto.get(p.id) || [], p.foto),
       colores,
       talles,
       // La grilla completa: con qué SKU se pide cada cruce de color y talle.
@@ -264,5 +275,17 @@ r.get('/pedidos/:numero/:documento.pdf', async (req, res, next) => {
     res.send(pdf);
   } catch (e) { next(e); }
 });
+
+/*
+ * La foto principal va primero: es la que se ve en la fila del catálogo antes
+ * de tocar nada, y el carrusel tiene que arrancar por ella. Si la principal no
+ * está entre las fotos cargadas —un producto de antes del panel—, se agrega.
+ */
+function conLaPrincipalPrimero(lista, principal) {
+  if (!principal) return lista;
+  const i = lista.findIndex((f) => f.ruta === principal);
+  if (i === -1) return [{ ruta: principal, color: null }, ...lista];
+  return [lista[i], ...lista.slice(0, i), ...lista.slice(i + 1)];
+}
 
 module.exports = r;

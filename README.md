@@ -180,6 +180,53 @@ muestra al elegir ese color: la lista ofrece **sólo los colores que ese product
 tiene**, porque con los treinta y seis del catálogo se puede etiquetar la foto de
 un pantalón negro como "Salmon" y esa foto no se muestra nunca.
 
+## Cargar fotos en masa
+
+Para subir de una vez las fotos de un zip ordenado como
+`Categoría/Modelo/Color/fotos`. Hace falta Python 3 con Pillow.
+
+**1. Preparar.** Decide a qué producto y a qué color va cada foto, saca las
+repetidas, elige cuáles subir y las achica a 1440×1920 sin los datos internos
+del celular (que traen la ubicación donde se sacó la foto):
+
+```bash
+python3 herramientas/fotos/preparar.py "MODELO ISU.zip" herramientas/fotos/preparadas --api http://localhost:8090 --por-color 5 --por-producto auto
+```
+
+Elige hasta **5 por color**, repartidas a lo largo de la carpeta —las fotos
+seguidas de una sesión se parecen—, y hasta **20 por producto**, o 5 por color
+si el producto tiene más de cuatro colores. Un color que el producto no vende
+va como foto general. Al final lista todo lo que quedó afuera y por qué.
+
+**2. Revisar** (conviene). Marca las fotos que parecen de otro color que el de
+su carpeta y arma una planilla para mirarlas:
+
+```bash
+python3 herramientas/fotos/revisar.py herramientas/fotos/preparadas --salida sospechosas.jpg
+```
+
+**3. Subir.** Entra con la cuenta de admin del `.env` y sube por la misma ruta
+que el panel. Si se corta, volver a correrlo sigue donde quedó:
+
+```bash
+node herramientas/fotos/subir.cjs herramientas/fotos/preparadas --api https://tu-dominio
+```
+
+`--solo SKU,SKU` o `--menos SKU,SKU` para subir una parte.
+
+**El mapa** (`herramientas/fotos/mapa.json`) es donde se deciden los casos que
+las reglas no resuelven solas:
+
+| Clave | Para qué |
+|---|---|
+| `modelos` | Carpeta del modelo → SKU. `null` = todavía no está en el catálogo. |
+| `colores` | Carpetas que no son un color oficial (`"PETROLEO": "Aero"`). `"Modelo/carpeta"` gana sobre `"carpeta"`. `null` = foto general. |
+| `archivos` | Una foto puntual mal guardada, por su ruta en el zip. `"fuera"` = no se sube. |
+| `preferidas` | Carpetas de las que se toman primero (`"bordo bueno"`). |
+
+El servidor también cuida la regla: rechaza la sexta foto de un color, y el
+tope del producto es 20 o 5 por color.
+
 ## Precios por talle
 
 Del **3XL para arriba** —y el ÚNICO— suele salir más caro porque lleva más tela,
