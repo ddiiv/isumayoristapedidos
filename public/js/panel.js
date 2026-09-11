@@ -415,7 +415,7 @@ function vistaFotos() {
   const miniaturas = fotos.length > 1 ? `
     <div class="miniaturas" role="group" aria-label="Todas las fotos">${fotos.map((x, k) => `
       <button type="button" data-ir-foto="${k}" aria-current="${k === i}" aria-label="Foto ${k + 1} de ${fotos.length}">
-        <img src="${esc(x.ruta)}" alt="" loading="lazy"></button>`).join('')}
+        <img src="${esc(x.miniatura || x.ruta)}" alt="" loading="lazy"></button>`).join('')}
     </div>` : '';
 
   const colores = coloresConFotos(actual);

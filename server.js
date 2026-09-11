@@ -7,6 +7,7 @@ const publicas = require('./src/rutas/publicas');
 const { rutas: cuentas } = require('./src/rutas/cuentas');
 const { rutas: admin } = require('./src/rutas/admin');
 const { conSesion } = require('./src/auth');
+const { completarMiniaturas } = require('./src/miniaturas');
 
 const app = express();
 const PORT = Number(process.env.PORT) || 8080;
@@ -131,6 +132,8 @@ const server = app.listen(PORT, () => {
   console.log(`  escuchando en el puerto ${PORT}${process.env.PORT ? '' : ' (PORT no vino del entorno)'}`);
   console.log(`  datos en ${DATA_DIR}`);
   console.log(`  panel ${process.env.ADMIN_PASSWORD ? 'configurado' : '✖ SIN ADMIN_PASSWORD — no va a abrir'}\n`);
+  // Las fotos de antes de las miniaturas se completan en segundo plano: el sitio ya está atendiendo.
+  completarMiniaturas().catch((e) => console.error('  miniaturas:', e.message));
 });
 
 for (const senal of ['SIGTERM', 'SIGINT']) {

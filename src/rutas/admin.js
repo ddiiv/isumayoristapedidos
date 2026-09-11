@@ -7,6 +7,7 @@ const {
   db, FOTOS_DIR, ordenDeTalle,
   ESTADOS, normalizarEstado, puedePasar, registrarEstado, historialDePedido,
 } = require('../db');
+const { hacerMiniatura, nombreMiniatura } = require('../miniaturas');
 const { importarPlanilla } = require('../excel');
 const { ordenarCatalogo } = require('../normalizar');
 const paleta = require('../colores');
@@ -117,40 +118,58 @@ const subirFoto = multer({
   },
 });
 
-r.post('/productos/:sku/fotos', subirFoto.single('foto'), (req, res) => {
-  if (!req.file) return res.status(400).json({ message: 'Falta la imagen.' });
-  const producto = db.prepare('SELECT id FROM productos WHERE sku_agrupador = ?').get(req.params.sku);
-  if (!producto) return res.status(404).json({ message: 'No existe ese producto.' });
+r.post('/productos/:sku/fotos', subirFoto.single('foto'), async (req, res, next) => {
+  try {
+    if (!req.file) return res.status(400).json({ message: 'Falta la imagen.' });
+    const producto = db.prepare('SELECT id FROM productos WHERE sku_agrupador = ?').get(req.params.sku);
+    if (!producto) return res.status(404).json({ message: 'No existe ese producto.' });
 
-  const cuantas = db.prepare('SELECT COUNT(*) n FROM fotos WHERE producto_id = ?').get(producto.id).n;
-  const tope = topeDeFotos(producto.id);
-  if (cuantas >= tope) {
-    return res.status(400).json({
-      message: `Este producto ya tiene ${tope} fotos, que es el máximo. Borrá alguna antes de subir otra.`,
-    });
-  }
+    const cuantas = db.prepare('SELECT COUNT(*) n FROM fotos WHERE producto_id = ?').get(producto.id).n;
+    const tope = topeDeFotos(producto.id);
+    if (cuantas >= tope) {
+      return res.status(400).json({
+        message: `Este producto ya tiene ${tope} fotos, que es el máximo. Borrá alguna antes de subir otra.`,
+      });
+    }
 
-  // Se mira antes de escribir el archivo: una foto rechazada no tiene que quedar ocupando el volumen.
-  const colorId = req.body?.colorId ? Number(req.body.colorId) : null;
-  if (colorId && fotosDelColor(producto.id, colorId) >= MAX_POR_COLOR) {
-    return res.status(400).json({
-      message: `Ese color ya tiene ${MAX_POR_COLOR} fotos. Borrá alguna o subila como foto general.`,
-    });
-  }
+    // Se mira antes de escribir el archivo: una foto rechazada no tiene que quedar ocupando el volumen.
+    const colorId = req.body?.colorId ? Number(req.body.colorId) : null;
+    if (colorId && fotosDelColor(producto.id, colorId) >= MAX_POR_COLOR) {
+      return res.status(400).json({
+        message: `Ese color ya tiene ${MAX_POR_COLOR} fotos. Borrá alguna o subila como foto general.`,
+      });
+    }
 
-  const nombre = `${crypto.randomBytes(12).toString('hex')}${TIPOS_FOTO[req.file.mimetype]}`;
-  fs.writeFileSync(path.join(FOTOS_DIR, nombre), req.file.buffer);
-  const ruta = `/fotos/${nombre}`;
-  const orden = db.prepare('SELECT COALESCE(MAX(orden), -1) + 1 AS n FROM fotos WHERE producto_id = ?')
-    .get(producto.id).n;
-  db.prepare('INSERT INTO fotos (producto_id, ruta, color_id, orden) VALUES (?,?,?,?)')
-    .run(producto.id, ruta, colorId, orden);
+    /*
+     * La miniatura se hace antes de guardar nada. Si sharp no puede abrir el
+     * archivo, no es una imagen aunque el navegador diga que sí —hasta acá sólo
+     * se miraba el tipo que declara el navegador— y no tiene que quedar
+     * ocupando el volumen.
+     */
+    let mini;
+    try {
+      mini = await hacerMiniatura(req.file.buffer);
+    } catch {
+      return res.status(400).json({ message: 'Ese archivo no es una imagen que se pueda abrir. Probá con otro JPG, PNG o WebP.' });
+    }
 
-  // La primera que se sube queda como principal: es la que se ve en la fila
-  // del catálogo, y sin una elegida la fila sale con el hueco gris.
-  if (!cuantas) db.prepare('UPDATE productos SET foto = ? WHERE id = ?').run(ruta, producto.id);
+    const nombre = `${crypto.randomBytes(12).toString('hex')}${TIPOS_FOTO[req.file.mimetype]}`;
+    fs.writeFileSync(path.join(FOTOS_DIR, nombre), req.file.buffer);
+    const ruta = `/fotos/${nombre}`;
+    const nombreMini = nombreMiniatura(nombre);
+    fs.writeFileSync(path.join(FOTOS_DIR, nombreMini), mini);
+    const miniatura = `/fotos/${nombreMini}`;
+    const orden = db.prepare('SELECT COALESCE(MAX(orden), -1) + 1 AS n FROM fotos WHERE producto_id = ?')
+      .get(producto.id).n;
+    db.prepare('INSERT INTO fotos (producto_id, ruta, color_id, orden, miniatura) VALUES (?,?,?,?,?)')
+      .run(producto.id, ruta, colorId, orden, miniatura);
 
-  res.json({ ok: true, ruta, quedan: tope - cuantas - 1 });
+    // La primera que se sube queda como principal: es la que se ve en la fila
+    // del catálogo, y sin una elegida la fila sale con el hueco gris.
+    if (!cuantas) db.prepare('UPDATE productos SET foto = ? WHERE id = ?').run(ruta, producto.id);
+
+    res.json({ ok: true, ruta, miniatura, quedan: tope - cuantas - 1 });
+  } catch (e) { next(e); }
 });
 
 r.put('/fotos/:id', (req, res) => {
@@ -196,6 +215,9 @@ r.delete('/fotos/:id', (req, res) => {
   // El archivo se borra del volumen: si no, cada foto reemplazada queda
   // ocupando lugar para siempre y el volumen se llena sin que nadie lo note.
   try { fs.unlinkSync(path.join(FOTOS_DIR, path.basename(foto.ruta))); } catch { /* ya no está */ }
+  if (foto.miniatura) {
+    try { fs.unlinkSync(path.join(FOTOS_DIR, path.basename(foto.miniatura))); } catch { /* ya no está */ }
+  }
 
   res.json({ ok: true });
 });
@@ -319,7 +341,7 @@ r.get('/productos/:sku', (req, res) => {
     ORDER BY color, orden_talle`).all(p.id);
 
   const fotos = db.prepare(`
-    SELECT f.id, f.ruta, f.orden, f.color_id, c.nombre AS color
+    SELECT f.id, f.ruta, f.orden, f.color_id, f.miniatura, c.nombre AS color
     FROM fotos f LEFT JOIN colores c ON c.id = f.color_id
     WHERE f.producto_id = ? ORDER BY f.orden`).all(p.id);
 

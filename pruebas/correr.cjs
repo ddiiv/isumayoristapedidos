@@ -678,12 +678,28 @@ const planilla = path.join(__dirname, 'catalogo-isuwaya.xlsx');
   chk('la general sin color', null, conFotos.fotos.find((f) => f.ruta === general.json?.ruta)?.color);
   chk('y la principal va primero', conFotos.foto, conFotos.fotos[0]?.ruta);
 
+  /*
+   * La tira de miniaturas bajaba las fotos enteras. Cada foto trae ahora una
+   * versión chica, que se sirve como imagen de verdad. Y como para hacerla hay
+   * que abrir el archivo, lo que no es una imagen rebota aunque el navegador
+   * diga que es un PNG.
+   */
+  const miniatura = conFotos.fotos.find((f) => f.ruta === deColor.json?.ruta)?.miniatura;
+  chk('cada foto trae su miniatura', true, typeof miniatura === 'string' && miniatura.endsWith('.webp'));
+  const miniServida = await pedir(miniatura, { crudo: true });
+  chk('la miniatura se sirve y es una imagen', [200, true], [miniServida.status, String(miniServida.tipo).includes('image/webp')]);
+  const trucho = new FormData();
+  trucho.append('foto', new Blob([Buffer.from('esto no es una imagen')], { type: 'image/png' }), 'trucha.png');
+  chk('un archivo que no es imagen rebota aunque diga que sí', 400,
+    (await pedir(`${rutaAdmin}/fotos`, { metodo: 'POST', cuerpo: trucho, admin: true })).status);
+
   const nuestras = ((await pedir(rutaAdmin, { admin: true })).json.fotos || [])
     .filter((f) => [general.json?.ruta, deColor.json?.ruta].includes(f.ruta));
   for (const f of nuestras) await pedir(`/api/admin/fotos/${f.id}`, { metodo: 'DELETE', admin: true });
   const despues = (await pedir('/api/catalogo')).json.productos.find((x) => x.sku === conFoto.sku);
   chk('y se borran sin dejar rastro', 0,
     (despues.fotos || []).filter((f) => [general.json?.ruta, deColor.json?.ruta].includes(f.ruta)).length);
+  chk('y la miniatura se borra con la foto', 404, (await pedir(miniatura, { crudo: true })).status);
 
   tit('22b. HASTA CINCO FOTOS POR COLOR');
   /*

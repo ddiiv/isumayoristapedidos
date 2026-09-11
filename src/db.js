@@ -266,6 +266,8 @@ asegurarColumna('pedidos', 'original', 'TEXT');
 // aplicando esto sobre los ítems; acá queda por qué el total no es la suma.
 asegurarColumna('pedidos', 'ajuste', 'TEXT');
 asegurarColumna('pedidos', 'actualizado_en', 'TEXT');
+// La versión chica de cada foto, para las miniaturas (ver src/miniaturas.js).
+asegurarColumna('fotos', 'miniatura', 'TEXT');
 
 /*
  * Orden de talles.

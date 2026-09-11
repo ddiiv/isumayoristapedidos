@@ -110,7 +110,7 @@ function vistaProducto() {
 
   const fotos = detalle.fotos.map((f) => `
     <li class="foto-item ${p.foto === f.ruta ? 'principal' : ''}" data-foto="${f.id}">
-      <img src="${esc(f.ruta)}" alt="">
+      <img src="${esc(f.miniatura || f.ruta)}" alt="" loading="lazy">
       <select class="select-mini" data-color-foto="${f.id}" aria-label="Color de la foto">
         <option value="">Foto general</option>
         ${detalle.colores.map((c) => `<option value="${c.id}"${c.id === f.color_id ? ' selected' : ''}>${esc(c.nombre)}</option>`).join('')}

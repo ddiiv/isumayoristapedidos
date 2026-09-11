@@ -180,6 +180,13 @@ muestra al elegir ese color: la lista ofrece **sólo los colores que ese product
 tiene**, porque con los treinta y seis del catálogo se puede etiquetar la foto de
 un pantalón negro como "Salmon" y esa foto no se muestra nunca.
 
+Cada foto tiene además una **miniatura** de 240×320 en WebP —unos 5 KB contra
+unos 100 KB de la foto entera—, que usan la tira del panel del producto y la
+grilla del admin. Se genera al subir la foto; las que ya estaban se completan
+solas al arrancar el servidor, sin correr nada. Si alguna no se pudo generar,
+la pantalla usa la foto entera. Al hacerla se abre el archivo, así que lo que
+no es una imagen de verdad se rechaza aunque el navegador diga que es un JPG.
+
 ## Cargar fotos en masa
 
 Para subir de una vez las fotos de un zip ordenado como
