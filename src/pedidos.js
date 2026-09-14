@@ -26,6 +26,7 @@ const OPCIONALES = ['email', 'entreCalles'];
 const limpiar = (v) => String(v ?? '').trim();
 
 const TOPE_POR_RENGLON = 10_000;
+const LARGO_ENVIO = 60;
 
 /*
  * El CUIT se valida de verdad, con su dígito verificador.
@@ -64,6 +65,17 @@ function validarCliente(datos = {}) {
   }
   if (cliente.codigoPostal && !/^[A-Za-z]?\d{4}[A-Za-z]{0,3}$/.test(cliente.codigoPostal.replace(/\s/g, ''))) {
     errores.codigoPostal = 'El código postal no parece válido (ej. 1425 o C1425DFG).';
+  }
+
+  /*
+   * La forma de envío es texto libre, con un largo que entre en el rótulo.
+   *
+   * La escribe el cliente —cada uno trabaja con su transporte— y termina
+   * impresa en un recuadro de cinco centímetros: un párrafo pegado ahí sale en
+   * letra de hormiga o cortado, y el paquete viaja con el dato a medias.
+   */
+  if (cliente.formaEnvio.length > LARGO_ENVIO) {
+    errores.formaEnvio = `Escribilo más corto: hasta ${LARGO_ENVIO} caracteres.`;
   }
 
   return { cliente, errores };
@@ -211,12 +223,16 @@ function armarPedido(carrito = []) {
   return { items, total, unidades, errores };
 }
 
+/*
+ * El pedido entra esperando stock ('pendiente'): antes de prepararlo ISUWAYA
+ * revisa que tenga todo, y desde el panel lo confirma, lo rearma o lo cancela.
+ */
 function guardarPedido({ cliente, items, total, unidades }) {
   const numero = proximoNumeroDePedido();
   const creadoEn = new Date().toISOString();
   const info = db.prepare(`
     INSERT INTO pedidos (numero, cliente, items, total, unidades, estado, creado_en)
-    VALUES (?, ?, ?, ?, ?, 'nuevo', ?)`)
+    VALUES (?, ?, ?, ?, ?, 'pendiente', ?)`)
     .run(numero, JSON.stringify(cliente), JSON.stringify(items), total, unidades, creadoEn);
   return { id: info.lastInsertRowid, numero, cliente, items, total, unidades, creado_en: creadoEn };
 }

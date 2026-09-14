@@ -2,7 +2,7 @@ const express = require('express');
 const { db } = require('../db');
 const { validarCliente, armarPedido, guardarPedido, leerPedido } = require('../pedidos');
 const { pdfPedido, pdfRotulo } = require('../pdf');
-const { avisarPedido } = require('../notificaciones');
+const { avisarPedido, avisarCliente } = require('../notificaciones');
 const auth = require('../auth');
 
 const r = express.Router();
@@ -214,9 +214,19 @@ r.post('/pedidos', frenar(demasiadosPedidos), async (req, res, next) => {
      * es lo que no se puede perder— y después se avisa.
      */
     const [pdfDelPedido, pdfDelRotulo] = await Promise.all([pdfPedido(pedido), pdfRotulo(pedido)]);
-    const avisos = await avisarPedido(pedido, { pedido: pdfDelPedido, rotulo: pdfDelRotulo });
-    db.prepare('UPDATE pedidos SET aviso_mail = ?, aviso_whatsapp = ? WHERE id = ?')
-      .run(avisos.mail, avisos.whatsapp, pedido.id);
+    /*
+     * A ISUWAYA y al cliente a la vez. A ISUWAYA le llega el pedido para revisar
+     * el stock; al cliente, la copia con el aviso de que falta esa confirmación.
+     * El cliente no recibe el rótulo: es un papel del depósito.
+     */
+    const conCuenta = { ...pedido, cliente_id: req.sesion?.rol === 'cliente' ? req.sesion.cliente.id : null };
+    const [avisosNegocio, avisoCliente] = await Promise.all([
+      avisarPedido(pedido, { pedido: pdfDelPedido, rotulo: pdfDelRotulo }),
+      avisarCliente(conCuenta, 'pendiente', { pdf: pdfDelPedido }),
+    ]);
+    const avisos = { ...avisosNegocio, cliente: avisoCliente };
+    db.prepare('UPDATE pedidos SET aviso_mail = ?, aviso_whatsapp = ?, aviso_cliente = ? WHERE id = ?')
+      .run(avisos.mail, avisos.whatsapp, avisos.cliente, pedido.id);
 
     res.status(201).json({
       numero: pedido.numero,

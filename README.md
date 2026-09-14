@@ -72,8 +72,8 @@ En **Variables** del servicio (`.env.example` las tiene todas comentadas):
 |---|---|
 | `ADMIN_EMAIL` `ADMIN_PASSWORD` | La cuenta del panel. Sin contraseña el panel no abre: no hay valor por defecto a propósito. |
 | `PEDIDOS_EMAIL` `PEDIDOS_WHATSAPP` | A dónde llega cada pedido |
-| `MAIL_HOST` `MAIL_PORT` `MAIL_USER` `MAIL_PASS` `MAIL_FROM` | Envío de correo |
-| `WHATSAPP_META_TOKEN` `WHATSAPP_META_PHONE_NUMBER_ID` `WHATSAPP_TEMPLATE_NAME` `WHATSAPP_TEMPLATE_LANG` | WhatsApp (opcional) |
+| `MAIL_HOST` `MAIL_PORT` `MAIL_USER` `MAIL_PASS` `MAIL_FROM` | Envío de correo. **Sin `MAIL_USER` y `MAIL_PASS` no sale ningún mail**, ni a ISUWAYA ni a los clientes. |
+| `WHATSAPP_META_TOKEN` `WHATSAPP_META_PHONE_NUMBER_ID` `WHATSAPP_TEMPLATE_NAME` `WHATSAPP_TEMPLATE_LANG` | Sólo para la API oficial de Meta. El grupo de empleados se vincula desde el panel, sin variables. |
 | `SESSION_SECRET` | Opcional. Si no está, la app genera una y la guarda en el volumen. |
 
 **No cargues `PORT` ni `DATA_DIR`.** Si pegás en el editor *Raw* el `.env` de tu
@@ -114,21 +114,52 @@ pega tal cual viene, con espacios: el servidor los saca solo.
 
 ### Sobre WhatsApp
 
-Fuera de la ventana de 24 horas, Meta sólo entrega **plantillas aprobadas**. Si
-`WHATSAPP_TEMPLATE_NAME` está cargado se usa esa plantilla con tres variables
-—número de pedido, cliente, total—; si no, se manda texto libre, que llega
-mientras haya una conversación abierta.
+Los pedidos nuevos llegan al **grupo de WhatsApp de los empleados**, con el PDF
+del pedido. Se vincula desde el panel, en la solapa **Avisos**: se escanea un QR
+con el teléfono —como WhatsApp Web— y se elige el grupo.
 
-El WhatsApp **avisa, no adjunta**: la API de Meta manda documentos sólo por URL
-pública, y publicar los datos de un cliente en una dirección adivinable para que
-WhatsApp la baje es peor que no mandar el adjunto. Los PDF van por mail y se
-bajan del panel.
+- **No es la vía oficial de WhatsApp.** Va contra sus condiciones y el número
+  puede quedar bloqueado: usá un número aparte, no el principal del negocio.
+- **La sesión se guarda en el volumen** (`/data/whatsapp-sesion`): un deploy no
+  obliga a escanear de nuevo. Si se desvincula desde el teléfono, la solapa lo
+  muestra y hay que volver a escanear.
+- **Una sola réplica del servicio.** Dos copias del servidor con la misma sesión
+  se desconectan entre sí.
+- Si WhatsApp está cortado, el pedido entra igual y el mail sale igual; el
+  pedido queda con la marca de que el WhatsApp no salió.
+
+La API oficial de Meta sigue disponible por variables para quien no vincule
+nada, pero sólo escribe en grupos creados por ella, de hasta 8 personas y con
+una cuenta verificada por Meta.
 
 **Si ningún aviso sale, el pedido igual queda guardado.** Se ve en el panel con
 la marca «Revisar aviso», y al cliente se le dice la verdad: que el pedido se
 recibió, sin afirmar que ya se avisó.
 
 ---
+
+## El circuito de compra
+
+1. **El cliente hace el pedido.** Entra *esperando stock*. A ISUWAYA le llega por
+   mail, con el remito y el rótulo, y al grupo de WhatsApp con el remito. Al
+   cliente, si dejó su mail, le llega una copia que avisa que falta confirmar el
+   stock.
+2. **ISUWAYA revisa el stock** desde el panel, en el detalle del pedido:
+   - **Confirmar: hay stock de todo** → pasa a *confirmado*.
+   - **Modificar artículos y precio** → si falta algo, se rearma y pasa a
+     *modificado*.
+   - **Marcar cancelado.**
+3. **El cliente se entera por mail** en cada uno de esos pasos, con el pedido
+   como queda y la nota que se haya escrito. Si tiene cuenta, además lo ve en
+   **Mis pedidos**.
+4. Después, *enviado* y *entregado*, desde el mismo panel.
+
+El mail del cliente es opcional: si no lo deja, sólo se entera en «Mis pedidos»,
+y sólo si tiene cuenta. La solapa **Avisos** del panel muestra si el correo está
+configurado.
+
+La forma de envío la escribe el cliente —cada uno trabaja con su transporte—,
+con un máximo de 60 caracteres para que entre en el rótulo.
 
 ## El panel
 
@@ -316,3 +347,21 @@ npm test           # en otra
 adversarias: qué pasa cuando alguien manda lo que la pantalla no deja mandar
 —un precio falso, un SKU de otro producto, cantidades negativas, una cookie de
 admin falsificada—.
+
+### Las otras suites
+
+- `pruebas/pdf.cjs` — el remito y el rótulo, midiendo que nada se salga del
+  papel ni quede encimado. No necesita el servidor.
+- `pruebas/whatsapp.cjs` — el aviso al grupo de WhatsApp, con un WhatsApp de
+  mentira. No necesita el servidor.
+- `pruebas/panel.cjs` — seguimiento, estadísticas, colores y el circuito de
+  compra. **Escribe pedidos y reimporta la planilla**: correla contra una copia
+  de la base. Los avisos por mail se prueban con un correo de prueba que guarda
+  los mails en una carpeta en vez de mandarlos:
+
+  ```bash
+  cp -r datos /tmp/copia
+  node pruebas/correo-de-prueba.cjs 2526 /tmp/correos &
+  DATA_DIR=/tmp/copia PORT=8091 MAIL_HOST=127.0.0.1 MAIL_PORT=2526 MAIL_USER=x MAIL_PASS=x PEDIDOS_EMAIL=pedidos@prueba.test node server.js &
+  API=http://localhost:8091 CORREOS=/tmp/correos PEDIDOS_EMAIL=pedidos@prueba.test node pruebas/panel.cjs
+  ```

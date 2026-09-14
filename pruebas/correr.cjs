@@ -727,6 +727,22 @@ const planilla = path.join(__dirname, 'catalogo-isuwaya.xlsx');
     await pedir(`/api/admin/fotos/${f.id}`, { metodo: 'DELETE', admin: true });
   }
 
+  tit('23. LA FORMA DE ENVÍO LA ESCRIBE EL CLIENTE');
+  /*
+   * Era una lista cerrada de siete transportes, y cada mayorista del interior
+   * trabaja con el suyo. Ahora se escribe, con un largo que entre en el
+   * recuadro del rótulo.
+   */
+  const conEnvio = (formaEnvio) => pedir('/api/pedidos/previsualizar', {
+    metodo: 'POST',
+    cuerpo: { cliente: { ...CLIENTE_OK, formaEnvio }, carrito: [{ skuAgrupador: p.sku, curvas: 1, cantidades: {} }] },
+  });
+  chk('un transporte que no estaba en ninguna lista se acepta', undefined,
+    (await conEnvio('Expreso Cruz del Sur a domicilio')).json?.erroresCliente?.formaEnvio);
+  chk('pero con un largo que entre en el rótulo', true,
+    /hasta 60/.test((await conEnvio('x'.repeat(61))).json?.erroresCliente?.formaEnvio || ''));
+  chk('y sigue siendo obligatoria', true, Boolean((await conEnvio('  ')).json?.erroresCliente?.formaEnvio));
+
   tit('21. CONFIRMAR PEDIDOS TIENE UN TECHO POR IP');
   /*
    * Va última a propósito: deja la IP frenada un minuto, así que cualquier

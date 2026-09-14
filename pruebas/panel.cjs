@@ -96,18 +96,17 @@ const mover = (numero, estado, nota) => pedir(
   chk('hay un producto con grilla para trabajar', true, Boolean(producto));
   const [a, b, c] = producto.combinaciones;
 
-  tit('1. EL PEDIDO NUEVO NACE CONFIRMADO Y CON SU LÍNEA DE TIEMPO');
+  tit('1. EL PEDIDO NUEVO ESPERA LA CONFIRMACIÓN DEL STOCK');
   /*
-   * En la base el pedido se guarda en 'nuevo' —lo escribe `src/pedidos.js`, que
-   * no sabe de seguimiento—. Para el cliente y para el panel eso es
-   * "confirmado", y la traducción tiene que estar hecha en el servidor: si la
-   * hiciera cada pantalla, la primera que se olvide muestra "nuevo".
+   * Un pedido ya no se da por confirmado al entrar: ISUWAYA revisa primero que
+   * tenga todo el stock. La línea de tiempo arranca en ese paso, con la fecha en
+   * que entró el pedido.
    */
   const numero = await pedidoNuevo(producto, { [a.sku]: 4, [b.sku]: 2 });
   const recien = await pedir(`/api/admin/pedidos/${numero}`, { como: 'admin' });
-  chk('el estado que se sirve es confirmado', 'confirmado', recien.json.pedido.estado);
+  chk('entra esperando que se confirme el stock', 'pendiente', recien.json.pedido.estado);
   chk('la línea de tiempo arranca con un paso', 1, recien.json.pedido.historial.length);
-  chk('y ese paso es la confirmación', 'confirmado', recien.json.pedido.historial[0].estado);
+  chk('y ese paso es la recepción', 'pendiente', recien.json.pedido.historial[0].estado);
   chk('con la fecha en que entró el pedido',
     recien.json.pedido.creado_en, recien.json.pedido.historial[0].fecha);
   chk('todavía no hay nada guardado del pedido original', null, recien.json.pedido.original);
@@ -119,10 +118,10 @@ const mover = (numero, estado, nota) => pedir(
    * de clic; no alcanza para que un pedido entregado no vuelva a confirmado
    * desde la consola del navegador, que es donde queda el historial mintiendo.
    */
-  chk('confirmado no salta directo a entregado', 409, (await mover(numero, 'entregado')).status);
+  chk('sin confirmar el stock no salta directo a entregado', 409, (await mover(numero, 'entregado')).status);
   chk('un estado inventado no entra', 400, (await mover(numero, 'volando')).status);
   chk('a modificado no se llega eligiéndolo', 409, (await mover(numero, 'modificado')).status);
-  chk('y no se puede quedar en el que ya está', 409, (await mover(numero, 'confirmado')).status);
+  chk('y no se puede quedar en el que ya está', 409, (await mover(numero, 'pendiente')).status);
 
   const sinSesion = await pedir(`/api/admin/pedidos/${numero}/estado`, {
     metodo: 'PUT', cuerpo: { estado: 'enviado' },
@@ -224,19 +223,112 @@ const mover = (numero, estado, nota) => pedir(
 
   const entregado = (await pedir(`/api/admin/pedidos/${numero}`, { como: 'admin' })).json.pedido;
   chk('la línea de tiempo guardó los cinco pasos', 5, entregado.historial.length);
-  chk('en orden', ['confirmado', 'modificado', 'modificado', 'enviado', 'entregado'],
+  chk('en orden', ['pendiente', 'modificado', 'modificado', 'enviado', 'entregado'],
     entregado.historial.map((h) => h.estado));
   chk('y cada uno con su fecha', true, entregado.historial.every((h) => !Number.isNaN(Date.parse(h.fecha))));
 
   tit('7. CANCELAR SE PUEDE HASTA ANTES DE ENTREGAR');
   const paraCancelar = await pedidoNuevo(producto, { [a.sku]: 1 });
-  chk('un confirmado se cancela', 200, (await mover(paraCancelar, 'cancelado', 'Lo dio de baja.')).status);
+  chk('un pedido esperando stock se cancela', 200, (await mover(paraCancelar, 'cancelado', 'Lo dio de baja.')).status);
   chk('pero después ya no se mueve', 409, (await mover(paraCancelar, 'enviado')).status);
   const editarCancelado = await pedir(`/api/admin/pedidos/${paraCancelar}/items`, {
     metodo: 'PUT', como: 'admin',
     cuerpo: { carrito: [{ skuAgrupador: producto.sku, cantidades: { [a.sku]: 5 } }] },
   });
   chk('ni se edita', 409, editarCancelado.status);
+
+  tit('7b. EL CIRCUITO DE COMPRA: CONFIRMAR EL STOCK Y AVISAR');
+  {
+    /*
+     * El pedido entra esperando stock. Al negocio le llega con los dos papeles
+     * y al cliente una copia que avisa que falta confirmar. Cuando el panel lo
+     * confirma, lo rearma o lo cancela, el cliente se entera por mail.
+     *
+     * Necesita el correo de prueba (pruebas/correo-de-prueba.cjs): CORREOS es la
+     * carpeta donde guarda los mails y PEDIDOS_EMAIL el correo del negocio, los
+     * dos iguales a los del servidor.
+     */
+    const CORREOS = process.env.CORREOS;
+    const NEGOCIO = process.env.PEDIDOS_EMAIL;
+    if (!CORREOS || !NEGOCIO) {
+      console.log('  (sin CORREOS y PEDIDOS_EMAIL: se saltean las pruebas de los avisos por mail)');
+    } else {
+      const fs = require('node:fs');
+      const path = require('node:path');
+      const esperar = (ms) => new Promise((r) => setTimeout(r, ms));
+      // El cuerpo viaja en quoted-printable y el asunto en encoded-word: se decodifican para leerlos.
+      const qp = (t) => Buffer.from(t.replace(/=\r\n/g, '')
+        .replace(/=([0-9A-F]{2})/g, (_, h) => String.fromCharCode(parseInt(h, 16))), 'latin1').toString('utf8');
+      const asuntoDe = (crudo) => {
+        const m = crudo.match(/^Subject: (.*(?:\r\n[ \t].*)*)/m);
+        if (!m) return '';
+        return m[1].replace(/\r\n[ \t]/g, ' ').replace(/=\?UTF-8\?([QB])\?([^?]*)\?=\s*/gi, (_, tipo, x) => (tipo.toUpperCase() === 'B'
+          ? Buffer.from(x, 'base64').toString('utf8')
+          : Buffer.from(x.replace(/_/g, ' ').replace(/=([0-9A-F]{2})/gi, (__, h) => String.fromCharCode(parseInt(h, 16))), 'latin1').toString('utf8'))).trim();
+      };
+      const leidos = new Set(fs.readdirSync(CORREOS));
+      const nuevos = async (cuantos) => {
+        for (let i = 0; i < 50 && fs.readdirSync(CORREOS).filter((x) => !leidos.has(x)).length < cuantos; i += 1) await esperar(100);
+        const archivos = fs.readdirSync(CORREOS).filter((x) => !leidos.has(x)).sort();
+        archivos.forEach((x) => leidos.add(x));
+        return archivos.map((x) => JSON.parse(fs.readFileSync(path.join(CORREOS, x), 'utf8'))).map((m) => ({
+          para: m.para, crudo: m.crudo, texto: qp(m.crudo), asunto: asuntoDe(m.crudo),
+          adjuntos: [...m.crudo.matchAll(/filename="?([^"\r\n;]+)/g)].map((x) => x[1]).filter((v, i, a) => a.indexOf(v) === i),
+        }));
+      };
+
+      const numeroCircuito = await pedidoNuevo(producto, { [a.sku]: 2 });
+      const alEntrar = await nuevos(2);
+      const alNegocio = alEntrar.find((m) => m.para.includes(NEGOCIO));
+      const alCliente = alEntrar.find((m) => m.para.includes(CLIENTE.email));
+      chk('al negocio le llega el pedido nuevo', true, Boolean(alNegocio));
+      chk('con el remito y el rótulo', [`${numeroCircuito}-pedido.pdf`, `${numeroCircuito}-rotulo.pdf`], alNegocio?.adjuntos);
+      chk('y le avisa que falta confirmar el stock', true, /esperando confirmación de stock/i.test(alNegocio?.texto || ''));
+      chk('al cliente le llega la copia', `Recibimos tu pedido ${numeroCircuito}`, alCliente?.asunto);
+      chk('sólo con el remito: el rótulo es del depósito', [`${numeroCircuito}-pedido.pdf`], alCliente?.adjuntos);
+      chk('le dice que todavía falta confirmar el stock', true, /revisamos que tengamos todo el stock/.test(alCliente?.texto || ''));
+      chk('y si responde, le escribe al negocio', true, alCliente?.crudo.includes(`Reply-To: ${NEGOCIO}`));
+      chk('el panel anota que el cliente se enteró', 'ok',
+        (await pedir(`/api/admin/pedidos/${numeroCircuito}`, { como: 'admin' })).json.pedido.aviso_cliente);
+
+      const confirmar = await mover(numeroCircuito, 'confirmado', 'Está todo.');
+      chk('se confirma el stock', [200, 'confirmado'], [confirmar.status, confirmar.json?.pedido?.estado]);
+      chk('y el aviso al cliente sale', 'ok', confirmar.json?.avisoCliente);
+      const alConfirmar = await nuevos(1);
+      chk('le llega la confirmación', `Confirmamos tu pedido ${numeroCircuito}`, alConfirmar[0]?.asunto);
+      chk('con el pedido y la nota del panel', [true, true],
+        [alConfirmar[0]?.adjuntos.includes(`${numeroCircuito}-pedido.pdf`), /Está todo\./.test(alConfirmar[0]?.texto || '')]);
+      chk('un confirmado no vuelve a esperar stock', 409, (await mover(numeroCircuito, 'pendiente')).status);
+
+      const numeroSinStock = await pedidoNuevo(producto, { [a.sku]: 4, [b.sku]: 2 });
+      await nuevos(2);
+      const rearmado = await pedir(`/api/admin/pedidos/${numeroSinStock}/items`, {
+        metodo: 'PUT', como: 'admin',
+        cuerpo: { carrito: [{ skuAgrupador: producto.sku, cantidades: { [a.sku]: 4 } }], nota: 'No quedaba el segundo.' },
+      });
+      chk('sin stock de todo se rearma desde que entra', [200, 'modificado'], [rearmado.status, rearmado.json?.pedido?.estado]);
+      const alRearmar = await nuevos(1);
+      chk('y al cliente le llega cómo queda', `Tu pedido ${numeroSinStock} tiene cambios`, alRearmar[0]?.asunto);
+      chk('con el pedido rearmado y la nota', [true, true],
+        [alRearmar[0]?.adjuntos.includes(`${numeroSinStock}-pedido.pdf`), /No quedaba el segundo\./.test(alRearmar[0]?.texto || '')]);
+
+      await mover(numeroSinStock, 'cancelado', 'Nos quedamos sin stock.');
+      const alCancelar = await nuevos(1);
+      chk('al cancelar también se entera', `Tu pedido ${numeroSinStock} fue cancelado`, alCancelar[0]?.asunto);
+      chk('sin adjunto: no hay nada que preparar', [], alCancelar[0]?.adjuntos);
+
+      const sinMail = await pedir('/api/pedidos', {
+        metodo: 'POST',
+        cuerpo: { cliente: { ...CLIENTE, email: '' }, carrito: [{ skuAgrupador: producto.sku, curvas: 0, cantidades: { [a.sku]: 1 } }] },
+      });
+      chk('sin mail del cliente el pedido entra igual', 201, sinMail.status);
+      chk('y queda dicho por qué el cliente no recibió nada', 'omitido: el cliente no dejó mail', sinMail.json?.avisos?.cliente);
+      chk('al negocio le llega igual', true, (await nuevos(1)).some((m) => m.para.includes(NEGOCIO)));
+
+      const est = (await pedir('/api/admin/estadisticas', { como: 'admin' })).json;
+      chk('las estadísticas cuentan los que esperan stock', true, (est.porEstado || []).some((e) => e.estado === 'pendiente'));
+    }
+  }
 
   tit('8. EL CLIENTE VE LO SUYO Y NADA MÁS');
   const mios = await pedir('/api/cuenta/pedidos', { como: 'cliente' });
@@ -272,7 +364,7 @@ const mover = (numero, estado, nota) => pedir(
    * traerlos igual: si no, devuelve vacío sobre datos que están ahí.
    */
   const todos = await pedir('/api/admin/pedidos?limite=1000', { como: 'admin' });
-  const CONOCIDOS = ['confirmado', 'modificado', 'enviado', 'entregado', 'cancelado'];
+  const CONOCIDOS = ['pendiente', 'confirmado', 'modificado', 'enviado', 'entregado', 'cancelado'];
   chk('ningún pedido se sirve con un estado de los viejos', [],
     [...new Set(todos.json.pedidos.map((p) => p.estado))].filter((e) => !CONOCIDOS.includes(e)));
 
@@ -373,6 +465,31 @@ const mover = (numero, estado, nota) => pedir(
       chk('el único color de un producto no se quita', 409,
         (await pedir(`/api/admin/productos/${encodeURIComponent(deUnColor.sku)}/colores/${detUno.colores[0].id}`, { metodo: 'DELETE', como: 'admin' })).status);
     }
+  }
+
+  tit('9d. LOS AVISOS SE VEN DESDE EL PANEL');
+  {
+    /*
+     * La solapa "Avisos" dice si el mail está configurado y cómo está el
+     * WhatsApp del grupo. Acá no se vincula nada de verdad —eso necesita un
+     * teléfono que escanee el QR—: se prueba que las rutas pidan administrador
+     * y que, sin WhatsApp conectado, lo que depende de él se rechace con motivo.
+     */
+    chk('sin ser administrador no se ven', 401, (await pedir('/api/admin/avisos')).status);
+    const avisos = await pedir('/api/admin/avisos', { como: 'admin' });
+    chk('responde', 200, avisos.status);
+    chk('dice si el mail está configurado', 'boolean', typeof avisos.json?.mail?.configurado);
+    chk('y cómo está el WhatsApp', 'string', typeof avisos.json?.whatsapp?.conexion);
+    chk('el QR sólo viaja mientras se está vinculando', true,
+      avisos.json?.whatsapp?.conexion === 'esperando-qr' || avisos.json?.whatsapp?.qr === null);
+    if (avisos.json?.whatsapp?.conexion !== 'conectado') {
+      const grupo = await pedir('/api/admin/whatsapp/grupo', { metodo: 'PUT', como: 'admin', cuerpo: { id: 'inventado@g.us' } });
+      chk('sin WhatsApp conectado no se elige grupo', 409, grupo.status);
+      chk('y dice por qué', true, /no está conectado/i.test(grupo.json?.message || ''));
+      chk('tampoco se manda la prueba', 409, (await pedir('/api/admin/whatsapp/prueba', { metodo: 'POST', como: 'admin' })).status);
+    }
+    chk('vincular pide administrador', 401, (await pedir('/api/admin/whatsapp/vincular', { metodo: 'POST' })).status);
+    chk('desvincular también', 401, (await pedir('/api/admin/whatsapp/desvincular', { metodo: 'POST' })).status);
   }
 
   tit('10. LAS ESTADÍSTICAS CIERRAN');

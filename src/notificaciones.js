@@ -1,5 +1,6 @@
 const nodemailer = require('nodemailer');
 const axios = require('axios');
+const whatsapp = require('./whatsapp');
 
 /*
  * Los avisos de un pedido nuevo.
@@ -56,6 +57,8 @@ ${lineas}
 
 TOTAL: ${pedido.unidades} unidades — ${pesos(pedido.total)}
 
+ESTADO: esperando confirmación de stock. Confirmalo, rearmalo o cancelalo desde el panel → Pedidos.
+
 Adjuntos: el remito A4 para armar el pedido y el rótulo de 10×15 para la bolsa.
 `;
 }
@@ -93,7 +96,14 @@ async function avisarPorMail(pedido, adjuntos) {
  * WHATSAPP_TEMPLATE_NAME está cargado se usa esa; si no, se manda texto libre,
  * que funciona mientras haya conversación abierta.
  */
-async function avisarPorWhatsapp(pedido) {
+async function avisarPorWhatsapp(pedido, adjuntos = {}) {
+  /*
+   * Si hay un WhatsApp vinculado desde el panel con un grupo elegido, el
+   * aviso va a ese grupo, con el PDF. La API de Meta queda para quien la
+   * configure por variables y no vincule nada.
+   */
+  if (whatsapp.configurado()) return whatsapp.avisarGrupo(pedido, adjuntos.pedido);
+
   const destino = String(process.env.PEDIDOS_WHATSAPP || '').replace(/\D/g, '');
   const token = process.env.WHATSAPP_META_TOKEN;
   const phoneId = process.env.WHATSAPP_META_PHONE_NUMBER_ID;
@@ -141,7 +151,7 @@ async function avisarPorWhatsapp(pedido) {
 async function avisarPedido(pedido, adjuntos) {
   const [mail, whatsapp] = await Promise.allSettled([
     avisarPorMail(pedido, adjuntos),
-    avisarPorWhatsapp(pedido),
+    avisarPorWhatsapp(pedido, adjuntos),
   ]);
   const leer = (r) => (r.status === 'fulfilled'
     ? (r.value.ok ? 'ok' : `omitido: ${r.value.motivo}`)
@@ -149,4 +159,70 @@ async function avisarPedido(pedido, adjuntos) {
   return { mail: leer(mail), whatsapp: leer(whatsapp) };
 }
 
-module.exports = { avisarPedido, cuerpoDelMail };
+/*
+ * Los avisos al cliente.
+ *
+ * El pedido ya no se da por confirmado al entrar: ISUWAYA revisa primero que
+ * tenga todo el stock. El cliente tiene que enterarse de las dos puntas —que lo
+ * recibimos, y qué pasó después— sin escribir a preguntar. Va por mail si lo
+ * dejó; si no, lo ve en «Mis pedidos» cuando tiene cuenta.
+ *
+ * Nunca tira error: el pedido o el cambio de estado ya están guardados cuando
+ * esto corre, y un mail que no sale no puede deshacerlos. Devuelve qué pasó,
+ * para dejarlo anotado en el pedido.
+ */
+const AL_CLIENTE = {
+  pendiente: {
+    asunto: (p) => `Recibimos tu pedido ${p.numero}`,
+    texto: 'Recibimos tu pedido y te lo adjuntamos.\n\n'
+      + 'Antes de prepararlo revisamos que tengamos todo el stock. Te escribimos apenas\n'
+      + 'lo confirmemos, y si falta algo te avisamos cómo queda.',
+  },
+  confirmado: {
+    asunto: (p) => `Confirmamos tu pedido ${p.numero}`,
+    texto: 'Tenemos el stock de todo lo que pediste y ya estamos preparando tu pedido.\n'
+      + 'Te adjuntamos el detalle.',
+  },
+  modificado: {
+    asunto: (p) => `Tu pedido ${p.numero} tiene cambios`,
+    texto: 'No teníamos todo lo que pediste y ajustamos tu pedido. Te adjuntamos cómo\n'
+      + 'queda: es el que vamos a preparar.',
+  },
+  cancelado: {
+    asunto: (p) => `Tu pedido ${p.numero} fue cancelado`,
+    texto: 'Tu pedido fue cancelado y no se va a despachar.',
+  },
+};
+
+async function avisarCliente(pedido, estado, { pdf = null, nota = null } = {}) {
+  const modelo = AL_CLIENTE[estado];
+  if (!modelo) return null;
+  const destino = String(pedido?.cliente?.email || '').trim();
+  if (!destino) return 'omitido: el cliente no dejó mail';
+  const t = transporte();
+  if (!t) return 'omitido: sin credenciales de correo';
+
+  const c = pedido.cliente;
+  const cuerpo = `Hola${c.nombre ? ` ${c.nombre}` : ''}:\n\n${modelo.texto}\n`
+    + (nota ? `\nNota de ISUWAYA: ${nota}\n` : '')
+    + `\nPedido ${pedido.numero} — ${pedido.unidades} unidades — ${pesos(pedido.total)}\n`
+    + `Envío: ${c.formaEnvio} · ${c.ciudad} (${c.codigoPostal}), ${c.provincia}\n`
+    + (pedido.cliente_id ? '\nLo podés seguir en «Mis pedidos», entrando a tu cuenta.\n' : '')
+    + '\nSi tenés alguna duda, respondé este mail.\n\nISUWAYA Mayorista\n';
+  try {
+    await t.sendMail({
+      from: process.env.MAIL_FROM || `ISUWAYA Mayorista <${process.env.MAIL_USER}>`,
+      to: destino,
+      // Si el cliente responde, que le llegue a quien gestiona los pedidos y no a la casilla que manda.
+      replyTo: process.env.PEDIDOS_EMAIL || undefined,
+      subject: modelo.asunto(pedido),
+      text: cuerpo,
+      attachments: pdf ? [{ filename: `${pedido.numero}-pedido.pdf`, content: pdf }] : [],
+    });
+    return 'ok';
+  } catch (e) {
+    return `error: ${String(e?.message || e).slice(0, 200)}`;
+  }
+}
+
+module.exports = { avisarPedido, avisarCliente, cuerpoDelMail };

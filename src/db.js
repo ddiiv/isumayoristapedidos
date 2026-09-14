@@ -266,6 +266,8 @@ asegurarColumna('pedidos', 'original', 'TEXT');
 // aplicando esto sobre los ítems; acá queda por qué el total no es la suma.
 asegurarColumna('pedidos', 'ajuste', 'TEXT');
 asegurarColumna('pedidos', 'actualizado_en', 'TEXT');
+// Qué pasó con el último aviso al cliente: el panel muestra si se enteró.
+asegurarColumna('pedidos', 'aviso_cliente', 'TEXT');
 // La versión chica de cada foto, para las miniaturas (ver src/miniaturas.js).
 asegurarColumna('fotos', 'miniatura', 'TEXT');
 
@@ -388,7 +390,8 @@ function ordenDeTalle(talle) {
  * no vuelva a "confirmado" desde una consola abierta a dos líneas de distancia.
  */
 const ESTADOS = {
-  confirmado: { etiqueta: 'Confirmado', descripcion: 'Lo recibimos y está en preparación.' },
+  pendiente:  { etiqueta: 'Esperando stock', descripcion: 'Lo recibimos y estamos revisando que tengamos todo.' },
+  confirmado: { etiqueta: 'Confirmado', descripcion: 'Hay stock de todo y está en preparación.' },
   modificado: { etiqueta: 'Modificado', descripcion: 'Cambiaron artículos o el precio acordado.' },
   enviado:    { etiqueta: 'Enviado',    descripcion: 'Salió del depósito.' },
   entregado:  { etiqueta: 'Entregado',  descripcion: 'Llegó a destino.' },
@@ -396,12 +399,15 @@ const ESTADOS = {
 };
 
 /** El camino normal, para dibujar la línea de tiempo. `cancelado` va aparte. */
-const CAMINO = ['confirmado', 'modificado', 'enviado', 'entregado'];
+const CAMINO = ['pendiente', 'confirmado', 'modificado', 'enviado', 'entregado'];
 
 const TRANSICIONES = {
   // A 'modificado' no se llega eligiéndolo de una lista: se llega editando el
   // pedido. Un estado que dice que algo cambió sin que nada haya cambiado es
   // peor que no tenerlo.
+  // Un pedido nuevo espera que se revise el stock: si está todo se confirma; si
+  // falta algo se rearma y pasa a 'modificado'; si no se puede, se cancela.
+  pendiente:  ['confirmado', 'cancelado'],
   confirmado: ['enviado', 'cancelado'],
   modificado: ['enviado', 'cancelado'],
   enviado:    ['entregado', 'cancelado'],
@@ -414,9 +420,9 @@ const TRANSICIONES = {
  *
  * La base de producción tiene pedidos en 'nuevo' y 'preparando', que es lo que
  * había antes de que esto fuera un seguimiento. Reescribirlos en una migración
- * sería tocar el historial del negocio para acomodar un nombre; además el
- * insert de un pedido nuevo sigue naciendo en 'nuevo', así que la traducción
- * hace falta igual y este es el único lugar donde vive.
+ * sería tocar el historial del negocio para acomodar un nombre. Los pedidos
+ * de ahora nacen en 'pendiente': 'nuevo' sólo lo tienen los que entraron antes
+ * de que hubiera que confirmar el stock, y esos ya se daban por confirmados.
  */
 const LEGADOS = { nuevo: 'confirmado', preparando: 'confirmado' };
 
@@ -436,13 +442,23 @@ const puedePasar = (desde, hasta) => (TRANSICIONES[normalizarEstado(desde)] || [
  * mientras tanto se muestra derivado del pedido: el resultado es el mismo y no
  * hay filas escritas por una lectura.
  */
+/*
+ * El primer paso de la línea de tiempo depende de cómo entró el pedido: los de
+ * ahora esperan que se confirme el stock; los de antes ya entraban confirmados.
+ */
+const pasoInicial = (estado) => (normalizarEstado(estado) === 'pendiente'
+  ? { estado: 'pendiente', nota: 'Recibimos tu pedido. Estamos revisando que tengamos todo el stock.' }
+  : { estado: 'confirmado', nota: 'Recibimos tu pedido.' });
+
 function asentarInicio(pedidoId) {
   const hay = db.prepare('SELECT COUNT(*) n FROM pedido_estados WHERE pedido_id = ?').get(pedidoId).n;
   if (hay) return;
-  const p = db.prepare('SELECT creado_en FROM pedidos WHERE id = ?').get(pedidoId);
+  const p = db.prepare('SELECT creado_en, estado FROM pedidos WHERE id = ?').get(pedidoId);
   if (!p) return;
+  // Se llama antes de cambiar el estado: todavía es el estado con el que entró.
+  const inicio = pasoInicial(p.estado);
   db.prepare('INSERT INTO pedido_estados (pedido_id, estado, nota, fecha) VALUES (?, ?, ?, ?)')
-    .run(pedidoId, 'confirmado', 'Recibimos tu pedido.', p.creado_en);
+    .run(pedidoId, inicio.estado, inicio.nota, p.creado_en);
 }
 
 /** Deja el pedido en `estado` y anota por qué. Devuelve la fila del historial. */
@@ -464,9 +480,9 @@ function historialDePedido(pedido) {
     WHERE pedido_id = ? ORDER BY id`).all(pedido.id);
 
   if (!filas.length) {
-    const inicio = { estado: 'confirmado', nota: 'Recibimos tu pedido.', cambios: null, fecha: pedido.creado_en };
     const actual = normalizarEstado(pedido.estado);
-    if (actual === 'confirmado') return [inicio];
+    const inicio = { ...pasoInicial(pedido.estado), cambios: null, fecha: pedido.creado_en };
+    if (actual === 'confirmado' || actual === 'pendiente') return [inicio];
     /*
      * Un pedido de antes del seguimiento: se sabe dónde está, no cuándo llegó
      * ahí. Se dice así, sin fecha, en vez de inventarle una que parezca real.

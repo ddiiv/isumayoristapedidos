@@ -23,8 +23,7 @@ const PROVINCIAS = ['Buenos Aires', 'CABA', 'Catamarca', 'Chaco', 'Chubut', 'Có
   'Entre Ríos', 'Formosa', 'Jujuy', 'La Pampa', 'La Rioja', 'Mendoza', 'Misiones', 'Neuquén',
   'Río Negro', 'Salta', 'San Juan', 'San Luis', 'Santa Cruz', 'Santa Fe', 'Santiago del Estero',
   'Tierra del Fuego', 'Tucumán'];
-const ENVIOS = ['Andreani a sucursal', 'Andreani a domicilio', 'Correo Argentino a sucursal',
-  'Correo Argentino a domicilio', 'Vía Cargo', 'Transporte propio del cliente', 'Retiro en el depósito'];
+// La forma de envío se escribe, no se elige: ver la nota en pedido.js.
 
 const api = async (ruta, opciones = {}) => {
   const r = await fetch(ruta, {
@@ -121,7 +120,7 @@ function vistaRegistro() {
       ${campo('codigoPostal', 'Código postal', { obligatorio: true, valor: d.codigoPostal })}
       ${campo('direccion', 'Dirección', { obligatorio: true, valor: d.direccion })}
       ${campo('entreCalles', 'Entre calles', { ancho: true, valor: d.entreCalles, ayuda: 'Opcional' })}
-      ${campo('formaEnvio', 'Forma de envío habitual', { obligatorio: true, ancho: true, opciones: ENVIOS, valor: d.formaEnvio })}
+      ${campo('formaEnvio', 'Forma de envío o transporte habitual', { obligatorio: true, ancho: true, valor: d.formaEnvio, ayuda: 'Ej.: Andreani a sucursal, Vía Cargo, transporte propio' })}
     </form>
     <p class="nota">
       ¿Ya tenés cuenta? <button class="btn texto enlace-texto" data-vista="entrar" >Entrá acá</button>
@@ -144,7 +143,7 @@ function vistaCuenta() {
       ${campo('codigoPostal', 'Código postal', { obligatorio: true, valor: d.codigoPostal })}
       ${campo('direccion', 'Dirección', { obligatorio: true, valor: d.direccion })}
       ${campo('entreCalles', 'Entre calles', { ancho: true, valor: d.entreCalles })}
-      ${campo('formaEnvio', 'Forma de envío habitual', { obligatorio: true, ancho: true, opciones: ENVIOS, valor: d.formaEnvio })}
+      ${campo('formaEnvio', 'Forma de envío o transporte habitual', { obligatorio: true, ancho: true, valor: d.formaEnvio, ayuda: 'Ej.: Andreani a sucursal, Vía Cargo, transporte propio' })}
     </form>
     <p class="nota separada">
       <button class="btn texto enlace-texto" data-vista="pedidos" >Ver mis pedidos</button>
@@ -174,6 +173,7 @@ let misPedidos = null;
 let pedidoAbierto = null;
 
 const ETIQUETAS = {
+  pendiente: 'Esperando confirmación',
   confirmado: 'Confirmado', modificado: 'Modificado',
   enviado: 'Enviado', entregado: 'Entregado', cancelado: 'Cancelado',
 };
@@ -194,7 +194,7 @@ function camino(p) {
   if (p.estado === 'cancelado') {
     return `<p class="seg-cortado">Este pedido está cancelado. Escribinos si lo querés rehacer.</p>`;
   }
-  const pasos = ['confirmado'];
+  const pasos = ['pendiente', 'confirmado'];
   if (p.fueModificado || p.estado === 'modificado') pasos.push('modificado');
   pasos.push('enviado', 'entregado');
   const donde = Math.max(0, pasos.indexOf(p.estado));
@@ -202,8 +202,10 @@ function camino(p) {
   return `<ol class="seg-camino" data-estado="${esc(p.estado)}">${pasos.map((paso, i) => {
     const clases = [i <= donde ? 'hecho' : '', i === donde ? 'actual' : '', paso === 'modificado' ? 'aviso' : '']
       .filter(Boolean).join(' ');
-    return `<li class="${clases}"><span class="punto"></span><span class="etq">${esc(ETIQUETAS[paso])}</span></li>`;
-  }).join('')}</ol>`;
+    return `<li class="${clases}"><span class="punto"></span><span class="etq">${esc(paso === 'pendiente' ? 'Recibido' : ETIQUETAS[paso])}</span></li>`;
+  }).join('')}</ol>${p.estado === 'pendiente'
+    ? '<p class="seg-espera">Estamos revisando que tengamos todo el stock. Te avisamos apenas lo confirmemos.</p>'
+    : ''}`;
 }
 
 const cabeceraDePedido = (p) => `

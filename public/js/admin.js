@@ -481,16 +481,18 @@ function vistaMasivo() {
  * botón que va a fallar. Cuando cambie el camino en `src/db.js`, cambia acá.
  */
 const ESTADOS = {
+  pendiente: 'Esperando stock',
   confirmado: 'Confirmado', modificado: 'Modificado',
   enviado: 'Enviado', entregado: 'Entregado', cancelado: 'Cancelado',
 };
 const SIGUIENTES = {
+  pendiente: ['confirmado', 'cancelado'],
   confirmado: ['enviado', 'cancelado'],
   modificado: ['enviado', 'cancelado'],
   enviado: ['entregado', 'cancelado'],
   entregado: [], cancelado: [],
 };
-const EDITABLES = ['confirmado', 'modificado'];
+const EDITABLES = ['pendiente', 'confirmado', 'modificado'];
 
 const momento = (iso, conHora = true) => (iso
   ? new Date(iso).toLocaleString('es-AR', conHora
@@ -675,14 +677,14 @@ function vistaPedidoDetalle() {
         <div class="acciones">
           ${siguientes.map((e) => `
             <button class="btn ${e === 'cancelado' ? 'borde peligro' : ''}" data-mover-a="${e}">
-              Marcar ${esc(ESTADOS[e].toLowerCase())}
+              ${esc(e === 'confirmado' ? 'Confirmar: hay stock de todo' : 'Marcar ' + ESTADOS[e].toLowerCase())}
             </button>`).join('')}
           ${EDITABLES.includes(p.estado) ? '<button class="btn borde" data-editar-pedido>Modificar artículos y precio</button>' : ''}
         </div>`
       : `<p class="sub">Un pedido ${esc(ESTADOS[p.estado].toLowerCase())} ya no se mueve: es el final del camino.</p>`}
 
       <h4 class="separado">Avisos</h4>
-      <p class="sub">Mail: ${esc(p.aviso_mail || '—')}<br>WhatsApp: ${esc(p.aviso_whatsapp || '—')}</p>
+      <p class="sub">Mail: ${esc(p.aviso_mail || '—')}<br>WhatsApp: ${esc(p.aviso_whatsapp || '—')}<br>Cliente: ${esc(p.aviso_cliente || '—')}</p>
 
       <div class="acciones">
         <a class="btn azul enlinea" href="/api/pedidos/${encodeURIComponent(p.numero)}/pedido.pdf">Remito A4</a>
@@ -1107,14 +1109,14 @@ function vistaClientes() {
 const TABS = [
   ['catalogo', 'Catálogo'], ['colores', 'Colores'], ['talles', 'Talles'],
   ['masivo', 'Precios en masa'], ['pedidos', 'Pedidos'],
-  ['estadisticas', 'Estadísticas'], ['clientes', 'Clientes'],
+  ['estadisticas', 'Estadísticas'], ['clientes', 'Clientes'], ['avisos', 'Avisos'],
 ];
 
 function pintar() {
   const vistas = {
     catalogo: vistaCatalogo, colores: vistaColores, talles: vistaTalles,
     masivo: vistaMasivo, pedidos: vistaPedidos, estadisticas: vistaEstadisticas,
-    clientes: vistaClientes,
+    clientes: vistaClientes, avisos: vistaAvisos,
   };
   raiz.innerHTML = `
     <div class="tabs">
@@ -1138,6 +1140,112 @@ function pintar() {
   for (const i of raiz.querySelectorAll('[data-alto]')) i.style.height = `${i.dataset.alto}%`;
   refrescarTotalEditor();
   el('#salir').hidden = false;
+  seguirAvisos();
+}
+
+// ══ AVISOS ════════════════════════════════════════════════════════
+/*
+ * A dónde avisa el portal cuando entra un pedido.
+ *
+ * El mail no se configura desde acá —son variables del servidor—, pero sí se
+ * dice si falta: sin eso no sale ningún mail, ni a ISUWAYA ni a los clientes, y
+ * nada en el resto del panel lo haría notar.
+ *
+ * El WhatsApp se vincula escaneando un QR, como WhatsApp Web, y después se
+ * elige el grupo. Mientras se espera el escaneo, la pantalla se actualiza sola:
+ * el QR cambia cada tanto y uno viejo ya no sirve.
+ */
+const ESTADO_WHATSAPP = {
+  apagado: ['no', 'Sin vincular'],
+  conectando: ['aviso', 'Conectando…'],
+  'esperando-qr': ['aviso', 'Esperando que escanees el QR'],
+  conectado: ['si', 'Conectado'],
+  reconectando: ['aviso', 'Reconectando…'],
+  desvinculado: ['no', 'Desvinculado'],
+  error: ['no', 'Con error'],
+};
+let timerAvisos = null;
+
+async function cargarAvisos() {
+  datos.avisos = await api('/avisos');
+  if (datos.avisos.whatsapp.conexion === 'conectado' && !datos.gruposWhatsapp) {
+    try { datos.gruposWhatsapp = (await api('/whatsapp/grupos')).grupos; } catch { datos.gruposWhatsapp = null; }
+  }
+}
+
+function seguirAvisos() {
+  clearTimeout(timerAvisos);
+  const conexion = datos.avisos?.whatsapp?.conexion;
+  if (vista.tab !== 'avisos' || !['conectando', 'esperando-qr', 'reconectando'].includes(conexion)) return;
+  timerAvisos = setTimeout(() => conError(async () => {
+    if (vista.tab !== 'avisos') return;
+    await cargarAvisos();
+    pintar();
+  }), 3000);
+}
+
+function vistaAvisos() {
+  if (!datos.avisos) return '<p class="cargando">Mirando cómo están los avisos…</p>';
+  const { mail, whatsapp: w } = datos.avisos;
+  const [clase, etiqueta] = ESTADO_WHATSAPP[w.conexion] || ['no', w.conexion];
+
+  let cuerpo;
+  if (w.conexion === 'esperando-qr' && w.qr) {
+    cuerpo = `
+      <div class="qr-caja">
+        <img class="qr-whatsapp" src="${esc(w.qr)}" alt="Código QR para vincular WhatsApp">
+        <ol class="pasos-qr">
+          <li>Abrí WhatsApp en el teléfono del número que va a mandar los pedidos.</li>
+          <li>Tocá <b>Dispositivos vinculados</b> y después <b>Vincular un dispositivo</b>.</li>
+          <li>Escaneá este código. Si cambia, no pasa nada: la pantalla se actualiza sola.</li>
+        </ol>
+      </div>`;
+  } else if (w.conexion === 'conectado') {
+    const grupos = datos.gruposWhatsapp;
+    cuerpo = `
+      <p>Conectado${w.numero ? ` con el número <b>+${esc(w.numero)}</b>` : ''}.</p>
+      <p>${w.grupo
+        ? `Los pedidos nuevos van al grupo <b>${esc(w.grupo.nombre)}</b>.`
+        : '<span class="pastilla aviso">Falta elegir el grupo</span> Hasta que lo elijas, los pedidos no llegan por WhatsApp.'}</p>
+      ${grupos ? `
+        <div class="campos">
+          <div class="campo ancho">
+            <label for="wa-grupo">Grupo de los empleados</label>
+            <select id="wa-grupo">
+              <option value="">Elegí un grupo…</option>
+              ${grupos.map((g) => `<option value="${esc(g.id)}"${w.grupo?.id === g.id ? ' selected' : ''}>${esc(g.nombre)} (${g.integrantes} personas)</option>`).join('')}
+            </select>
+          </div>
+        </div>` : '<p class="sub">No pude traer los grupos de este WhatsApp.</p>'}
+      <div class="acciones">
+        ${grupos ? '<button class="btn" data-wa-grupo>Guardar grupo</button>' : '<button class="btn borde" data-wa-buscar>Buscar grupos</button>'}
+        ${w.grupo ? '<button class="btn borde" data-wa-prueba>Mandar mensaje de prueba</button>' : ''}
+        <button class="btn texto quitar" data-wa-desvincular>Desvincular</button>
+      </div>`;
+  } else if (['conectando', 'reconectando'].includes(w.conexion)) {
+    cuerpo = '<p class="cargando">Conectando con WhatsApp…</p>';
+  } else {
+    cuerpo = `
+      ${w.error ? `<p class="mensaje error">${esc(w.error)}</p>` : ''}
+      <div class="acciones"><button class="btn" data-wa-vincular>Vincular WhatsApp</button></div>`;
+  }
+
+  return `
+    <div class="tarjeta">
+      <h3>Mail</h3>
+      ${mail.configurado
+        ? `<p class="mensaje ok">Configurado. Los pedidos nuevos llegan a <b>${esc(mail.destino || 'sin destino cargado')}</b>, y los clientes que dejan su mail reciben la copia y cada confirmación.</p>`
+        : `<p class="mensaje error">Falta configurar el correo: sin eso no sale ningún mail, ni a ustedes ni a los clientes.
+             En Railway, en <b>Variables</b>, cargá <b>MAIL_USER</b> (la cuenta de Gmail) y <b>MAIL_PASS</b> (una contraseña de aplicación de Google).</p>`}
+    </div>
+    <div class="tarjeta">
+      <h3>WhatsApp del grupo de empleados <span class="pastilla ${clase}">${esc(etiqueta)}</span></h3>
+      <p class="mensaje info">
+        Se conecta un WhatsApp común, como WhatsApp Web. No es la vía oficial de WhatsApp y el número puede quedar
+        bloqueado: usá un número aparte, no el principal del negocio. Si se corta, los pedidos entran igual y el mail sale igual.
+      </p>
+      ${cuerpo}
+    </div>`;
 }
 
 /** Trae las estadísticas del período elegido. */
@@ -1225,6 +1333,11 @@ raiz.addEventListener('click', (e) => conError(async () => {
     // recorren todos los pedidos del período y nadie las mira desde el catálogo.
     if (vista.tab === 'estadisticas' && !datos.estadisticas) {
       await cargarEstadisticas();
+      pintar();
+    }
+    // Los avisos se miran de nuevo cada vez: el WhatsApp se pudo haber cortado desde la última.
+    if (vista.tab === 'avisos') {
+      await cargarAvisos();
       pintar();
     }
     return;
@@ -1356,6 +1469,42 @@ raiz.addEventListener('click', (e) => conError(async () => {
     return;
   }
 
+  // ── Avisos: el WhatsApp del grupo
+  if (t.closest('[data-wa-vincular]')) {
+    datos.avisos.whatsapp = await api('/whatsapp/vincular', { method: 'POST' });
+    datos.gruposWhatsapp = null;
+    pintar();
+    return;
+  }
+  if (t.closest('[data-wa-buscar]')) {
+    datos.gruposWhatsapp = (await api('/whatsapp/grupos')).grupos;
+    pintar();
+    return;
+  }
+  if (t.closest('[data-wa-grupo]')) {
+    const id = el('#wa-grupo')?.value;
+    if (!id) { mensaje('Elegí el grupo.', 'error'); pintar(); return; }
+    const r = await api('/whatsapp/grupo', { method: 'PUT', body: JSON.stringify({ id }) });
+    await cargarAvisos();
+    mensaje(`Listo: los pedidos nuevos van a llegar al grupo ${r.grupo.nombre}.`);
+    pintar();
+    return;
+  }
+  if (t.closest('[data-wa-prueba]')) {
+    const r = await api('/whatsapp/prueba', { method: 'POST' });
+    mensaje(`Mandé un mensaje de prueba al grupo ${r.grupo.nombre}. Fijate que haya llegado.`);
+    pintar();
+    return;
+  }
+  if (t.closest('[data-wa-desvincular]')) {
+    if (!window.confirm('¿Desvincular el WhatsApp? Los pedidos dejan de llegar al grupo hasta que lo vuelvas a vincular.')) return;
+    datos.avisos.whatsapp = await api('/whatsapp/desvincular', { method: 'POST' });
+    datos.gruposWhatsapp = null;
+    mensaje('WhatsApp desvinculado.');
+    pintar();
+    return;
+  }
+
   // ── Fotos
   const principal = t.closest('[data-principal]');
   if (principal) {
@@ -1455,7 +1604,7 @@ raiz.addEventListener('click', (e) => conError(async () => {
     });
     await cargar();
     sacarDelDetalleSiSeFue(numero);
-    mensaje(`${numero}: ${ESTADOS[r.pedido.estado].toLowerCase()}.`);
+    mensaje(`${numero}: ${ESTADOS[r.pedido.estado].toLowerCase()}.${r.avisoCliente ? ` Aviso al cliente: ${r.avisoCliente}.` : ''}`);
     pintar();
     return;
   }

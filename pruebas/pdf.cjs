@@ -395,6 +395,17 @@ const pedidoItemGigante = () => pedidoBase({
   chk('no aparece "undefined" en el rótulo', !/undefined/i.test(sinLocalidad.texto), sinLocalidad.texto.slice(0, 200));
   chk('el renglón de localidad desaparece entero', !/LOCALIDAD/.test(sinLocalidad.texto), sinLocalidad.texto.slice(0, 200));
 
+  /*
+   * El teléfono del cliente va en el rótulo, y el código postal en su propio
+   * recuadro: pegado a la ciudad, "(5152)", había que buscarlo adentro del
+   * renglón.
+   */
+  const conTodo = await revisar('rotulo-cp-y-telefono', await pdfRotulo(pedidoBase({ cliente: { ...CLIENTE } })));
+  chk('el rótulo lleva el teléfono del cliente', conTodo.texto.includes(CLIENTE.telefono), conTodo.texto.slice(0, 300));
+  chk('con su título, como el resto de los datos', /TEL[EÉ]FONO/.test(conTodo.texto), conTodo.texto.slice(0, 300));
+  chk('el código postal tiene su recuadro', /C[OÓ]DIGO POSTAL/.test(conTodo.texto), conTodo.texto.slice(0, 300));
+  chk('y ya no va entre paréntesis pegado a la ciudad', !conTodo.texto.includes(`(${CLIENTE.codigoPostal})`), conTodo.texto.slice(0, 300));
+
   tit('14. NADA REVIENTA CON DATOS INCOMPLETOS');
   /*
    * Un pedido viejo o a medio guardar no puede tumbar la descarga del remito:

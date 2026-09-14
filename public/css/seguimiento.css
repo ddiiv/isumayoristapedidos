@@ -193,3 +193,10 @@
   .seg-camino .etq { font-size: 9.5px; }
   .seg-total .n { font-size: 17px; }
 }
+
+/* Esperando que ISUWAYA confirme el stock */
+.seg-estado.es-pendiente { background: #eef1f5; color: #4a5568; }
+.seg-espera {
+  margin: 8px 0 0; padding: 8px 10px; border-radius: 8px;
+  background: #eef1f5; color: #4a5568; font-size: 12.5px; line-height: 1.45;
+}

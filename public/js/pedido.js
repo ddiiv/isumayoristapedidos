@@ -30,8 +30,13 @@ const PROVINCIAS = ['Buenos Aires', 'CABA', 'Catamarca', 'Chaco', 'Chubut', 'Có
   'Río Negro', 'Salta', 'San Juan', 'San Luis', 'Santa Cruz', 'Santa Fe', 'Santiago del Estero',
   'Tierra del Fuego', 'Tucumán'];
 
-const ENVIOS = ['Andreani a sucursal', 'Andreani a domicilio', 'Correo Argentino a sucursal',
-  'Correo Argentino a domicilio', 'Vía Cargo', 'Transporte propio del cliente', 'Retiro en el depósito'];
+/*
+ * La forma de envío la escribe el cliente.
+ *
+ * Era una lista cerrada de siete transportes, y cada mayorista del interior
+ * trabaja con el suyo —un expreso de su zona, un flete conocido—: con la lista
+ * elegía el más parecido y el rótulo salía con un transporte que no era.
+ */
 
 export function abrirDialogo() {
   paso = 'carrito';
@@ -189,13 +194,13 @@ function vistaDatos() {
       ${campo('nombre', 'Nombre y apellido', { obligatorio: true, ancho: true })}
       ${campo('cuit', 'CUIT', { obligatorio: true, ayuda: '30-12345678-9' })}
       ${campo('telefono', 'Teléfono', { obligatorio: true, tipo: 'tel', ayuda: '11 5555-5555' })}
-      ${campo('email', 'Email', { tipo: 'email', ancho: true, ayuda: 'Opcional' })}
+      ${campo('email', 'Email', { tipo: 'email', ancho: true, ayuda: 'Opcional: ahí te mandamos el pedido y la confirmación del stock' })}
       ${campo('provincia', 'Provincia', { obligatorio: true, opciones: PROVINCIAS })}
       ${campo('ciudad', 'Ciudad', { obligatorio: true })}
       ${campo('codigoPostal', 'Código postal', { obligatorio: true, ayuda: '1425' })}
       ${campo('direccion', 'Dirección', { obligatorio: true, ayuda: 'Calle, número, piso' })}
       ${campo('entreCalles', 'Entre calles', { ancho: true, ayuda: 'Opcional' })}
-      ${campo('formaEnvio', 'Forma de envío', { obligatorio: true, ancho: true, opciones: ENVIOS })}
+      ${campo('formaEnvio', 'Forma de envío o transporte', { obligatorio: true, ancho: true, ayuda: 'Ej.: Andreani a sucursal, Vía Cargo, transporte propio' })}
     </form>`;
 }
 
@@ -262,10 +267,19 @@ function vistaConfirmado() {
    * algo que hacer en vez de una espera silenciosa.
    */
   const avisado = ['mail', 'whatsapp'].some((c) => confirmado.avisos?.[c] === 'ok');
-  const cabecera = avisado
-    ? '<p class="mensaje ok">Recibimos tu pedido y ya le avisamos a ISUWAYA.</p>'
-    : '<p class="mensaje ok">Recibimos tu pedido y quedó guardado.</p>'
-      + '<p class="mensaje info">Si nadie te contacta en las próximas 24 horas, escribinos con este número de pedido.</p>';
+  /*
+   * Y dice que todavía falta un paso: el pedido no está confirmado hasta que
+   * ISUWAYA revise el stock. Sin eso, "recibimos tu pedido" se lee como "ya
+   * está", y el cliente cuenta con mercadería que puede no haber.
+   */
+  const seEntera = confirmado.avisos?.cliente === 'ok'
+    ? 'Te mandamos una copia por mail y te escribimos apenas lo confirmemos.'
+    : sesion.rol === 'cliente'
+      ? 'Vas a ver la confirmación en «Mis pedidos».'
+      : 'Si nadie te contacta en las próximas 24 horas, escribinos con este número de pedido.';
+  const cabecera = `<p class="mensaje ok">Recibimos tu pedido${avisado ? ' y ya le avisamos a ISUWAYA' : ' y quedó guardado'}.</p>`
+    + '<p class="mensaje info">Antes de prepararlo revisamos que tengamos todo el stock. '
+    + `${esc(seEntera)}</p>`;
 
   return `
     <div class="confirmado">

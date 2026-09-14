@@ -8,6 +8,9 @@ const {
   ESTADOS, normalizarEstado, puedePasar, registrarEstado, historialDePedido,
 } = require('../db');
 const { hacerMiniatura, nombreMiniatura } = require('../miniaturas');
+const { pdfPedido } = require('../pdf');
+const { avisarCliente } = require('../notificaciones');
+const whatsapp = require('../whatsapp');
 const { importarPlanilla } = require('../excel');
 const { ordenarCatalogo } = require('../normalizar');
 const paleta = require('../colores');
@@ -909,7 +912,7 @@ r.get('/pedidos', (req, res) => {
 
   const filas = db.prepare(`
     SELECT id, numero, cliente, items, total, unidades, estado, creado_en,
-           aviso_mail, aviso_whatsapp, cliente_id, original, ajuste, actualizado_en
+           aviso_mail, aviso_whatsapp, aviso_cliente, cliente_id, original, ajuste, actualizado_en
     FROM pedidos WHERE ${donde} ORDER BY id DESC LIMIT ${limite}`).all(...params);
 
   const totales = db.prepare(`
@@ -946,7 +949,38 @@ r.get('/pedidos/:numero', (req, res) => {
  * a "confirmado" desde una consola abierta deja el historial mintiendo, y el
  * historial es lo único que queda cuando hay que discutir un reclamo.
  */
-r.put('/pedidos/:numero/estado', (req, res) => {
+/*
+ * Los errores de una ruta asincrónica van al manejador de errores.
+ *
+ * Express 4 no espera las promesas: sin esto, un error después de un `await`
+ * deja la pantalla esperando una respuesta que no llega nunca.
+ */
+const conErrores = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+
+// Un pedido se puede rearmar mientras no salió del depósito.
+const EDITABLES = ['pendiente', 'confirmado', 'modificado'];
+
+/*
+ * Avisarle al cliente lo que cambió en su pedido.
+ *
+ * Sólo los pasos que cambian lo que va a recibir: que se confirmó el stock, que
+ * se rearmó o que se canceló. El aviso queda anotado en el pedido, así el panel
+ * muestra si el cliente se enteró.
+ */
+async function avisarClienteDelCambio(numero, estado, nota) {
+  if (!['confirmado', 'modificado', 'cancelado'].includes(estado)) return null;
+  const pedido = leerPedido(numero);
+  if (!pedido) return null;
+  let pdf = null;
+  if (estado !== 'cancelado') {
+    try { pdf = await pdfPedido(pedido); } catch { /* sin adjunto: el aviso sale igual */ }
+  }
+  const aviso = await avisarCliente(pedido, estado, { pdf, nota });
+  db.prepare('UPDATE pedidos SET aviso_cliente = ? WHERE id = ?').run(aviso, pedido.id);
+  return aviso;
+}
+
+r.put('/pedidos/:numero/estado', conErrores(async (req, res) => {
   const fila = db.prepare('SELECT * FROM pedidos WHERE numero = ?').get(req.params.numero);
   if (!fila) return res.status(404).json({ message: 'No existe ese pedido.' });
 
@@ -967,8 +1001,9 @@ r.put('/pedidos/:numero/estado', (req, res) => {
   }
 
   registrarEstado(fila.id, destino, { nota: limpiarNota(req.body?.nota) });
-  res.json({ pedido: conSeguimiento(leerPedido(fila.numero)) });
-});
+  const avisoCliente = await avisarClienteDelCambio(fila.numero, destino, limpiarNota(req.body?.nota));
+  res.json({ pedido: conSeguimiento(leerPedido(fila.numero)), avisoCliente });
+}));
 
 /*
  * GET /api/admin/pedidos/:numero/editor — la grilla para rearmar el pedido.
@@ -1046,12 +1081,12 @@ r.get('/grilla/:sku', (req, res) => {
  *  · lo que el cliente confirmó se copia entero antes de tocar nada. Sin eso,
  *    a la semana no hay forma de mostrarle qué pidió él y qué se despachó.
  */
-r.put('/pedidos/:numero/items', (req, res) => {
+r.put('/pedidos/:numero/items', conErrores(async (req, res) => {
   const fila = db.prepare('SELECT * FROM pedidos WHERE numero = ?').get(req.params.numero);
   if (!fila) return res.status(404).json({ message: 'No existe ese pedido.' });
 
   const actual = normalizarEstado(fila.estado);
-  if (actual !== 'confirmado' && actual !== 'modificado') {
+  if (!EDITABLES.includes(actual)) {
     return res.status(409).json({
       message: `Un pedido ${ESTADOS[actual].etiqueta.toLowerCase()} ya no se edita. Lo que salió del depósito no cambia.`,
     });
@@ -1089,8 +1124,9 @@ r.put('/pedidos/:numero/items', (req, res) => {
   });
   guardar();
 
-  res.json({ pedido: conSeguimiento(leerPedido(fila.numero)), errores });
-});
+  const avisoCliente = await avisarClienteDelCambio(fila.numero, 'modificado', limpiarNota(req.body?.nota));
+  res.json({ pedido: conSeguimiento(leerPedido(fila.numero)), errores, avisoCliente });
+}));
 
 /*
  * ══ Estadísticas ═══════════════════════════════════════════════════
@@ -1492,5 +1528,32 @@ function compararItems(antes, despues) {
     masLineas: Math.max(0, lineas.length - 20),
   };
 }
+
+// ── Avisos: el WhatsApp del grupo de empleados y el mail ───────────
+/*
+ * Los errores esperables —no está conectado, ese grupo no existe— vuelven con
+ * su código y su mensaje, para que el panel diga qué hacer en vez de "falló".
+ */
+const conAviso = (fn) => conErrores(async (req, res) => {
+  try {
+    await fn(req, res);
+  } catch (e) {
+    if (e.status) return res.status(e.status).json({ message: e.message });
+    throw e;
+  }
+});
+
+// El mail no se puede vincular desde el panel —son variables de Railway—, pero sí mostrar si falta.
+const estadoDelMail = () => ({
+  configurado: Boolean(process.env.MAIL_USER && process.env.MAIL_PASS),
+  destino: process.env.PEDIDOS_EMAIL || null,
+});
+
+r.get('/avisos', (req, res) => res.json({ whatsapp: whatsapp.estadoPublico(), mail: estadoDelMail() }));
+r.post('/whatsapp/vincular', conAviso(async (req, res) => res.json(await whatsapp.vincular())));
+r.post('/whatsapp/desvincular', conAviso(async (req, res) => res.json(await whatsapp.desvincular())));
+r.get('/whatsapp/grupos', conAviso(async (req, res) => res.json({ grupos: await whatsapp.grupos() })));
+r.put('/whatsapp/grupo', conAviso(async (req, res) => res.json({ grupo: await whatsapp.elegirGrupo(String(req.body?.id || '')) })));
+r.post('/whatsapp/prueba', conAviso(async (req, res) => res.json(await whatsapp.mandarPrueba())));
 
 module.exports = { rutas: r };

@@ -378,21 +378,24 @@ async function pdfRotulo(pedido) {
    * caja de la forma de envío.
    */
   /*
-   * La localidad se arma con lo que haya.
+   * El teléfono va en el bloque del destinatario, con el resto de los datos.
    *
-   * Interpolando ciudad y postal derecho, un pedido viejo al que le falta el
-   * dato salía rotulado "undefined (undefined)": el renglón nunca queda vacío,
-   * así que el filtro de líneas sin valor no lo sacaba nunca.
+   * Estaba al pie, en letra de seis puntos, y es justo lo que busca el
+   * transportista cuando no encuentra la dirección: con el paquete en la mano
+   * y el cliente del otro lado del teléfono.
+   *
+   * El código postal ya no va pegado a la ciudad —"Villa Carlos Paz (5152)"—:
+   * tiene su propio recuadro abajo. Cada dato pasa por `texto()`, que devuelve
+   * vacío si falta, así que un renglón sin dato desaparece entero en vez de
+   * salir impreso "undefined".
    */
-  const localidad = [texto(cliente.ciudad), texto(cliente.codigoPostal) && `(${texto(cliente.codigoPostal)})`]
-    .filter(Boolean).join(' ');
-
   const lineas = [
     { et: 'Destinatario', valor: texto(cliente.nombre), peso: 1.35 },
     { et: 'CUIT', valor: texto(cliente.cuit), peso: 1 },
+    { et: 'Teléfono', valor: texto(cliente.telefono), peso: 1.1 },
     { et: 'Dirección', valor: texto(cliente.direccion), peso: 1.1 },
     ...(texto(cliente.entreCalles) ? [{ et: 'Entre calles', valor: texto(cliente.entreCalles), peso: 0.9 }] : []),
-    { et: 'Localidad', valor: localidad, peso: 1.15 },
+    { et: 'Localidad', valor: texto(cliente.ciudad), peso: 1.15 },
     { et: 'Provincia', valor: texto(cliente.provincia), peso: 1 },
   ].filter((l) => l.valor !== '');
 
@@ -447,8 +450,30 @@ async function pdfRotulo(pedido) {
     y += Math.min(doc.heightOfString(l.valor, { width: ancho }), opciones.height ?? Infinity) + 7;
   }
 
-  doc.rect(M, yEnvio, ancho, ALTO_ENVIO).lineWidth(1.3).strokeColor(VERDE).stroke();
-  doc.fillColor(GRIS).font('Helvetica').fontSize(6.8).text('FORMA DE ENVÍO', M + 9, yEnvio + 8, { lineBreak: false });
+  /*
+   * El código postal, solo y en grande, en su propio recuadro.
+   *
+   * Es el primer dato con el que el transporte clasifica los paquetes. Metido
+   * en el renglón de la ciudad había que buscarlo; separado se lee de un
+   * vistazo desde la pila. Va al lado de la forma de envío porque los dos se
+   * miran juntos: a dónde va y con quién viaja.
+   */
+  const ANCHO_CP = 3.2 * CM;
+  const SEPARACION = 0.25 * CM;
+  const xEnvio = M + ANCHO_CP + SEPARACION;
+  const anchoCajaEnvio = ancho - ANCHO_CP - SEPARACION;
+
+  doc.rect(M, yEnvio, ANCHO_CP, ALTO_ENVIO).lineWidth(1.3).strokeColor(AZUL).stroke();
+  doc.fillColor(GRIS).font('Helvetica').fontSize(6.8).text('CÓDIGO POSTAL', M + 9, yEnvio + 8, { lineBreak: false });
+  const textoCP = texto(cliente.codigoPostal) || '—';
+  let cuerpoCP = 20;
+  doc.font('Helvetica-Bold');
+  while (cuerpoCP > 8 && doc.fontSize(cuerpoCP).widthOfString(textoCP) > ANCHO_CP - 18) cuerpoCP -= 0.5;
+  doc.fillColor(AZUL).font('Helvetica-Bold').fontSize(cuerpoCP)
+    .text(textoCP, M + 9, yEnvio + 18, { width: ANCHO_CP - 18, lineBreak: false, ellipsis: true });
+
+  doc.rect(xEnvio, yEnvio, anchoCajaEnvio, ALTO_ENVIO).lineWidth(1.3).strokeColor(VERDE).stroke();
+  doc.fillColor(GRIS).font('Helvetica').fontSize(6.8).text('FORMA DE ENVÍO', xEnvio + 9, yEnvio + 8, { lineBreak: false });
 
   /*
    * La forma de envío también se mide antes de escribirla.
@@ -459,7 +484,7 @@ async function pdfRotulo(pedido) {
    * el transporte a medio leer es un paquete que vuelve.
    */
   const textoEnvio = texto(cliente.formaEnvio) || '—';
-  const anchoEnvio = ancho - 18;
+  const anchoEnvio = anchoCajaEnvio - 18;
   const altoEnvioDisponible = ALTO_ENVIO - 24;
   let cuerpoEnvio = 13;
   doc.font('Helvetica-Bold');
@@ -469,10 +494,8 @@ async function pdfRotulo(pedido) {
     cuerpoEnvio -= 0.5;
   }
   doc.fillColor(VERDE).font('Helvetica-Bold').fontSize(cuerpoEnvio)
-    .text(textoEnvio, M + 9, yEnvio + 20, { width: anchoEnvio, height: altoEnvioDisponible, ellipsis: true });
+    .text(textoEnvio, xEnvio + 9, yEnvio + 20, { width: anchoEnvio, height: altoEnvioDisponible, ellipsis: true });
 
-  doc.fillColor(GRIS).font('Helvetica').fontSize(6.5)
-    .text(`Tel. ${texto(cliente.telefono) || '—'}`, M, 15 * CM - 0.38 * CM, { width: ancho, align: 'right', lineBreak: false });
 
   return aBuffer(doc);
 }
