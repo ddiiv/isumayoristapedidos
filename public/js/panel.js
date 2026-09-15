@@ -53,6 +53,40 @@ const ANCHO_BORDES = 38;    // el padding del contenido del cajón
 const anchoQueNecesita = (talles) => ANCHO_COLOR + talles * ANCHO_CELDA + ANCHO_BORDES;
 const entraElCuadro = (talles) => window.innerWidth >= anchoQueNecesita(talles);
 
+/*
+ * Lo que de verdad ocupa el cuadro: la tabla, el relleno del cajón y la barra
+ * de desplazamiento vertical del contenido cuando la hay.
+ *
+ * Sin la barra, el cajón quedaba unos 13 px más angosto que la tabla en todo
+ * producto con fotos —el contenido es más alto que la pantalla, así que la
+ * barra aparece siempre— y el último talle quedaba detrás de una barra
+ * horizontal, que es justo lo que este cálculo existe para evitar.
+ */
+function anchoDelCuadro(tabla) {
+  const contenido = el('#panel-contenido');
+  const barra = contenido.offsetWidth - contenido.clientWidth;
+  return Math.ceil(tabla.getBoundingClientRect().width) + ANCHO_BORDES + barra;
+}
+
+/*
+ * El cuadro puede crecer después de medido.
+ *
+ * La pastilla con el total de un color ensancha la columna del nombre apenas
+ * se escribe la primera cantidad, y la letra del sitio, si todavía no había
+ * llegado, es más ancha que la de respaldo con que se midió. En los dos casos
+ * el cajón se estira para acompañar, pero nunca se achica ni se repinta
+ * apilado: eso le sacaría el foco a quien está escribiendo un número. Si ya no
+ * entra en la pantalla, queda el desplazamiento del envoltorio como red.
+ */
+function estirarAlCuadro() {
+  const tabla = panel.querySelector('table.matriz-talles');
+  if (!tabla || !panel.classList.contains('abierto')) return;
+  const necesita = Math.min(anchoDelCuadro(tabla), window.innerWidth);
+  if (necesita > panel.getBoundingClientRect().width) {
+    panel.style.setProperty('--ancho-cuadro', `${necesita}px`);
+  }
+}
+
 let formaForzada = null;   // 'apilada' cuando la medición dice que la tabla no entra
 
 // Qué fotos se están mirando en el panel: todas o las de un color, y cuál.
@@ -313,9 +347,10 @@ function pintar() {
    */
   const tabla = panel.querySelector('table.matriz-talles');
   if (tabla) {
-    const necesita = Math.ceil(tabla.getBoundingClientRect().width) + ANCHO_BORDES;
+    const necesita = anchoDelCuadro(tabla);
     if (necesita > window.innerWidth) { formaForzada = 'apilada'; pintar(); return; }
     panel.style.setProperty('--ancho-cuadro', `${necesita}px`);
+    if (document.fonts && document.fonts.status !== 'loaded') document.fonts.ready.then(estirarAlCuadro);
   }
 
   pintarMuestras(el('#panel-contenido'));
@@ -566,6 +601,7 @@ function actualizarCuentaDeFila(input) {
     fila.querySelector('.col-color, header').append(cuenta);
   }
   cuenta.textContent = n;
+  estirarAlCuadro();
 }
 
 /*

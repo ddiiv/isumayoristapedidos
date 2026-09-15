@@ -365,6 +365,36 @@ talle. El pedido es la suma.
 
 ---
 
+## El diseño
+
+Tema claro con la paleta del logo. Todos los colores salen de las variables de
+`:root` en `public/css/estilos.css`; `admin.css` y `seguimiento.css` no definen
+colores propios, así que un cambio de tono se hace en un solo lugar.
+
+- **Azul** (`--azul`) para lo que ubica: lo elegido, los precios, la solapa activa.
+- **Verde** (`--verde`) sólo para lo que hay que apretar. Si también decorara,
+  dejaría de señalar la acción.
+- **Petróleo** (`--teal`) para el estado «enviado» y detalles de la marca.
+- **El degradé del logo** (`--degrade`) en tres lugares y en ninguno más: la
+  franja de arriba, el botón flotante del pedido y la caja del total.
+- Ámbar y rojo quedan para lo que pide atención: pedido modificado, cancelado,
+  errores.
+
+Todo texto pasa 4,5:1 de contraste contra su fondo y los bordes de los campos
+pasan 3:1. Si se cambia un color, conviene volver a medirlo.
+
+Las letras están en `public/fuentes/` —Outfit para títulos y precios,
+Instrument Sans para el resto—, cada una con su licencia SIL OFL al lado. Se
+sirven desde el sitio porque la política de seguridad no deja cargar fuentes de
+afuera, y con caché de un año: si alguna vez se cambia una fuente, tiene que ir
+con otro nombre de archivo.
+
+El logo del encabezado y los íconos de la pestaña (`public/img/`) salen del PNG
+del logo, recortado. El de 180 px lleva fondo blanco porque iOS no respeta la
+transparencia en el ícono de la pantalla de inicio.
+
+---
+
 ## Las pruebas
 
 ```bash

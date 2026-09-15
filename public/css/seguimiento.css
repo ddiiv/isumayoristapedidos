@@ -4,6 +4,8 @@
  * Va en su propio archivo y no en estilos.css porque lo escribe una parte del
  * trabajo distinta de la del catálogo, y dos manos en el mismo archivo se
  * pisan. La página lo carga siempre, aunque todavía no haya nada que pintar.
+ *
+ * Los colores salen de las variables de estilos.css; acá no se define ninguno.
  */
 
 /*
@@ -15,9 +17,9 @@
  * el resto lo esconde entre lo que no hace falta mirar.
  */
 :root {
-  --seg-ambar: #9a5b00;
-  --seg-ambar-suave: #fff3e0;
-  --seg-ambar-borde: #f0d9b5;
+  --seg-ambar: var(--ambar);
+  --seg-ambar-suave: var(--ambar-claro);
+  --seg-ambar-borde: var(--ambar-borde);
 }
 
 /* ── La tarjeta de cada pedido en "Mis pedidos" ─────────────────── */
@@ -30,31 +32,36 @@
  * de pasos entra entera.
  */
 .seg-pedido {
-  border: 1px solid var(--linea); border-radius: var(--radio);
-  padding: 14px; margin-bottom: 12px; background: #fff;
+  border: 1px solid var(--linea); border-radius: 14px;
+  padding: 15px 16px; margin-bottom: 12px; background: var(--papel);
+  box-shadow: var(--sombra-1);
 }
-.seg-pedido.es-cancelado { background: #fcfafa; border-color: #efd8d6; }
+.seg-pedido.es-cancelado { background: var(--fondo-suave); border-color: var(--rojo-borde); }
 
 .seg-cabeza {
   display: flex; align-items: flex-start; justify-content: space-between;
   gap: 10px; flex-wrap: wrap;
 }
-.seg-cabeza .numero { font-size: 15px; font-weight: 700; color: var(--azul); }
-.seg-cabeza .cuando { font-size: 11px; color: var(--tinta-suave); margin-top: 2px; }
-.seg-cabeza .plata { text-align: right; }
-.seg-cabeza .plata b { display: block; font-size: 16px; color: var(--azul); }
-.seg-cabeza .plata span { font-size: 11px; color: var(--tinta-suave); }
+.seg-cabeza .numero {
+  font-family: var(--letra-titulo); font-size: 17px; font-weight: 700; color: var(--azul);
+  font-variant-numeric: tabular-nums;
+}
+.seg-cabeza .cuando { font-size: 12px; color: var(--tinta-suave); margin-top: 2px; }
+.seg-cabeza .plata { text-align: right; font-variant-numeric: tabular-nums; }
+.seg-cabeza .plata b { display: block; font-family: var(--letra-titulo); font-size: 17px; color: var(--tinta); }
+.seg-cabeza .plata span { font-size: 12px; color: var(--tinta-suave); }
 
 /* ── La pastilla del estado ─────────────────────────────────────── */
 .seg-estado {
   display: inline-block; font-size: 11px; font-weight: 700;
-  padding: 3px 10px; border-radius: 20px; white-space: nowrap;
+  padding: 3px 10px; border-radius: 999px; white-space: nowrap;
 }
+.seg-estado.es-pendiente  { background: var(--gris-claro); color: var(--tinta-2); }
 .seg-estado.es-confirmado { background: var(--azul-claro); color: var(--azul); }
 .seg-estado.es-modificado { background: var(--seg-ambar-suave); color: var(--seg-ambar); }
-.seg-estado.es-enviado    { background: var(--azul-claro); color: var(--azul); }
+.seg-estado.es-enviado    { background: var(--teal-claro); color: var(--teal); }
 .seg-estado.es-entregado  { background: var(--verde-claro); color: var(--verde); }
-.seg-estado.es-cancelado  { background: #fdeceb; color: var(--rojo); }
+.seg-estado.es-cancelado  { background: var(--rojo-claro); color: var(--rojo); }
 
 /* ── El camino: en qué paso va ──────────────────────────────────── */
 /*
@@ -63,7 +70,7 @@
  * costado de la tarjeta y parece que el camino sigue fuera de la pantalla.
  */
 .seg-camino {
-  list-style: none; margin: 14px 0 0; padding: 0;
+  list-style: none; margin: 16px 0 0; padding: 0;
   display: flex; text-align: center;
 }
 .seg-camino li { flex: 1; position: relative; min-width: 0; }
@@ -75,7 +82,7 @@
 .seg-camino .punto {
   position: relative; z-index: 1; display: block; margin: 0 auto 6px;
   width: 16px; height: 16px; border-radius: 50%;
-  background: #fff; border: 2px solid var(--linea);
+  background: var(--papel); border: 2px solid var(--linea-fuerte);
 }
 .seg-camino li.hecho .punto { background: var(--verde); border-color: var(--verde); }
 .seg-camino li.actual .punto {
@@ -93,7 +100,7 @@
   box-shadow: 0 0 0 4px var(--seg-ambar-suave);
 }
 .seg-camino .etq {
-  display: block; font-size: 10.5px; line-height: 1.25; color: var(--tinta-suave);
+  display: block; font-size: 11px; line-height: 1.25; color: var(--tinta-suave);
   /* Los nombres son de una palabra y romperlos por la mitad se lee peor que
      achicarlos: en 375 px cuatro pasos entran, cortados no. */
   overflow-wrap: break-word; hyphens: none;
@@ -101,18 +108,18 @@
 .seg-camino li.hecho .etq, .seg-camino li.actual .etq { color: var(--tinta); font-weight: 700; }
 
 .seg-cortado {
-  margin: 14px 0 0; padding: 9px 12px; border-radius: 8px;
-  background: #fdeceb; border: 1px solid #f3c6c3;
-  font-size: 12.5px; color: var(--rojo); font-weight: 600;
+  margin: 14px 0 0; padding: 10px 12px; border-radius: 10px;
+  background: var(--rojo-claro); border: 1px solid var(--rojo-borde);
+  font-size: 13px; color: var(--rojo); font-weight: 600;
 }
 
-.seg-acciones { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 13px; }
+.seg-acciones { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
 
 /* Lo que hay que leer sí o sí: el pedido no salió como se pidió. */
 .seg-alerta {
-  margin: 12px 0 0; padding: 10px 12px; border-radius: 8px;
+  margin: 12px 0 0; padding: 10px 12px; border-radius: 10px;
   background: var(--seg-ambar-suave); border: 1px solid var(--seg-ambar-borde);
-  font-size: 12.5px; color: var(--seg-ambar); line-height: 1.5;
+  font-size: 13px; color: var(--seg-ambar); line-height: 1.5;
 }
 .seg-alerta b { color: var(--seg-ambar); }
 
@@ -128,75 +135,78 @@
 .seg-linea > li .hito {
   position: absolute; left: -9px; top: 1px;
   width: 15px; height: 15px; border-radius: 50%;
-  background: #fff; border: 2px solid var(--azul);
+  background: var(--papel); border: 2px solid var(--azul);
 }
 .seg-linea > li.paso-modificado .hito { border-color: var(--seg-ambar); }
+.seg-linea > li.paso-enviado .hito { border-color: var(--teal); }
 .seg-linea > li.paso-entregado .hito { border-color: var(--verde); background: var(--verde); }
 .seg-linea > li.paso-cancelado .hito { border-color: var(--rojo); background: var(--rojo); }
-.seg-linea .titulo { font-size: 13.5px; font-weight: 700; color: var(--tinta); }
-.seg-linea .cuando { font-size: 11px; color: var(--tinta-suave); margin-top: 1px; }
-.seg-linea .nota-paso { margin: 6px 0 0; font-size: 12.5px; line-height: 1.5; color: var(--tinta); }
+.seg-linea .titulo { font-size: 14px; font-weight: 700; color: var(--tinta); }
+.seg-linea .cuando { font-size: 12px; color: var(--tinta-suave); margin-top: 1px; }
+.seg-linea .nota-paso { margin: 6px 0 0; font-size: 13px; line-height: 1.5; color: var(--tinta); }
 
 /* ── Qué cambió en una modificación ─────────────────────────────── */
 .seg-cambios {
   margin-top: 8px; border: 1px solid var(--seg-ambar-borde);
-  border-radius: 8px; background: var(--seg-ambar-suave); padding: 9px 11px;
+  border-radius: 10px; background: var(--seg-ambar-suave); padding: 10px 12px;
 }
 .seg-cambios h5 {
-  margin: 0 0 6px; font-size: 11px; letter-spacing: .3px;
+  margin: 0 0 6px; font-size: 11px; letter-spacing: .08em;
   text-transform: uppercase; color: var(--seg-ambar);
 }
 .seg-cambios ul { list-style: none; margin: 0; padding: 0; }
 .seg-cambios li {
   border: 0; padding: 2px 0; margin: 0;
-  font-size: 12px; color: var(--tinta); line-height: 1.45;
+  font-size: 12.5px; color: var(--tinta); line-height: 1.45;
 }
 .seg-cambios .antes { text-decoration: line-through; color: var(--tinta-suave); }
 .seg-cambios .despues { font-weight: 700; }
 .seg-cambios .quitado .despues { color: var(--rojo); }
 .seg-cambios .sumado .despues { color: var(--verde); }
-.seg-cambios .resto { font-size: 11.5px; color: var(--seg-ambar); margin-top: 5px; }
+.seg-cambios .resto { font-size: 12px; color: var(--seg-ambar); margin-top: 5px; }
 
 .seg-plata {
   display: flex; gap: 10px; flex-wrap: wrap; margin-top: 8px;
-  font-size: 12px; color: var(--tinta-suave);
+  font-size: 12.5px; color: var(--tinta-suave); font-variant-numeric: tabular-nums;
 }
 .seg-plata b { color: var(--tinta); }
 .seg-plata .baja b { color: var(--verde); }
 .seg-plata .sube b { color: var(--rojo); }
 
 /* ── El detalle de lo que va a salir ────────────────────────────── */
-.seg-bloque { margin-top: 20px; }
+.seg-bloque { margin-top: 22px; }
 .seg-bloque > h4 {
-  margin: 0 0 8px; font-size: 13px; color: var(--azul);
-  padding-bottom: 6px; border-bottom: 1px solid var(--linea);
+  margin: 0 0 8px; font-family: var(--letra-titulo); font-size: 15px; color: var(--tinta);
+  padding-bottom: 7px; border-bottom: 1px solid var(--linea);
 }
 .seg-total {
   display: flex; align-items: center; justify-content: space-between;
-  gap: 12px; margin-top: 12px; padding: 12px 14px;
-  background: var(--azul-claro); border-radius: var(--radio);
+  gap: 12px; margin-top: 12px; padding: 13px 15px;
+  background: var(--azul-claro); border-radius: 12px;
 }
-.seg-total .n { font-size: 19px; font-weight: 700; color: var(--azul); }
-.seg-total .u { font-size: 12px; color: var(--tinta-suave); }
-.seg-total .ajuste { font-size: 11.5px; color: var(--seg-ambar); font-weight: 700; }
+.seg-total .n {
+  font-family: var(--letra-titulo); font-size: 21px; font-weight: 700; color: var(--azul);
+  font-variant-numeric: tabular-nums;
+}
+.seg-total .u { font-size: 12.5px; color: var(--tinta-suave); }
+.seg-total .ajuste { font-size: 12px; color: var(--seg-ambar); font-weight: 700; }
 
 /* El pedido original, cuando hubo cambios: apagado, porque es lo que ya no va. */
 .seg-original {
-  margin-top: 12px; border: 1px dashed var(--linea);
-  border-radius: 8px; padding: 10px 12px; background: #fbfcfd;
+  margin-top: 12px; border: 1px dashed var(--linea-fuerte);
+  border-radius: 10px; padding: 10px 12px; background: var(--fondo-suave);
 }
-.seg-original h5 { margin: 0 0 5px; font-size: 11.5px; color: var(--tinta-suave); }
-.seg-original .lineas { font-size: 12px; color: var(--tinta-suave); line-height: 1.6; }
+.seg-original h5 { margin: 0 0 5px; font-size: 12px; color: var(--tinta-suave); }
+.seg-original .lineas { font-size: 12.5px; color: var(--tinta-suave); line-height: 1.6; }
 
 @media (max-width: 420px) {
   .seg-cabeza .plata { text-align: left; }
-  .seg-camino .etq { font-size: 9.5px; }
-  .seg-total .n { font-size: 17px; }
+  .seg-camino .etq { font-size: 10px; }
+  .seg-total .n { font-size: 18px; }
 }
 
 /* Esperando que ISUWAYA confirme el stock */
-.seg-estado.es-pendiente { background: #eef1f5; color: #4a5568; }
 .seg-espera {
-  margin: 8px 0 0; padding: 8px 10px; border-radius: 8px;
-  background: #eef1f5; color: #4a5568; font-size: 12.5px; line-height: 1.45;
+  margin: 10px 0 0; padding: 9px 11px; border-radius: 10px;
+  background: var(--gris-claro); color: var(--tinta-2); font-size: 13px; line-height: 1.45;
 }

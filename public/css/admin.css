@@ -1,48 +1,73 @@
 /* Lo propio del panel. Lo demás lo hereda de la hoja del catálogo. */
-.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--linea); margin-bottom: 20px; }
-.tabs button {
-  border: 0; background: none; padding: 11px 14px; font-size: 13.5px; font-weight: 600;
-  color: var(--tinta-suave); border-bottom: 3px solid transparent;
+
+/* En el panel no hay buscador debajo del encabezado: sin la línea, el blanco
+   translúcido se funde con el fondo al bajar. */
+header.principal { box-shadow: 0 1px 0 var(--linea); }
+
+/* Las solapas son una tira de píldoras, la misma forma que las categorías del
+   catálogo: quien usa las dos pantallas no tiene que aprender dos controles. */
+.tabs {
+  display: flex; gap: 4px; padding: 4px; margin-bottom: 20px;
+  background: var(--papel); border: 1px solid var(--linea); border-radius: 14px;
+  box-shadow: var(--sombra-1); overflow-x: auto; scrollbar-width: thin;
 }
-.tabs button[aria-current="true"] { color: var(--azul); border-bottom-color: var(--azul); }
+.tabs button {
+  flex: 0 0 auto; border: 0; background: transparent; padding: 9px 14px; border-radius: var(--radio-chico);
+  font-size: 14px; font-weight: 600; color: var(--tinta-suave); white-space: nowrap;
+  transition: background-color .18s var(--curva), color .18s var(--curva);
+}
+.tabs button:hover { background: var(--gris-claro); color: var(--tinta); }
+.tabs button[aria-current="true"] { background: var(--azul-claro); color: var(--azul-hover); }
 
 .tarjeta {
-  background: #fff; border: 1px solid var(--linea); border-radius: var(--radio);
-  padding: 18px; margin-bottom: 16px;
+  background: var(--papel); border: 1px solid var(--linea); border-radius: var(--radio);
+  box-shadow: var(--sombra-1); padding: 20px; margin-bottom: 16px;
 }
-.tarjeta h3 { margin: 0 0 4px; font-size: 15px; color: var(--azul); }
-.tarjeta p.sub { margin: 0 0 14px; font-size: 13px; color: var(--tinta-suave); line-height: 1.5; }
+.tarjeta h3 {
+  margin: 0 0 4px; font-family: var(--letra-titulo); font-size: 18px; font-weight: 700;
+  letter-spacing: -.01em; color: var(--tinta);
+}
+.tarjeta p.sub { margin: 0 0 14px; font-size: 13.5px; color: var(--tinta-suave); line-height: 1.55; }
 
-table.datos { width: 100%; border-collapse: collapse; font-size: 13px; }
+table.datos { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
 table.datos th {
-  text-align: left; font-size: 11px; letter-spacing: .4px; color: var(--tinta-suave);
-  padding: 8px 10px; border-bottom: 2px solid var(--linea); white-space: nowrap;
+  text-align: left; font-size: 12px; font-weight: 600; color: var(--tinta-suave);
+  padding: 9px 10px; border-bottom: 1px solid var(--linea-fuerte); white-space: nowrap;
 }
-table.datos td { padding: 9px 10px; border-bottom: 1px solid var(--linea); vertical-align: middle; }
-table.datos tr:hover td { background: #fafbfd; }
+table.datos td { padding: 10px; border-bottom: 1px solid var(--linea); vertical-align: middle; }
+table.datos tr:hover td { background: var(--fondo-suave); }
 table.datos input[type="number"], table.datos input[type="text"] {
-  width: 110px; font: inherit; font-size: 13px; padding: 5px 8px;
-  border: 1px solid var(--linea); border-radius: 6px;
+  width: 110px; font: inherit; font-size: 13px; padding: 6px 8px; color: var(--tinta);
+  border: 1px solid var(--borde-campo); border-radius: 8px; background: var(--papel);
 }
 .envoltorio-tabla { overflow-x: auto; }
 
-.pastilla { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 20px; }
+.pastilla { font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 999px; white-space: nowrap; }
 .pastilla.si { background: var(--verde-claro); color: var(--verde); }
-.pastilla.no { background: #f1f3f6; color: var(--tinta-suave); }
-.pastilla.aviso { background: #fdeceb; color: var(--rojo); }
+.pastilla.no { background: var(--gris-claro); color: var(--tinta-2); }
+.pastilla.aviso { background: var(--rojo-claro); color: var(--rojo); }
 
-.entrar { max-width: 380px; margin: 60px auto; }
+.entrar { max-width: 400px; margin: 72px auto; }
 .subida { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .subida input[type="file"] { font-size: 13px; }
 
+/* Todos los campos del panel, con el mismo anillo que los del catálogo. */
+.tarjeta :is(input:not([type="checkbox"], [type="radio"], [type="color"], [type="file"]), select, textarea) {
+  transition: border-color .18s var(--curva), box-shadow .18s var(--curva);
+}
+.tarjeta :is(input:not([type="checkbox"], [type="radio"], [type="color"], [type="file"]), select, textarea):focus {
+  outline: none; border-color: var(--azul); box-shadow: 0 0 0 3px rgba(42, 93, 150, .18);
+}
+.tarjeta :is(input[type="checkbox"], input[type="radio"]) { accent-color: var(--azul); }
+
 /* ── Piezas del panel ───────────────────────────────────────────── */
-.tarjeta h4 { margin: 0 0 6px; font-size: 13px; color: var(--azul); }
+.tarjeta h4 { margin: 0 0 6px; font-size: 13.5px; color: var(--tinta); }
 .acciones {
   display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 14px;
 }
 .tarjeta textarea {
-  width: 100%; font: inherit; font-size: 14px; padding: 9px 11px;
-  border: 1px solid var(--linea); border-radius: 8px; resize: vertical;
+  width: 100%; font: inherit; font-size: 14px; padding: 10px 12px; color: var(--tinta);
+  border: 1px solid var(--borde-campo); border-radius: var(--radio-chico); resize: vertical;
 }
 
 /* Fotos: cuadrícula con lo justo para decidir cuál es cuál. */
@@ -51,7 +76,7 @@ table.datos input[type="number"], table.datos input[type="text"] {
   display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
 }
 .foto-item {
-  border: 1px solid var(--linea); border-radius: 9px; overflow: hidden; background: #fff;
+  border: 1px solid var(--linea); border-radius: 12px; overflow: hidden; background: var(--papel);
 }
 .foto-item.principal { border-color: var(--verde); box-shadow: 0 0 0 1px var(--verde); }
 .foto-item img { width: 100%; aspect-ratio: 3/4; object-fit: cover; display: block; }
@@ -60,53 +85,58 @@ table.datos input[type="number"], table.datos input[type="text"] {
   display: flex; justify-content: space-between; align-items: center;
   gap: 6px; padding: 5px 8px; border-top: 1px solid var(--linea);
 }
-.foto-acciones .btn { padding: 3px 4px; font-size: 11px; }
+.foto-acciones .btn { padding: 3px 4px; font-size: 11.5px; }
 .quitar { color: var(--rojo); }
 
 /* El cuadrito de color: `input type=color` para elegirlo mirándolo, que es la
    única forma sensata. Un campo de texto con "#1a2b3c" es adivinar. */
 .pastilla-color {
   width: 46px; height: 34px; padding: 2px; cursor: pointer;
-  border: 1px solid var(--linea); border-radius: 7px; background: #fff;
+  border: 1px solid var(--borde-campo); border-radius: 8px; background: var(--papel);
 }
 .nombre-color {
-  font: inherit; font-size: 13px; padding: 6px 9px; width: 100%; min-width: 130px;
-  border: 1px solid var(--linea); border-radius: 6px;
+  font: inherit; font-size: 13px; padding: 7px 10px; width: 100%; min-width: 130px; color: var(--tinta);
+  border: 1px solid var(--borde-campo); border-radius: 8px;
 }
 input.medida {
-  font: inherit; font-size: 13px; padding: 5px 8px; width: 82px;
-  border: 1px solid var(--linea); border-radius: 6px;
+  font: inherit; font-size: 13px; padding: 6px 8px; width: 82px; color: var(--tinta);
+  border: 1px solid var(--borde-campo); border-radius: 8px;
 }
 
 .totales-fila {
   display: flex; gap: 12px; flex-wrap: wrap; margin: 16px 0 6px;
 }
 .totales-fila > div {
-  flex: 1; min-width: 120px; background: var(--azul-claro);
-  border-radius: 9px; padding: 10px 14px;
+  flex: 1; min-width: 120px; background: var(--fondo);
+  border: 1px solid var(--linea); border-radius: 12px; padding: 11px 14px;
 }
-.totales-fila b { display: block; font-size: 18px; color: var(--azul); }
+.totales-fila b {
+  display: block; font-family: var(--letra-titulo); font-size: 20px; color: var(--azul);
+  font-variant-numeric: tabular-nums;
+}
 
-.subida input[type="color"] { width: 46px; height: 34px; padding: 2px; border: 1px solid var(--linea); border-radius: 7px; }
+.subida input[type="color"] { width: 46px; height: 34px; padding: 2px; border: 1px solid var(--borde-campo); border-radius: 8px; }
 .subida input[name="nombre"] {
-  font: inherit; font-size: 14px; padding: 8px 10px;
-  border: 1px solid var(--linea); border-radius: 7px; min-width: 170px;
+  font: inherit; font-size: 14px; padding: 9px 11px; color: var(--tinta);
+  border: 1px solid var(--borde-campo); border-radius: var(--radio-chico); min-width: 170px;
 }
 
 @media (max-width: 640px) {
-  .tabs { overflow-x: auto; }
-  .tabs button { white-space: nowrap; }
-  .totales-fila > div { min-width: 96px; padding: 8px 10px; }
-  .totales-fila b { font-size: 15px; }
+  .tarjeta { padding: 16px; }
+  .totales-fila > div { min-width: 96px; padding: 9px 11px; }
+  .totales-fila b { font-size: 16px; }
 }
 
 .talles-grandes { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
 .chip-check {
-  display: inline-flex; align-items: center; gap: 6px;
-  border: 1px solid var(--linea); border-radius: 20px; padding: 6px 12px;
-  font-size: 13px; font-weight: 600; cursor: pointer; background: #fff;
+  display: inline-flex; align-items: center; gap: 7px;
+  border: 1px solid var(--linea-fuerte); border-radius: 999px; padding: 7px 13px;
+  font-size: 13px; font-weight: 600; cursor: pointer; background: var(--papel);
+  transition: background-color .15s var(--curva), border-color .15s var(--curva);
 }
-.chip-check input { margin: 0; }
+.chip-check:hover { border-color: var(--azul-borde); }
+.chip-check:has(input:checked) { background: var(--azul-claro); border-color: var(--azul-borde); color: var(--azul-hover); }
+.chip-check input { margin: 0; accent-color: var(--azul); }
 
 /* ══ Seguimiento del pedido ═══════════════════════════════════════ */
 /*
@@ -116,17 +146,20 @@ input.medida {
  * palabra por palabra es lo que hace que se saltee uno. El ámbar del
  * modificado no es de la marca a propósito: es el único estado que obliga a
  * hacer algo —hay que avisarle al cliente— y tiene que saltar del azul.
+ * Enviado toma el petróleo del logo: sigue siendo de la marca, pero ya no se
+ * confunde con confirmado.
  */
 .estado-pastilla {
   display: inline-block; font-size: 11px; font-weight: 700;
-  padding: 2px 9px; border-radius: 20px; white-space: nowrap;
+  padding: 3px 10px; border-radius: 999px; white-space: nowrap;
 }
+.estado-pastilla.es-pendiente  { background: var(--gris-claro); color: var(--tinta-2); }
 .estado-pastilla.es-confirmado { background: var(--azul-claro); color: var(--azul); }
-.estado-pastilla.es-modificado { background: #fff3e0; color: #9a5b00; }
-.estado-pastilla.es-enviado    { background: #e7edf7; color: var(--azul); }
+.estado-pastilla.es-modificado { background: var(--ambar-claro); color: var(--ambar); }
+.estado-pastilla.es-enviado    { background: var(--teal-claro); color: var(--teal); }
 .estado-pastilla.es-entregado  { background: var(--verde-claro); color: var(--verde); }
-.estado-pastilla.es-cancelado  { background: #fdeceb; color: var(--rojo); }
-.tarjeta h3 .estado-pastilla { margin-left: 6px; vertical-align: middle; }
+.estado-pastilla.es-cancelado  { background: var(--rojo-claro); color: var(--rojo); }
+.tarjeta h3 .estado-pastilla { margin-left: 6px; vertical-align: middle; font-family: var(--letra); letter-spacing: 0; }
 
 .linea-tiempo { list-style: none; margin: 4px 0 0; padding: 0; }
 .linea-tiempo > li {
@@ -136,21 +169,22 @@ input.medida {
 .linea-tiempo > li:last-child { border-left-color: transparent; padding-bottom: 0; }
 .linea-tiempo > li .hito {
   position: absolute; left: -8px; top: 1px;
-  width: 14px; height: 14px; border-radius: 50%; background: #fff;
+  width: 14px; height: 14px; border-radius: 50%; background: var(--papel);
   border: 2px solid var(--azul);
 }
-.linea-tiempo > li.paso-modificado .hito { border-color: #9a5b00; }
+.linea-tiempo > li.paso-modificado .hito { border-color: var(--ambar); }
+.linea-tiempo > li.paso-enviado .hito { border-color: var(--teal); }
 .linea-tiempo > li.paso-entregado .hito { border-color: var(--verde); background: var(--verde); }
 .linea-tiempo > li.paso-cancelado .hito { border-color: var(--rojo); background: var(--rojo); }
 .titulo-paso { font-size: 13.5px; font-weight: 700; color: var(--tinta); }
-.nota-paso { margin: 5px 0 0; font-size: 12.5px; line-height: 1.5; }
+.nota-paso { margin: 5px 0 0; font-size: 13px; line-height: 1.5; }
 
 .cambios-caja {
-  margin-top: 7px; padding: 8px 11px; border-radius: 8px;
-  background: #fff8ee; border: 1px solid #f0d9b5;
+  margin-top: 8px; padding: 9px 12px; border-radius: 10px;
+  background: var(--ambar-claro); border: 1px solid var(--ambar-borde);
 }
 .cambios-caja ul { list-style: none; margin: 0; padding: 0; }
-.cambios-caja li { font-size: 12px; line-height: 1.5; }
+.cambios-caja li { font-size: 12.5px; line-height: 1.5; }
 .cambios-caja .antes { text-decoration: line-through; color: var(--tinta-suave); }
 .cambios-caja .despues { font-weight: 700; }
 .cambios-caja .quitado .despues { color: var(--rojo); }
@@ -158,20 +192,21 @@ input.medida {
 .cambios-caja p.chico { margin: 6px 0 0; }
 
 .original-caja {
-  margin-top: 12px; padding: 10px 12px;
-  border: 1px dashed var(--linea); border-radius: 8px; background: #fbfcfd;
+  margin-top: 12px; padding: 11px 13px;
+  border: 1px dashed var(--linea-fuerte); border-radius: 10px; background: var(--fondo-suave);
 }
 .original-caja h4 { color: var(--tinta-suave); }
-.btn.peligro { color: var(--rojo); border-color: #f3c6c3; }
+.btn.peligro { color: var(--rojo); border-color: var(--rojo-borde); }
+.btn.peligro:hover:not(:disabled) { background: var(--rojo-claro); border-color: var(--rojo-borde); color: var(--rojo); }
 
 /* ── El cuadro para rearmar el pedido ───────────────────────────── */
-.editor-grilla th { font-size: 11.5px; font-weight: 700; color: var(--tinta); }
+.editor-grilla th { font-size: 12px; font-weight: 700; color: var(--tinta); }
 .editor-grilla tbody th { text-align: left; white-space: nowrap; padding: 6px 10px 6px 0; }
 .editor-grilla td { padding: 4px; text-align: center; }
 table.datos.editor-grilla input[type="number"] { width: 58px; text-align: center; }
 /* El cruce que el producto no tiene: gris y sin casillero, para que se vea que
    no es que está en cero — es que no existe. */
-.editor-grilla td.sin-cruce { color: var(--linea); font-weight: 700; }
+.editor-grilla td.sin-cruce { color: var(--linea-fuerte); font-weight: 700; }
 
 /* ══ Estadísticas ═════════════════════════════════════════════════ */
 .tarjetas-numero {
@@ -179,22 +214,25 @@ table.datos.editor-grilla input[type="number"] { width: 58px; text-align: center
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
 }
 .tarjetas-numero > div {
-  background: var(--azul-claro); border-radius: 9px; padding: 11px 14px;
+  background: var(--fondo); border: 1px solid var(--linea); border-radius: 12px; padding: 12px 15px;
 }
-.tarjetas-numero span { font-size: 10px; font-weight: 700; letter-spacing: .4px; color: var(--tinta-suave); }
-.tarjetas-numero b { display: block; font-size: 21px; color: var(--azul); line-height: 1.2; margin: 2px 0; }
-.tarjetas-numero small { font-size: 11px; color: var(--tinta-suave); }
-.tarjetas-numero .verde { background: var(--verde-claro); }
+.tarjetas-numero span { font-size: 10.5px; font-weight: 700; letter-spacing: .08em; color: var(--tinta-suave); }
+.tarjetas-numero b {
+  display: block; font-family: var(--letra-titulo); font-size: 23px; color: var(--azul);
+  line-height: 1.2; margin: 3px 0; font-variant-numeric: tabular-nums;
+}
+.tarjetas-numero small { font-size: 11.5px; color: var(--tinta-suave); }
+.tarjetas-numero .verde { background: var(--verde-claro); border-color: var(--verde-borde); }
 .tarjetas-numero .verde b { color: var(--verde); }
-.tarjetas-numero .ambar { background: #fff3e0; }
-.tarjetas-numero .ambar b { color: #9a5b00; }
-.tarjetas-numero .rojo { background: #fdeceb; }
+.tarjetas-numero .ambar { background: var(--ambar-claro); border-color: var(--ambar-borde); }
+.tarjetas-numero .ambar b { color: var(--ambar); }
+.tarjetas-numero .rojo { background: var(--rojo-claro); border-color: var(--rojo-borde); }
 .tarjetas-numero .rojo b { color: var(--rojo); }
 
 /* Cuánto de lo facturado está cobrado, en una sola línea. */
 .barra-compuesta {
-  display: flex; height: 12px; border-radius: 20px; overflow: hidden;
-  background: #f1f3f6; margin: 14px 0 4px;
+  display: flex; height: 12px; border-radius: 999px; overflow: hidden;
+  background: var(--gris-claro); margin: 14px 0 4px;
 }
 .barra-compuesta i { display: block; height: 100%; }
 .barra-compuesta .cobrado { background: var(--verde); }
@@ -203,12 +241,12 @@ table.datos.editor-grilla input[type="number"] { width: 58px; text-align: center
 .barras { list-style: none; margin: 8px 0 0; padding: 0; }
 .barras li {
   display: grid; grid-template-columns: minmax(96px, 1.5fr) 2.2fr auto;
-  gap: 9px; align-items: center; padding: 3px 0; font-size: 12px;
+  gap: 9px; align-items: center; padding: 4px 0; font-size: 12.5px;
 }
 .barras .etq { color: var(--tinta); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.barras .pista { background: #f1f3f6; border-radius: 20px; height: 9px; overflow: hidden; }
-.barras .pista i { display: block; height: 100%; background: var(--azul); border-radius: 20px; }
-.barras .val { color: var(--tinta-suave); white-space: nowrap; font-size: 11.5px; }
+.barras .pista { background: var(--gris-claro); border-radius: 999px; height: 9px; overflow: hidden; }
+.barras .pista i { display: block; height: 100%; background: linear-gradient(90deg, var(--azul), var(--teal)); border-radius: 999px; }
+.barras .val { color: var(--tinta-suave); white-space: nowrap; font-size: 12px; font-variant-numeric: tabular-nums; }
 
 /*
  * La curva del período, en columnas.
@@ -226,11 +264,11 @@ table.datos.editor-grilla input[type="number"] { width: 58px; text-align: center
   justify-content: flex-end; height: 100%; min-width: 26px;
 }
 .grafico .col {
-  display: block; width: 100%; background: var(--azul);
-  border-radius: 4px 4px 0 0; min-height: 2px;
+  display: block; width: 100%; background: linear-gradient(to top, var(--azul), var(--teal));
+  border-radius: 5px 5px 0 0; min-height: 2px;
 }
 .grafico .pie {
-  font-size: 9.5px; color: var(--tinta-suave); text-align: center;
+  font-size: 10px; color: var(--tinta-suave); text-align: center;
   margin-top: 5px; height: 12px; white-space: nowrap;
 }
 
@@ -240,8 +278,8 @@ table.datos.editor-grilla input[type="number"] { width: 58px; text-align: center
 
 @media (max-width: 640px) {
   .tarjetas-numero { grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); }
-  .tarjetas-numero b { font-size: 18px; }
-  .barras li { grid-template-columns: minmax(78px, 1.4fr) 1.6fr auto; font-size: 11.5px; }
+  .tarjetas-numero b { font-size: 19px; }
+  .barras li { grid-template-columns: minmax(78px, 1.4fr) 1.6fr auto; font-size: 12px; }
   table.datos.editor-grilla input[type="number"] { width: 50px; }
 }
 
@@ -250,21 +288,20 @@ table.datos.editor-grilla input[type="number"] { width: 58px; text-align: center
 .agregar-color { display: grid; gap: 10px; }
 .talles-a-agregar { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 13px; }
 .talles-a-agregar label { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
-.estado-pastilla.es-pendiente { background: #eef1f5; color: #4a5568; }
 
 /* ── Avisos: el QR para vincular WhatsApp ───────────────────────── */
 .qr-caja { display: flex; flex-wrap: wrap; gap: 18px; align-items: center; margin: 10px 0; }
 .qr-whatsapp {
-  width: 240px; height: 240px; padding: 6px; background: #fff;
-  border: 1px solid var(--linea); border-radius: 10px; image-rendering: pixelated;
+  width: 240px; height: 240px; padding: 8px; background: #fff;
+  border: 1px solid var(--linea); border-radius: 14px; image-rendering: pixelated;
 }
 .pasos-qr { margin: 0; padding-left: 20px; max-width: 360px; font-size: 13.5px; line-height: 1.6; }
 
 /* ── Revisión del stock ─────────────────────────────────────────── */
-.aviso-pendientes { background: #f6f8fb; border-color: #d9dee6; }
+.aviso-pendientes { background: var(--azul-claro); border-color: var(--azul-borde); }
 .stock-grilla td.celda-stock { text-align: center; }
 .stock-grilla td.celda-stock .chico { display: block; margin-bottom: 3px; white-space: nowrap; }
-.stock-grilla td.falta input { border-color: #d97706; background: #fff7ed; }
+.stock-grilla td.falta input { border-color: var(--ambar); background: var(--ambar-claro); }
 
 /* ── La ficha del cliente ───────────────────────────────────────── */
 .lista-simple { margin: 0; padding-left: 18px; line-height: 1.75; font-size: 13.5px; }

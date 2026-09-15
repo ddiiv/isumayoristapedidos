@@ -37,8 +37,9 @@ app.use((req, res, next) => {
    * JavaScript de la página está en archivos propios, así que un texto de un
    * producto que llegue con HTML adentro no se ejecuta.
    *
-   * `img-src` acepta `data:` por el favicon embebido y `blob:` por la vista
-   * previa de una foto antes de subirla en el panel.
+   * `img-src` acepta `data:` por los íconos que dibuja la hoja de estilos
+   * (lupa, cruz, flechas) y `blob:` por la vista previa de una foto antes de
+   * subirla en el panel.
    */
   /*
    * Una página HTML no se guarda en ningún cache.
@@ -91,6 +92,15 @@ app.use('/api/admin', admin);
  */
 app.use('/fotos', express.static(FOTOS_DIR, {
   maxAge: '365d', immutable: true, index: false, dotfiles: 'ignore',
+}));
+
+/*
+ * Las letras no cambian nunca con el mismo nombre: si alguna vez se cambia una
+ * fuente, va con otro archivo. Por eso pueden quedar guardadas un año y no se
+ * vuelven a pedir en cada visita, como sí pasa con el resto de /public.
+ */
+app.use('/fuentes', express.static(path.join(__dirname, 'public', 'fuentes'), {
+  maxAge: '365d', immutable: true, index: false,
 }));
 
 app.use(express.static(path.join(__dirname, 'public'), { index: 'index.html' }));
