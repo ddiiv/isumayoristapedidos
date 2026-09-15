@@ -40,12 +40,23 @@ const tit = (t) => console.log(`\n\x1b[1m${t}\x1b[0m`);
  * habría que entrar y salir entre cada llamada.
  */
 const cookies = { admin: '', cliente: '' };
+/*
+ * Cada pedido de prueba sale con una IP distinta.
+ *
+ * El servidor frena más de diez pedidos por minuto desde una misma IP, y esta
+ * suite hace más que eso en segundos: sin esto mediría el limitador y no lo
+ * que dice que mide. Localmente la IP se toma de esta cabecera; en Railway la
+ * pone su proxy y no se puede falsear desde afuera.
+ */
+const ipDePrueba = () => `10.${1 + Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}.${1 + Math.floor(Math.random() * 250)}`;
+
 async function pedir(ruta, { metodo = 'GET', cuerpo, como = null } = {}) {
   const r = await fetch(`${API}${ruta}`, {
     method: metodo,
     headers: {
       'Content-Type': 'application/json',
       ...(como && cookies[como] ? { Cookie: cookies[como] } : {}),
+      'X-Forwarded-For': ipDePrueba(),
     },
     body: cuerpo ? JSON.stringify(cuerpo) : undefined,
   });
@@ -56,8 +67,23 @@ async function pedir(ruta, { metodo = 'GET', cuerpo, como = null } = {}) {
 }
 
 const sello = Date.now().toString(36);
+
+/*
+ * Un CUIT válido distinto en cada corrida: el CUIT identifica al cliente, y con
+ * uno fijo la segunda corrida contra la misma base choca con la cuenta de la
+ * primera.
+ */
+function cuitAlAzar(prefijo = '20') {
+  for (;;) {
+    const cuerpo = prefijo + String(Math.floor(Math.random() * 1e8)).padStart(8, '0');
+    const suma = [5, 4, 3, 2, 7, 6, 5, 4, 3, 2].reduce((t, peso, i) => t + peso * Number(cuerpo[i]), 0);
+    const v = 11 - (suma % 11);
+    if (v === 10) continue;
+    return `${cuerpo.slice(0, 2)}-${cuerpo.slice(2)}-${v === 11 ? 0 : v}`;
+  }
+}
 const CLIENTE = {
-  nombre: 'Seguimiento QA', cuit: '20-30456789-9', telefono: '11 5555-7777',
+  nombre: 'Seguimiento QA', cuit: cuitAlAzar(), telefono: '11 5555-7777',
   email: `seguimiento.${sello}@prueba.test`, provincia: 'Córdoba', ciudad: 'Río Cuarto',
   codigoPostal: '5800', direccion: 'Sobremonte 340', entreCalles: '',
   formaEnvio: 'Andreani a sucursal',
@@ -308,7 +334,7 @@ const mover = (numero, estado, nota) => pedir(
       });
       chk('sin stock de todo se rearma desde que entra', [200, 'modificado'], [rearmado.status, rearmado.json?.pedido?.estado]);
       const alRearmar = await nuevos(1);
-      chk('y al cliente le llega cómo queda', `Tu pedido ${numeroSinStock} tiene cambios`, alRearmar[0]?.asunto);
+      chk('rearmar un pedido que esperaba stock lo confirma con cambios', `Confirmamos tu pedido ${numeroSinStock}, con cambios`, alRearmar[0]?.asunto);
       chk('con el pedido rearmado y la nota', [true, true],
         [alRearmar[0]?.adjuntos.includes(`${numeroSinStock}-pedido.pdf`), /No quedaba el segundo\./.test(alRearmar[0]?.texto || '')]);
 
@@ -327,7 +353,120 @@ const mover = (numero, estado, nota) => pedir(
 
       const est = (await pedir('/api/admin/estadisticas', { como: 'admin' })).json;
       chk('las estadísticas cuentan los que esperan stock', true, (est.porEstado || []).some((e) => e.estado === 'pendiente'));
+
+      const conFaltante = await pedidoNuevo(producto, { [a.sku]: 4, [b.sku]: 2 });
+      await nuevos(2);
+      const revision = await pedir(`/api/admin/pedidos/${conFaltante}/confirmar-stock`, {
+        metodo: 'PUT', como: 'admin', cuerpo: { disponibles: { [a.sku]: 2, [b.sku]: 0 }, nota: 'Lo que falta entra el lunes.' },
+      });
+      chk('la revisión de stock con faltantes avisa al cliente', 'ok', revision.json?.avisoCliente);
+      const alRevisar = await nuevos(1);
+      chk('le llega la confirmación con cambios', `Confirmamos tu pedido ${conFaltante}, con cambios`, alRevisar[0]?.asunto);
+      chk('con el pedido como queda', true, Boolean(alRevisar[0]?.adjuntos.includes(`${conFaltante}-pedido.pdf`)));
+      chk('y lo que cambió, renglón por renglón', [true, true],
+        [/pediste 4, te mandamos 2/.test(alRevisar[0]?.texto || ''), /pediste 2, no hay/.test(alRevisar[0]?.texto || '')]);
+      chk('con el total de antes y el de ahora', true, /Total: antes .+, ahora /.test(alRevisar[0]?.texto || ''));
+      chk('y la nota', true, /Lo que falta entra el lunes\./.test(alRevisar[0]?.texto || ''));
     }
+  }
+
+  tit('7c. LA REVISIÓN DEL STOCK, RENGLÓN POR RENGLÓN');
+  {
+    const stock = (numero, cuerpo, como = 'admin') => pedir(`/api/admin/pedidos/${numero}/confirmar-stock`, { metodo: 'PUT', como, cuerpo });
+    const completo = await pedidoNuevo(producto, { [a.sku]: 3, [b.sku]: 2 });
+    chk('sin ser administrador no se revisa', 401, (await stock(completo, {}, null)).status);
+    chk('un cruce que no se pidió rebota', 400, (await stock(completo, { disponibles: { [c.sku]: 1 } })).status);
+    chk('más de lo pedido rebota', 400, (await stock(completo, { disponibles: { [a.sku]: 4 } })).status);
+    chk('una cantidad que no es entera rebota', 400, (await stock(completo, { disponibles: { [a.sku]: 1.5 } })).status);
+    chk('sin nada de nada no se confirma', 400, (await stock(completo, { disponibles: { [a.sku]: 0, [b.sku]: 0 } })).status);
+    const todo = await stock(completo, { disponibles: { [a.sku]: 3, [b.sku]: 2 } });
+    chk('con todo, queda confirmado tal cual', [200, 'confirmado', false], [todo.status, todo.json?.pedido?.estado, todo.json?.conCambios]);
+    chk('sin tocar el total', Math.round(a.precio * 3 + b.precio * 2), todo.json?.pedido?.total);
+    chk('y sin guardar un "original": no cambió nada', null, todo.json?.pedido?.original);
+    chk('un pedido ya confirmado no se vuelve a revisar', 409, (await stock(completo, { disponibles: {} })).status);
+
+    const parcial = await pedidoNuevo(producto, { [a.sku]: 4, [b.sku]: 2 });
+    const r = await stock(parcial, { disponibles: { [a.sku]: 2, [b.sku]: 0 }, nota: 'El resto entra el lunes.' });
+    chk('si falta algo, se confirma con los cambios', [200, 'modificado', true], [r.status, r.json?.pedido?.estado, r.json?.conCambios]);
+    chk('el total lo recalcula el servidor con lo que hay', Math.round(a.precio * 2), r.json?.pedido?.total);
+    chk('se guarda lo que había pedido', Math.round(a.precio * 4 + b.precio * 2), r.json?.pedido?.original?.total);
+    chk('y queda dicho qué cambió', [true, true], [
+      Boolean(r.json?.cambios?.lineas?.some((l) => l.color === a.color && l.talle === a.talle && l.antes === 4 && l.despues === 2)),
+      Boolean(r.json?.cambios?.lineas?.some((l) => l.color === b.color && l.talle === b.talle && l.despues === 0)),
+    ]);
+    chk('con la nota en la línea de tiempo', 'El resto entra el lunes.', r.json?.pedido?.historial?.at(-1)?.nota);
+    chk('la lista de pedidos dice cuántos esperan stock', 'number', typeof (await pedir('/api/admin/pedidos', { como: 'admin' })).json?.pendientes);
+  }
+
+  tit('7d. CADA COMPRA QUEDA EN CLIENTES, POR CUIT');
+  {
+    const cuit = cuitAlAzar('30');
+    const soloNumeros = cuit.replace(/\D/g, '');
+    const email = `reservado.${sello}@prueba.test`;
+    const datosReservado = { ...CLIENTE, cuit, email, nombre: 'Reservado QA', telefono: '351 555-9876' };
+    const carrito = [{ skuAgrupador: producto.sku, curvas: 0, cantidades: { [a.sku]: 1 } }];
+    const comprar = (cliente) => pedir('/api/pedidos', { metodo: 'POST', cuerpo: { cliente, carrito } });
+    const porCuit = (valor) => pedir('/api/clientes/por-cuit', { metodo: 'POST', cuerpo: { cuit: valor } });
+    const deEste = async () => (await pedir('/api/admin/clientes', { como: 'admin' })).json.clientes
+      .filter((x) => x.cuit.replace(/\D/g, '') === soloNumeros);
+
+    chk('un CUIT que nunca compró no trae nada', { encontrado: false }, (await porCuit(cuit)).json);
+    chk('un CUIT inválido rebota', 400, (await porCuit('20-11111111-1')).status);
+
+    chk('la primera compra sin cuenta entra', 201, (await comprar(datosReservado)).status);
+    let registro = await deEste();
+    chk('y deja al cliente registrado, sin cuenta', [1, false, 1], [registro.length, registro[0]?.tieneCuenta, registro[0]?.pedidos]);
+
+    chk('la segunda, con el CUIT escrito sin guiones y a otro lugar', 201, (await comprar({
+      ...datosReservado, cuit: soloNumeros, direccion: 'Belgrano 900', ciudad: 'Córdoba', codigoPostal: '5000', formaEnvio: 'Vía Cargo',
+    })).status);
+    registro = await deEste();
+    chk('suma al mismo cliente, no crea otro', [1, 2], [registro.length, registro[0]?.pedidos]);
+    chk('la ficha junta los dos lugares a los que mandó', 2,
+      (await pedir(`/api/admin/clientes/${registro[0].id}`, { como: 'admin' })).json.direcciones?.length);
+
+    const busqueda = (await porCuit(cuit)).json;
+    chk('al escribir el CUIT vuelve el nombre', [true, 'Reservado QA'], [busqueda.encontrado, busqueda.nombre]);
+    chk('el teléfono vuelve tapado', [true, false], [Boolean(busqueda.telefono?.endsWith('9876')), Boolean(busqueda.telefono?.includes('555'))]);
+    chk('y el email también', [true, false], [Boolean(busqueda.email?.includes('•')), busqueda.email === email]);
+
+    const tapado = { ...datosReservado, direccion: 'Colón 1', telefono: busqueda.telefono, email: busqueda.email };
+    const previa = await pedir('/api/pedidos/previsualizar', { metodo: 'POST', cuerpo: { cliente: tapado, carrito } });
+    chk('dejando los datos tapados, el resumen no los destapa', [undefined, busqueda.telefono, busqueda.email],
+      [previa.json?.erroresCliente?.telefono, previa.json?.cliente?.telefono, previa.json?.cliente?.email]);
+    const conTapados = await comprar(tapado);
+    chk('y el pedido entra', 201, conTapados.status);
+    const guardado = (await pedir(`/api/admin/pedidos/${conTapados.json?.numero}`, { como: 'admin' })).json?.pedido;
+    chk('con los datos reales guardados', ['351 555-9876', email], [guardado?.cliente?.telefono, guardado?.cliente?.email]);
+    const conOtroCuit = await pedir('/api/pedidos/previsualizar', { metodo: 'POST', cuerpo: { cliente: { ...tapado, cuit: cuitAlAzar('27') }, carrito } });
+    chk('lo tapado con otro CUIT no pasa', true, Boolean(conOtroCuit.json?.erroresCliente?.telefono));
+
+    const ajeno = await comprar({ ...datosReservado, email: `otro.${sello}@prueba.test`, telefono: '11 4444-0000' });
+    chk('otra persona compra con ese CUIT y otro email', 201, ajeno.status);
+
+    await new Promise((listo) => setTimeout(listo, 1100));
+    chk('con el email de un cliente sin cuenta no se entra', 401,
+      (await pedir('/api/sesion', { metodo: 'POST', cuerpo: { email: `otro.${sello}@prueba.test`, password: 'cualquier-cosa-123' } })).status);
+
+    cookies.reservado = '';
+    const nueva = await pedir('/api/cuenta', { metodo: 'POST', como: 'reservado', cuerpo: { ...datosReservado, password: 'reservado-qa-123' } });
+    chk('crear la cuenta con ese CUIT', 201, nueva.status);
+    registro = await deEste();
+    chk('ocupa el mismo lugar y conserva las compras', [1, true, 4], [registro.length, registro[0]?.tieneCuenta, registro[0]?.pedidos]);
+    const mios = ((await pedir('/api/cuenta/pedidos', { como: 'reservado' })).json?.pedidos || []).map((x) => x.numero);
+    chk('en «Mis pedidos» ve las compras que dejaron su email', 3, mios.length);
+    chk('y no la que otro hizo con su CUIT', false, mios.includes(ajeno.json?.numero));
+    chk('tampoco la abre por número', 404, (await pedir(`/api/cuenta/pedidos/${ajeno.json?.numero}`, { como: 'reservado' })).status);
+    chk('otra cuenta con el mismo CUIT no se crea', 409, (await pedir('/api/cuenta', {
+      metodo: 'POST', cuerpo: { ...datosReservado, email: `duplicada.${sello}@prueba.test`, password: 'otra-clave-123' },
+    })).status);
+
+    const id = registro[0].id;
+    chk('el panel corrige un teléfono', 200,
+      (await pedir(`/api/admin/clientes/${id}`, { metodo: 'PUT', como: 'admin', cuerpo: { telefono: '351 555-0000' } })).status);
+    chk('pero no el email de una cuenta', 400,
+      (await pedir(`/api/admin/clientes/${id}`, { metodo: 'PUT', como: 'admin', cuerpo: { email: 'x@y.zz' } })).status);
+    chk('la ficha de un cliente pide administrador', 401, (await pedir(`/api/admin/clientes/${id}`)).status);
   }
 
   tit('8. EL CLIENTE VE LO SUYO Y NADA MÁS');

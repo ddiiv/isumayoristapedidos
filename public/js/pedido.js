@@ -188,11 +188,12 @@ function vistaDatos() {
   return `
     ${sesion.rol === 'cliente'
       ? `<p class="mensaje ok">Completamos con los datos de tu cuenta. Si este envío va a otra dirección, cambialos acá: se usan sólo para este pedido.</p>`
-      : `<p class="mensaje info">Con estos datos armamos el rótulo del paquete. Revisá la dirección: es la que se pega en la bolsa.
+      : `<p class="mensaje info">Con estos datos armamos el rótulo del paquete. Si ya compraste, empezá por el CUIT: completamos tus datos.
            <button class="btn texto enlace-texto" id="ir-a-entrar" >Entrá a tu cuenta</button> y se completan solos.</p>`}
     <form id="form-datos" class="campos" novalidate>
-      ${campo('nombre', 'Nombre y apellido', { obligatorio: true, ancho: true })}
       ${campo('cuit', 'CUIT', { obligatorio: true, ayuda: '30-12345678-9' })}
+      <div class="campo ancho aviso-cuit" id="aviso-cuit" hidden></div>
+      ${campo('nombre', 'Nombre y apellido', { obligatorio: true, ancho: true })}
       ${campo('telefono', 'Teléfono', { obligatorio: true, tipo: 'tel', ayuda: '11 5555-5555' })}
       ${campo('email', 'Email', { tipo: 'email', ancho: true, ayuda: 'Opcional: ahí te mandamos el pedido y la confirmación del stock' })}
       ${campo('provincia', 'Provincia', { obligatorio: true, opciones: PROVINCIAS })}
@@ -463,4 +464,65 @@ dialogo.addEventListener('click', async (e) => {
   if (e.target.id === 'ir-a-entrar') { cerrarDialogo(); abrirCuenta('entrar'); return; }
   if (e.target.id === 'bajar-pdf') return bajarPdf(e.target);
   if (e.target.id === 'confirmar') return confirmar(e.target);
+});
+
+/*
+ * El CUIT completa lo que ya se sabe del cliente.
+ *
+ * Quien ya compró no vuelve a escribir su nombre, su teléfono y su email: al
+ * poner el CUIT llegan solos. La dirección no, porque cada pedido puede ir a
+ * otro lado. El teléfono y el email llegan tapados —"•• ••••-1234"—: la página
+ * es pública y cualquiera puede escribir un CUIT. Si se dejan así, el servidor
+ * usa los guardados; si se escriben otros, se usan los nuevos.
+ *
+ * Con la sesión abierta no hace falta: los datos ya salen de la cuenta.
+ */
+let cuitBuscado = '';
+let esperaCuit = null;
+
+function avisoCuit(texto) {
+  const aviso = el('#aviso-cuit');
+  if (!aviso) return;
+  aviso.textContent = texto;
+  aviso.hidden = !texto;
+}
+
+async function buscarCuit(digitos, form) {
+  let datos;
+  try {
+    const r = await fetch('/api/clientes/por-cuit', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cuit: digitos }),
+    });
+    // Un CUIT que no valida, o demasiadas búsquedas: el formulario sigue como está.
+    if (!r.ok) return;
+    datos = await r.json();
+  } catch { return; }
+  // Si mientras tanto cambió el CUIT o se cerró el formulario, la respuesta ya no corresponde.
+  if (!form.isConnected || form.elements.cuit.value.replace(/\D/g, '') !== digitos) return;
+  cuitBuscado = digitos;
+  if (!datos.encontrado) return;
+  for (const campo of ['nombre', 'telefono', 'email']) {
+    if (datos[campo] && form.elements[campo]) form.elements[campo].value = datos[campo];
+  }
+  avisoCuit('Ya compraste con este CUIT: completamos tus datos. Si cambiaron, escribilos de nuevo.');
+}
+
+dialogo.addEventListener('input', (e) => {
+  if (e.target.name !== 'cuit' || sesion.rol === 'cliente') return;
+  const form = e.target.form;
+  const digitos = e.target.value.replace(/\D/g, '');
+  if (digitos !== cuitBuscado) {
+    // Otro CUIT: lo tapado era de otro cliente y ya no sirve.
+    for (const campo of ['telefono', 'email']) {
+      if (form.elements[campo]?.value.includes('•')) form.elements[campo].value = '';
+    }
+    avisoCuit('');
+  }
+  clearTimeout(esperaCuit);
+  if (digitos.length === 11 && digitos !== cuitBuscado) esperaCuit = setTimeout(() => buscarCuit(digitos, form), 300);
+});
+
+// Tocar un dato tapado lo selecciona entero: lo que se escriba lo reemplaza, no se mezcla con los puntitos.
+dialogo.addEventListener('focusin', (e) => {
+  if (['telefono', 'email'].includes(e.target.name) && e.target.value.includes('•')) e.target.select();
 });

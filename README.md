@@ -144,13 +144,19 @@ recibió, sin afirmar que ya se avisó.
    mail, con el remito y el rótulo, y al grupo de WhatsApp con el remito. Al
    cliente, si dejó su mail, le llega una copia que avisa que falta confirmar el
    stock.
-2. **ISUWAYA revisa el stock** desde el panel, en el detalle del pedido:
-   - **Confirmar: hay stock de todo** → pasa a *confirmado*.
-   - **Modificar artículos y precio** → si falta algo, se rearma y pasa a
-     *modificado*.
-   - **Marcar cancelado.**
-3. **El cliente se entera por mail** en cada uno de esos pasos, con el pedido
-   como queda y la nota que se haya escrito. Si tiene cuenta, además lo ve en
+2. **ISUWAYA revisa el stock.** En **Pedidos**, arriba, se ve cuántos esperan
+   confirmación. **Revisar stock** abre el pedido renglón por renglón: cada
+   casillero arranca en lo pedido y se baja si hay menos (o a cero si no hay).
+   - Hay de todo → **Confirmar: hay stock de todo**: queda *confirmado*.
+   - Falta algo → **Confirmar con los cambios**: el servidor rearma el pedido con
+     lo que hay, lo vuelve a valorizar y queda *modificado*.
+   - Para sumar otro artículo o cambiar el precio: **Cambiar artículos o precio**,
+     el editor completo. Guardar desde ahí también confirma el pedido.
+   - Si no hay nada: volver al pedido y **Marcar cancelado**.
+3. **El cliente se entera por mail** en cada uno de esos pasos: se le reenvía el
+   pedido como queda, con la nota que se haya escrito y, si hubo cambios, lo que
+   cambió renglón por renglón («pediste 4, te mandamos 2») y el total de antes y
+   de ahora. Si tiene cuenta, además lo ve en
    **Mis pedidos**.
 4. Después, *enviado* y *entregado*, desde el mismo panel.
 
@@ -160,6 +166,29 @@ configurado.
 
 La forma de envío la escribe el cliente —cada uno trabaja con su transporte—,
 con un máximo de 60 caracteres para que entre en el rótulo.
+
+## Los clientes
+
+Todo el que confirma un pedido queda en **Clientes**, reconocido por su **CUIT**
+—da igual cómo lo escriba, con o sin guiones—:
+
+- **Sin cuenta** queda con su lugar reservado: sus datos guardados y sus compras
+  contadas. Si después crea una cuenta con ese CUIT, la cuenta ocupa ese mismo
+  lugar y conserva las compras.
+- **Con cuenta**, cada pedido hecho con la sesión abierta suma a esa cuenta.
+- La ficha de cada cliente muestra sus pedidos, cuánto compró —sin contar los
+  cancelados— y **a dónde mandó**, con cuántas veces: el mismo cliente puede
+  mandar cada pedido a otro lado.
+
+**Al escribir el CUIT en el pedido**, si ya compró, se completan solos el nombre,
+el teléfono y el email. El teléfono y el email llegan **tapados**
+(`•• ••••-1234`, `ma•••@gmail.com`): la página es pública y cualquiera puede
+escribir un CUIT. Si el cliente los deja así, se usan los guardados; si escribe
+otros, los nuevos. La dirección no se completa, porque cambia de pedido en pedido.
+
+Al crear una cuenta con un CUIT que ya compró, en «Mis pedidos» se ven las
+compras que dejaron **ese mismo email**: el CUIT de un negocio no es un secreto,
+y no alcanza para ver lo que pidió otro.
 
 ## El panel
 

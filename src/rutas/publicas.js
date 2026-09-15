@@ -1,6 +1,7 @@
 const express = require('express');
 const { db } = require('../db');
-const { validarCliente, armarPedido, guardarPedido, leerPedido } = require('../pedidos');
+const { validarCliente, cuitValido, armarPedido, guardarPedido, leerPedido } = require('../pedidos');
+const clientes = require('../clientes');
 const { pdfPedido, pdfRotulo } = require('../pdf');
 const { avisarPedido, avisarCliente } = require('../notificaciones');
 const auth = require('../auth');
@@ -41,6 +42,8 @@ function limitador(porMinuto) {
 
 const demasiadosPedidos = limitador(10);
 const demasiadosPapeles = limitador(60);
+// La búsqueda por CUIT: una por pedido alcanza y sobra, y así nadie recorre CUITs de a miles.
+const demasiadasBusquedas = limitador(20);
 
 const frenar = (mirar) => (req, res, next) => (mirar(req)
   ? res.status(429).json({ message: 'Estás yendo muy rápido. Esperá un momento y probá de nuevo.' })
@@ -149,14 +152,28 @@ r.get('/catalogo', (req, res) => {
 });
 
 // POST /api/pedidos/previsualizar — valoriza sin guardar nada.
+/*
+ * POST /api/clientes/por-cuit — lo que ya se sabe de un CUIT, para el formulario.
+ *
+ * El nombre completo y el teléfono y el email tapados: ver src/clientes.js. Por
+ * POST y no en la dirección, para que los CUIT no queden anotados en los logs.
+ */
+r.post('/clientes/por-cuit', frenar(demasiadasBusquedas), (req, res) => {
+  const cuit = String(req.body?.cuit || '');
+  if (!cuitValido(cuit)) return res.status(400).json({ message: 'Ese CUIT no es válido.' });
+  res.json(clientes.datosParaAutocompletar(cuit));
+});
+
 r.post('/pedidos/previsualizar', frenar(demasiadosPapeles), (req, res) => {
-  const { cliente, errores: erroresCliente } = validarCliente(req.body?.cliente);
+  const { datos, ocultos } = clientes.completarConGuardados(req.body?.cliente);
+  const { cliente, errores: erroresCliente } = validarCliente(datos);
   const { items, total, unidades, errores } = armarPedido(req.body?.carrito);
 
   if (!items.length) {
     return res.status(400).json({ message: 'El pedido está vacío.', errores, erroresCliente });
   }
-  res.json({ cliente, items, total, unidades, errores, erroresCliente });
+  // Lo que salió de lo guardado vuelve tapado: el resumen lo ve quien escribió el CUIT, que puede no ser el dueño.
+  res.json({ cliente: clientes.enmascarar(cliente, ocultos), items, total, unidades, errores, erroresCliente });
 });
 
 /*
@@ -168,12 +185,14 @@ r.post('/pedidos/previsualizar', frenar(demasiadosPapeles), (req, res) => {
  */
 r.post('/pedidos/pdf', frenar(demasiadosPapeles), async (req, res, next) => {
   try {
-    const { cliente } = validarCliente(req.body?.cliente);
+    const { datos, ocultos } = clientes.completarConGuardados(req.body?.cliente);
+    const { cliente } = validarCliente(datos);
     const { items, total, unidades } = armarPedido(req.body?.carrito);
     if (!items.length) return res.status(400).json({ message: 'El pedido está vacío.' });
 
     const pdf = await pdfPedido({
-      numero: 'PRELIMINAR', creado_en: new Date().toISOString(), cliente, items, total, unidades,
+      numero: 'PRELIMINAR', creado_en: new Date().toISOString(),
+      cliente: clientes.enmascarar(cliente, ocultos), items, total, unidades,
     });
     res.type('application/pdf')
       .setHeader('Content-Disposition', 'attachment; filename="pedido-preliminar.pdf"');
@@ -184,7 +203,8 @@ r.post('/pedidos/pdf', frenar(demasiadosPapeles), async (req, res, next) => {
 // POST /api/pedidos — confirma, guarda y avisa.
 r.post('/pedidos', frenar(demasiadosPedidos), async (req, res, next) => {
   try {
-    const { cliente, errores: erroresCliente } = validarCliente(req.body?.cliente);
+    const { datos, ocultos } = clientes.completarConGuardados(req.body?.cliente);
+    const { cliente, errores: erroresCliente } = validarCliente(datos);
     if (Object.keys(erroresCliente).length) {
       return res.status(400).json({ message: 'Faltan datos para el envío.', erroresCliente });
     }
@@ -192,19 +212,23 @@ r.post('/pedidos', frenar(demasiadosPedidos), async (req, res, next) => {
     const { items, total, unidades, errores } = armarPedido(req.body?.carrito);
     if (!items.length) return res.status(400).json({ message: 'El pedido está vacío.', errores });
 
-    const pedido = guardarPedido({ cliente, items, total, unidades });
-
     /*
-     * Si venía con la sesión abierta, el pedido queda atado a esa cuenta.
+     * El pedido queda atado a su cliente: a la cuenta si hay sesión, y si no al
+     * cliente de ese CUIT, que se crea reservado la primera vez. Así cada compra
+     * suma en la sección de clientes y la próxima vez el CUIT completa los datos.
      *
-     * Se guarda igual el cliente que vino en el formulario y no el de la
-     * cuenta: son los datos de ESTE envío, que puede ir a otra dirección. La
-     * cuenta dice quién lo pidió; el formulario, a dónde va.
+     * Se guarda igual el cliente que vino en el formulario: son los datos de
+     * ESTE envío, que puede ir a otra dirección. El cliente dice quién lo pidió;
+     * el formulario, a dónde va. Todo en una transacción: no puede quedar un
+     * cliente registrado por un pedido que no se guardó.
      */
-    if (req.sesion?.rol === 'cliente') {
-      db.prepare('UPDATE pedidos SET cliente_id = ? WHERE id = ?')
-        .run(req.sesion.cliente.id, pedido.id);
-    }
+    const cuentaId = req.sesion?.rol === 'cliente' ? req.sesion.cliente.id : null;
+    const pedido = db.transaction(() => guardarPedido({
+      cliente, items, total, unidades,
+      clienteId: clientes.registrarCompra(cliente, { cuentaId }),
+      conSesion: Boolean(cuentaId),
+      datosGuardados: ocultos,
+    }))();
 
     /*
      * El pedido ya está guardado antes de avisar.
@@ -219,7 +243,7 @@ r.post('/pedidos', frenar(demasiadosPedidos), async (req, res, next) => {
      * el stock; al cliente, la copia con el aviso de que falta esa confirmación.
      * El cliente no recibe el rótulo: es un papel del depósito.
      */
-    const conCuenta = { ...pedido, cliente_id: req.sesion?.rol === 'cliente' ? req.sesion.cliente.id : null };
+    const conCuenta = { ...pedido, seVeEnCuenta: clientes.seVeEnCuenta(pedido) };
     const [avisosNegocio, avisoCliente] = await Promise.all([
       avisarPedido(pedido, { pedido: pdfDelPedido, rotulo: pdfDelRotulo }),
       avisarCliente(conCuenta, 'pendiente', { pdf: pdfDelPedido }),
@@ -270,7 +294,7 @@ r.get('/pedidos/:numero/:documento.pdf', async (req, res, next) => {
     const pedido = leerPedido(req.params.numero);
     if (!pedido) return res.status(404).json({ message: 'No existe ese pedido.' });
 
-    const esSuyo = req.sesion?.rol === 'cliente' && pedido.cliente_id === req.sesion.cliente.id;
+    const esSuyo = req.sesion?.rol === 'cliente' && clientes.visibleEnCuenta(pedido, req.sesion.cliente);
     if (!esAdmin && !esSuyo && !auth.documentoFirmado(pedido.numero, req.query.t)) {
       /*
        * Se contesta lo mismo exista o no el pedido de otro: un 404 acá y un
@@ -279,7 +303,15 @@ r.get('/pedidos/:numero/:documento.pdf', async (req, res, next) => {
       return res.status(404).json({ message: 'No existe ese pedido.' });
     }
 
-    const pdf = cual === 'rotulo' ? await pdfRotulo(pedido) : await pdfPedido(pedido);
+    /*
+     * Quien lo baja con la firma —sin cuenta— ve tapados los datos que salieron
+     * de lo guardado: la firma prueba que hizo el pedido, no que sea el dueño
+     * del CUIT que escribió.
+     */
+    let ocultosDelPedido = [];
+    try { ocultosDelPedido = JSON.parse(pedido.datos_guardados || '[]'); } catch { /* sin datos guardados */ }
+    const paraImprimir = esAdmin || esSuyo ? pedido : { ...pedido, cliente: clientes.enmascarar(pedido.cliente, ocultosDelPedido) };
+    const pdf = cual === 'rotulo' ? await pdfRotulo(pedido) : await pdfPedido(paraImprimir);
     res.type('application/pdf')
       .setHeader('Content-Disposition', `attachment; filename="${pedido.numero}-${cual}.pdf"`);
     res.send(pdf);

@@ -78,6 +78,14 @@ function validarCliente(datos = {}) {
     errores.formaEnvio = `Escribilo más corto: hasta ${LARGO_ENVIO} caracteres.`;
   }
 
+  /*
+   * Un dato tapado que llegó hasta acá no se pudo cambiar por el guardado: el
+   * CUIT no es el de ese cliente, o se tocó a medias. Guardarlo así dejaría un
+   * pedido con un teléfono de puntitos.
+   */
+  if (cliente.telefono.includes('•')) errores.telefono = 'Volvé a escribir el teléfono completo.';
+  if (cliente.email.includes('•')) errores.email = 'Volvé a escribir el email completo.';
+
   return { cliente, errores };
 }
 
@@ -227,14 +235,21 @@ function armarPedido(carrito = []) {
  * El pedido entra esperando stock ('pendiente'): antes de prepararlo ISUWAYA
  * revisa que tenga todo, y desde el panel lo confirma, lo rearma o lo cancela.
  */
-function guardarPedido({ cliente, items, total, unidades }) {
+function guardarPedido({
+  cliente, items, total, unidades, clienteId = null, conSesion = false, datosGuardados = [],
+}) {
   const numero = proximoNumeroDePedido();
   const creadoEn = new Date().toISOString();
   const info = db.prepare(`
-    INSERT INTO pedidos (numero, cliente, items, total, unidades, estado, creado_en)
-    VALUES (?, ?, ?, ?, ?, 'pendiente', ?)`)
-    .run(numero, JSON.stringify(cliente), JSON.stringify(items), total, unidades, creadoEn);
-  return { id: info.lastInsertRowid, numero, cliente, items, total, unidades, creado_en: creadoEn };
+    INSERT INTO pedidos (numero, cliente, items, total, unidades, estado, creado_en,
+                         cliente_id, con_sesion, datos_guardados)
+    VALUES (?, ?, ?, ?, ?, 'pendiente', ?, ?, ?, ?)`)
+    .run(numero, JSON.stringify(cliente), JSON.stringify(items), total, unidades, creadoEn,
+      clienteId, conSesion ? 1 : 0, datosGuardados.length ? JSON.stringify(datosGuardados) : null);
+  return {
+    id: info.lastInsertRowid, numero, cliente, items, total, unidades, creado_en: creadoEn,
+    cliente_id: clienteId, con_sesion: conSesion ? 1 : 0,
+  };
 }
 
 function leerPedido(numero) {

@@ -259,3 +259,12 @@ table.datos.editor-grilla input[type="number"] { width: 58px; text-align: center
   border: 1px solid var(--linea); border-radius: 10px; image-rendering: pixelated;
 }
 .pasos-qr { margin: 0; padding-left: 20px; max-width: 360px; font-size: 13.5px; line-height: 1.6; }
+
+/* ── Revisión del stock ─────────────────────────────────────────── */
+.aviso-pendientes { background: #f6f8fb; border-color: #d9dee6; }
+.stock-grilla td.celda-stock { text-align: center; }
+.stock-grilla td.celda-stock .chico { display: block; margin-bottom: 3px; white-space: nowrap; }
+.stock-grilla td.falta input { border-color: #d97706; background: #fff7ed; }
+
+/* ── La ficha del cliente ───────────────────────────────────────── */
+.lista-simple { margin: 0; padding-left: 18px; line-height: 1.75; font-size: 13.5px; }

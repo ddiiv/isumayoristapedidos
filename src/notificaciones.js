@@ -183,6 +183,11 @@ const AL_CLIENTE = {
     texto: 'Tenemos el stock de todo lo que pediste y ya estamos preparando tu pedido.\n'
       + 'Te adjuntamos el detalle.',
   },
+  'confirmado-con-cambios': {
+    asunto: (p) => `Confirmamos tu pedido ${p.numero}, con cambios`,
+    texto: 'Revisamos el stock y no teníamos todo lo que pediste. Te adjuntamos el pedido\n'
+      + 'como queda: es el que vamos a preparar.',
+  },
   modificado: {
     asunto: (p) => `Tu pedido ${p.numero} tiene cambios`,
     texto: 'No teníamos todo lo que pediste y ajustamos tu pedido. Te adjuntamos cómo\n'
@@ -194,7 +199,29 @@ const AL_CLIENTE = {
   },
 };
 
-async function avisarCliente(pedido, estado, { pdf = null, nota = null } = {}) {
+/*
+ * Lo que cambió, renglón por renglón.
+ *
+ * El PDF adjunto dice cómo queda el pedido, pero no qué se sacó: quien pidió
+ * cuatro remeras negras en L y recibe un pedido con dos tiene que ponerse a
+ * comparar con lo que había mandado. Acá se lo dice derecho.
+ */
+function textoDeCambios(cambios) {
+  const lineas = cambios?.lineas || [];
+  if (!lineas.length) return '';
+  const renglon = (l) => {
+    const que = `${l.titulo} — ${l.color || 'Único'} ${l.talle}`;
+    if (!l.antes) return `  · ${que}: agregamos ${l.despues}`;
+    if (!l.despues) return `  · ${que}: pediste ${l.antes}, no hay`;
+    return `  · ${que}: pediste ${l.antes}, te mandamos ${l.despues}`;
+  };
+  return `\nLo que cambió respecto de lo que pediste:\n${lineas.map(renglon).join('\n')}\n`
+    + (cambios.masLineas ? `  · y ${cambios.masLineas} cambios más: están en el pedido adjunto.\n` : '')
+    + (cambios.totalAntes !== undefined && cambios.totalAntes !== cambios.totalDespues
+      ? `Total: antes ${pesos(cambios.totalAntes)}, ahora ${pesos(cambios.totalDespues)}.\n` : '');
+}
+
+async function avisarCliente(pedido, estado, { pdf = null, nota = null, cambios = null } = {}) {
   const modelo = AL_CLIENTE[estado];
   if (!modelo) return null;
   const destino = String(pedido?.cliente?.email || '').trim();
@@ -205,9 +232,10 @@ async function avisarCliente(pedido, estado, { pdf = null, nota = null } = {}) {
   const c = pedido.cliente;
   const cuerpo = `Hola${c.nombre ? ` ${c.nombre}` : ''}:\n\n${modelo.texto}\n`
     + (nota ? `\nNota de ISUWAYA: ${nota}\n` : '')
+    + textoDeCambios(cambios)
     + `\nPedido ${pedido.numero} — ${pedido.unidades} unidades — ${pesos(pedido.total)}\n`
     + `Envío: ${c.formaEnvio} · ${c.ciudad} (${c.codigoPostal}), ${c.provincia}\n`
-    + (pedido.cliente_id ? '\nLo podés seguir en «Mis pedidos», entrando a tu cuenta.\n' : '')
+    + (pedido.seVeEnCuenta ? '\nLo podés seguir en «Mis pedidos», entrando a tu cuenta.\n' : '')
     + '\nSi tenés alguna duda, respondé este mail.\n\nISUWAYA Mayorista\n';
   try {
     await t.sendMail({

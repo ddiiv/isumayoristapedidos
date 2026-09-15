@@ -1,6 +1,7 @@
 const crypto = require('node:crypto');
 const express = require('express');
 const { db, ESTADOS, normalizarEstado, historialDePedido } = require('../db');
+const clientes = require('../clientes');
 const auth = require('../auth');
 const { validarCliente, cuitValido } = require('../pedidos');
 
@@ -123,7 +124,8 @@ r.post('/sesion', (req, res) => {
   }
 
   // ── ¿Es un cliente?
-  const cliente = db.prepare('SELECT * FROM clientes WHERE email = ?').get(email);
+  // Sólo cuentas: un cliente reservado —compró sin cuenta— no tiene contraseña con la que entrar.
+  const cliente = db.prepare('SELECT * FROM clientes WHERE email = ? AND password_hash IS NOT NULL').get(email);
   const coincide = auth.verificar(password, cliente ? cliente.password_hash : HASH_DE_RELLENO);
   if (!cliente || !coincide) {
     return res.status(401).json({ message: 'Email o contraseña incorrectos.' });
@@ -167,7 +169,7 @@ r.post('/cuenta', (req, res) => {
     return res.status(400).json({ message: 'Revisá los datos.', errores });
   }
 
-  const existe = db.prepare('SELECT id FROM clientes WHERE email = ?').get(email);
+  const existe = db.prepare('SELECT id FROM clientes WHERE email = ? AND password_hash IS NOT NULL').get(email);
   if (existe) {
     return res.status(409).json({
       message: 'Ya hay una cuenta con ese email. Entrá con tu contraseña o escribinos si la olvidaste.',
@@ -178,20 +180,45 @@ r.post('/cuenta', (req, res) => {
     return res.status(409).json({ message: 'Ese email no se puede usar.', errores: { email: 'No disponible.' } });
   }
 
-  const info = db.prepare(`
-    INSERT INTO clientes (email, password_hash, nombre, cuit, telefono, provincia, ciudad,
-                          codigo_postal, direccion, entre_calles, forma_envio, creado_en)
-    VALUES (@email, @hash, @nombre, @cuit, @telefono, @provincia, @ciudad,
-            @codigoPostal, @direccion, @entreCalles, @formaEnvio, @creadoEn)`)
-    .run({
-      email, hash: auth.hashear(password),
-      nombre: cliente.nombre, cuit: cliente.cuit, telefono: cliente.telefono,
-      provincia: cliente.provincia, ciudad: cliente.ciudad, codigoPostal: cliente.codigoPostal,
-      direccion: cliente.direccion, entreCalles: cliente.entreCalles, formaEnvio: cliente.formaEnvio,
-      creadoEn: new Date().toISOString(),
+  /*
+   * El CUIT es el cliente. Si ya hay una cuenta con ese CUIT, no se crea otra.
+   * Si compró antes sin cuenta, la cuenta ocupa ese lugar reservado y conserva
+   * sus compras en la sección de clientes. De esas compras viejas, en «Mis
+   * pedidos» ve las que dejaron este mismo email: el CUIT de un negocio no es un
+   * secreto, y no alcanza para ver lo que pidió otro (ver src/clientes.js).
+   */
+  const porCuit = clientes.buscarPorCuit(cliente.cuit);
+  if (porCuit?.password_hash) {
+    return res.status(409).json({
+      message: 'Ya hay una cuenta con ese CUIT. Entrá con tu email, o escribinos si no la reconocés.',
+      errores: { cuit: 'Ya tiene una cuenta.' },
     });
+  }
 
-  const nuevo = db.prepare('SELECT * FROM clientes WHERE id = ?').get(info.lastInsertRowid);
+  const fila = {
+    email, hash: auth.hashear(password),
+    nombre: cliente.nombre, cuit: cliente.cuit, cuitNumero: clientes.cuitNumero(cliente.cuit),
+    telefono: cliente.telefono, provincia: cliente.provincia, ciudad: cliente.ciudad,
+    codigoPostal: cliente.codigoPostal, direccion: cliente.direccion, entreCalles: cliente.entreCalles,
+    formaEnvio: cliente.formaEnvio, creadoEn: new Date().toISOString(),
+  };
+  let id;
+  if (porCuit) {
+    db.prepare(`
+      UPDATE clientes SET email = @email, password_hash = @hash, nombre = @nombre, cuit = @cuit,
+        cuit_numero = @cuitNumero, telefono = @telefono, provincia = @provincia, ciudad = @ciudad,
+        codigo_postal = @codigoPostal, direccion = @direccion, entre_calles = @entreCalles, forma_envio = @formaEnvio
+      WHERE id = @id`).run({ ...fila, id: porCuit.id });
+    id = porCuit.id;
+  } else {
+    id = Number(db.prepare(`
+      INSERT INTO clientes (email, password_hash, nombre, cuit, cuit_numero, telefono, provincia, ciudad,
+                            codigo_postal, direccion, entre_calles, forma_envio, creado_en)
+      VALUES (@email, @hash, @nombre, @cuit, @cuitNumero, @telefono, @provincia, @ciudad,
+              @codigoPostal, @direccion, @entreCalles, @formaEnvio, @creadoEn)`).run(fila).lastInsertRowid);
+  }
+
+  const nuevo = db.prepare('SELECT * FROM clientes WHERE id = ?').get(id);
   auth.ponerCookie(res, req, { rol: 'cliente', id: nuevo.id });
   res.status(201).json({
     rol: 'cliente', cliente: auth.sinPassword(nuevo), datosDePedido: auth.datosDePedido(nuevo),
@@ -256,12 +283,18 @@ r.put('/cuenta', (req, res) => {
     return res.status(400).json({ message: 'Revisá los datos.', errores });
   }
 
+  // Otra CUENTA con ese CUIT sería el mismo cliente dos veces.
+  const otro = clientes.buscarPorCuit(cliente.cuit);
+  if (otro && otro.id !== actual.id && otro.password_hash) {
+    return res.status(409).json({ message: 'Ese CUIT ya tiene otra cuenta.', errores: { cuit: 'Ya tiene otra cuenta.' } });
+  }
+
   db.prepare(`
-    UPDATE clientes SET nombre=@nombre, cuit=@cuit, telefono=@telefono, provincia=@provincia,
+    UPDATE clientes SET nombre=@nombre, cuit=@cuit, cuit_numero=@cuitNumero, telefono=@telefono, provincia=@provincia,
       ciudad=@ciudad, codigo_postal=@codigoPostal, direccion=@direccion,
       entre_calles=@entreCalles, forma_envio=@formaEnvio
     WHERE id=@id`)
-    .run({ ...cliente, codigoPostal: cliente.codigoPostal, id: actual.id });
+    .run({ ...cliente, cuitNumero: clientes.cuitNumero(cliente.cuit), id: actual.id });
 
   const nuevo = db.prepare('SELECT * FROM clientes WHERE id = ?').get(actual.id);
   res.json({ cliente: auth.sinPassword(nuevo), datosDePedido: auth.datosDePedido(nuevo) });
@@ -302,7 +335,8 @@ r.get('/cuenta/pedidos', (req, res) => {
   const filas = db.prepare(`
     SELECT id, numero, total, unidades, estado, creado_en, actualizado_en, ajuste,
            original IS NOT NULL AS fueModificado
-    FROM pedidos WHERE cliente_id = ? ORDER BY id DESC LIMIT 100`).all(req.sesion.cliente.id);
+    FROM pedidos WHERE cliente_id = ? AND ${clientes.FILTRO_VISIBLE_SQL}
+    ORDER BY id DESC LIMIT 100`).all(req.sesion.cliente.id, req.sesion.cliente.email || '');
 
   res.json({
     estados: ESTADOS,
@@ -332,7 +366,7 @@ r.get('/cuenta/pedidos/:numero', (req, res) => {
     .get(String(req.params.numero), req.sesion.cliente.id);
   // Mismo 404 que si no existiera: un 403 acá le diría a quien prueba números
   // cuáles pedidos son de otro.
-  if (!fila) return res.status(404).json({ message: 'No existe ese pedido.' });
+  if (!fila || !clientes.visibleEnCuenta(fila, req.sesion.cliente)) return res.status(404).json({ message: 'No existe ese pedido.' });
 
   res.json({
     pedido: {

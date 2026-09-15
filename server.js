@@ -9,6 +9,7 @@ const { rutas: admin } = require('./src/rutas/admin');
 const { conSesion } = require('./src/auth');
 const { completarMiniaturas } = require('./src/miniaturas');
 const whatsapp = require('./src/whatsapp');
+const { completarClientesDePedidos } = require('./src/clientes');
 
 const app = express();
 const PORT = Number(process.env.PORT) || 8080;
@@ -135,6 +136,8 @@ const server = app.listen(PORT, () => {
   console.log(`  panel ${process.env.ADMIN_PASSWORD ? 'configurado' : '✖ SIN ADMIN_PASSWORD — no va a abrir'}\n`);
   // Las fotos de antes de las miniaturas se completan en segundo plano: el sitio ya está atendiendo.
   completarMiniaturas().catch((e) => console.error('  miniaturas:', e.message));
+  // Los pedidos de antes, atados a su cliente por CUIT (una sola vez: después no queda ninguno suelto).
+  try { completarClientesDePedidos(); } catch (e) { console.error('  clientes:', e.message); }
   // Si el WhatsApp del grupo ya estaba vinculado, se reconecta solo: un deploy no obliga a escanear de nuevo.
   whatsapp.arrancarSiHaySesion();
 });

@@ -11,6 +11,7 @@ const { hacerMiniatura, nombreMiniatura } = require('../miniaturas');
 const { pdfPedido } = require('../pdf');
 const { avisarCliente } = require('../notificaciones');
 const whatsapp = require('../whatsapp');
+const { seVeEnCuenta } = require('../clientes');
 const { importarPlanilla } = require('../excel');
 const { ordenarCatalogo } = require('../normalizar');
 const paleta = require('../colores');
@@ -851,22 +852,97 @@ r.delete('/talles/:id', (req, res) => {
 });
 
 // ── Clientes ──────────────────────────────────────────────────────
+/*
+ * GET /api/admin/clientes — todos los que compraron, con cuenta o sin ella.
+ *
+ * Cuántas veces compró cada uno y cuánto, sin los cancelados: un pedido
+ * cancelado no es una compra. Ordena el último pedido: arriba, los que están
+ * comprando ahora.
+ */
 r.get('/clientes', (req, res) => {
   const filas = db.prepare(`
     SELECT c.id, c.email, c.nombre, c.cuit, c.telefono, c.provincia, c.ciudad,
-           c.activo, c.creado_en, c.ultimo_acceso,
-           (SELECT COUNT(*) FROM pedidos p WHERE p.cliente_id = c.id) AS pedidos
-    FROM clientes c ORDER BY c.id DESC`).all();
-  res.json({ clientes: filas });
+           c.activo, c.creado_en, c.ultimo_acceso, c.password_hash IS NOT NULL AS tieneCuenta,
+           COUNT(p.id) FILTER (WHERE p.estado <> 'cancelado') AS pedidos,
+           COUNT(p.id) FILTER (WHERE p.estado = 'cancelado') AS cancelados,
+           COALESCE(SUM(p.total) FILTER (WHERE p.estado <> 'cancelado'), 0) AS comprado,
+           MAX(p.creado_en) AS ultimoPedido
+    FROM clientes c LEFT JOIN pedidos p ON p.cliente_id = c.id
+    GROUP BY c.id
+    ORDER BY (MAX(p.creado_en) IS NULL), MAX(p.creado_en) DESC, c.id DESC`).all();
+  res.json({ clientes: filas.map((f) => ({ ...f, tieneCuenta: Boolean(f.tieneCuenta) })) });
 });
 
-r.put('/clientes/:id', (req, res) => {
-  if (req.body?.activo === undefined) {
-    return res.status(400).json({ message: 'No mandaste nada para cambiar.' });
+/*
+ * GET /api/admin/clientes/:id — un cliente, sus pedidos y a dónde mandó.
+ *
+ * El mismo cliente manda cada pedido a otro lado: los lugares se juntan con
+ * cuántas veces se usó cada uno, en vez de guardar "la" dirección del cliente.
+ */
+r.get('/clientes/:id', (req, res) => {
+  const c = db.prepare('SELECT * FROM clientes WHERE id = ?').get(Number(req.params.id));
+  if (!c) return res.status(404).json({ message: 'No existe ese cliente.' });
+
+  const pedidos = db.prepare(`
+    SELECT numero, cliente, total, unidades, estado, creado_en
+    FROM pedidos WHERE cliente_id = ? ORDER BY id DESC`).all(c.id).map((f) => {
+    let d = {};
+    try { d = JSON.parse(f.cliente); } catch { /* pedido sin datos legibles */ }
+    return {
+      numero: f.numero, creado_en: f.creado_en, total: f.total, unidades: f.unidades,
+      estado: normalizarEstado(f.estado),
+      envio: {
+        direccion: d.direccion || '', ciudad: d.ciudad || '', provincia: d.provincia || '',
+        codigoPostal: d.codigoPostal || '', formaEnvio: d.formaEnvio || '',
+      },
+    };
+  });
+
+  const lugares = new Map();
+  for (const p of pedidos) {
+    const e = p.envio;
+    const clave = [e.direccion, e.ciudad, e.codigoPostal, e.formaEnvio].map((x) => String(x).trim().toLowerCase()).join('|');
+    if (!lugares.has(clave)) lugares.set(clave, { ...e, veces: 0, ultimo: p.creado_en });
+    lugares.get(clave).veces += 1;
   }
-  const info = db.prepare('UPDATE clientes SET activo = ? WHERE id = ?')
-    .run(req.body.activo ? 1 : 0, Number(req.params.id));
-  if (!info.changes) return res.status(404).json({ message: 'No existe ese cliente.' });
+
+  const { password_hash: clave, ...datos } = c;
+  res.json({
+    cliente: { ...datos, tieneCuenta: Boolean(clave) },
+    pedidos,
+    direcciones: [...lugares.values()].sort((a, b) => b.veces - a.veces),
+  });
+});
+
+/*
+ * PUT /api/admin/clientes/:id — { activo?, nombre?, telefono?, email? }
+ *
+ * Para corregir un dato mal cargado. El email de una CUENTA no se toca desde
+ * acá: es con lo que el cliente entra, y cambiárselo lo deja afuera.
+ */
+r.put('/clientes/:id', (req, res) => {
+  const c = db.prepare('SELECT * FROM clientes WHERE id = ?').get(Number(req.params.id));
+  if (!c) return res.status(404).json({ message: 'No existe ese cliente.' });
+  const b = req.body || {};
+  const campos = [];
+  const valores = [];
+  if (b.activo !== undefined) { campos.push('activo = ?'); valores.push(b.activo ? 1 : 0); }
+  for (const [campo, etiqueta] of [['nombre', 'El nombre'], ['telefono', 'El teléfono']]) {
+    if (b[campo] === undefined) continue;
+    const v = String(b[campo]).trim();
+    if (!v) return res.status(400).json({ message: `${etiqueta} no puede quedar vacío.` });
+    campos.push(`${campo} = ?`); valores.push(v);
+  }
+  if (b.email !== undefined) {
+    if (c.password_hash) {
+      return res.status(400).json({ message: 'El email de una cuenta lo cambia el cliente: es con lo que entra.' });
+    }
+    const v = String(b.email).trim().toLowerCase();
+    if (v && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v)) return res.status(400).json({ message: 'Ese email no parece válido.' });
+    campos.push('email = ?'); valores.push(v || null);
+  }
+  if (!campos.length) return res.status(400).json({ message: 'No mandaste nada para cambiar.' });
+  db.prepare(`UPDATE clientes SET ${campos.join(', ')} WHERE id = ?`).run(...valores, c.id);
   res.json({ ok: true });
 });
 
@@ -921,6 +997,8 @@ r.get('/pedidos', (req, res) => {
     FROM pedidos WHERE ${donde}`).get(...params);
 
   res.json({
+    // Cuántos esperan la confirmación de stock, con cualquier filtro: es lo primero que hay que atender.
+    pendientes: db.prepare("SELECT COUNT(*) n FROM pedidos WHERE estado = 'pendiente'").get().n,
     pedidos: filas.map((f) => ({
       ...f,
       cliente: JSON.parse(f.cliente),
@@ -967,15 +1045,16 @@ const EDITABLES = ['pendiente', 'confirmado', 'modificado'];
  * se rearmó o que se canceló. El aviso queda anotado en el pedido, así el panel
  * muestra si el cliente se enteró.
  */
-async function avisarClienteDelCambio(numero, estado, nota) {
-  if (!['confirmado', 'modificado', 'cancelado'].includes(estado)) return null;
+async function avisarClienteDelCambio(numero, estado, nota, cambios = null) {
+  if (!['confirmado', 'confirmado-con-cambios', 'modificado', 'cancelado'].includes(estado)) return null;
   const pedido = leerPedido(numero);
   if (!pedido) return null;
+  pedido.seVeEnCuenta = seVeEnCuenta(pedido);
   let pdf = null;
   if (estado !== 'cancelado') {
     try { pdf = await pdfPedido(pedido); } catch { /* sin adjunto: el aviso sale igual */ }
   }
-  const aviso = await avisarCliente(pedido, estado, { pdf, nota });
+  const aviso = await avisarCliente(pedido, estado, { pdf, nota, cambios });
   db.prepare('UPDATE pedidos SET aviso_cliente = ? WHERE id = ?').run(aviso, pedido.id);
   return aviso;
 }
@@ -1006,17 +1085,10 @@ r.put('/pedidos/:numero/estado', conErrores(async (req, res) => {
 }));
 
 /*
- * GET /api/admin/pedidos/:numero/editor — la grilla para rearmar el pedido.
- *
- * Lo guardado dice "Negro, L: 4"; para volver a valorizarlo hace falta el SKU
- * de ese cruce, que es lo único que el servidor acepta como entrada. La
- * traducción de nombre a SKU se hace acá, con la base al lado, y no en el
- * navegador adivinando.
+ * Lo pedido, traducido a la grilla vigente de cada producto: cada cruce con su
+ * SKU, su precio y la cantidad pedida. Lo usan el editor y la revisión de stock.
  */
-r.get('/pedidos/:numero/editor', (req, res) => {
-  const pedido = leerPedido(req.params.numero);
-  if (!pedido) return res.status(404).json({ message: 'No existe ese pedido.' });
-
+function lineasDelPedido(pedido) {
   const pedidos = new Map();   // skuAgrupador -> Map("color|talle" -> cantidad)
   for (const it of pedido.items) {
     if (!pedidos.has(it.skuAgrupador)) pedidos.set(it.skuAgrupador, new Map());
@@ -1049,6 +1121,22 @@ r.get('/pedidos/:numero/editor', (req, res) => {
       .map(([k, cantidad]) => ({ color: k.split('|')[0], talle: k.split('|')[1], cantidad }));
     lineas.push(grilla);
   }
+  return lineas;
+}
+
+/*
+ * GET /api/admin/pedidos/:numero/editor — la grilla para rearmar el pedido.
+ *
+ * Lo guardado dice "Negro, L: 4"; para volver a valorizarlo hace falta el SKU
+ * de ese cruce, que es lo único que el servidor acepta como entrada. La
+ * traducción de nombre a SKU se hace acá, con la base al lado, y no en el
+ * navegador adivinando.
+ */
+r.get('/pedidos/:numero/editor', (req, res) => {
+  const pedido = leerPedido(req.params.numero);
+  if (!pedido) return res.status(404).json({ message: 'No existe ese pedido.' });
+
+  const lineas = lineasDelPedido(pedido);
 
   res.json({
     numero: pedido.numero,
@@ -1081,6 +1169,38 @@ r.get('/grilla/:sku', (req, res) => {
  *  · lo que el cliente confirmó se copia entero antes de tocar nada. Sin eso,
  *    a la semana no hay forma de mostrarle qué pidió él y qué se despachó.
  */
+/*
+ * Rearma un pedido con otro carrito: lo valoriza el servidor, guarda el pedido
+ * original la primera vez y deja anotado qué cambió. Lo usan el editor y la
+ * revisión de stock.
+ */
+function rearmarPedido(fila, carrito, { ajuste = null, nota = null, notaPorDefecto = null } = {}) {
+  const { items, total: base, unidades, errores } = armarPedido(carrito);
+  if (!items.length) {
+    return { error: 'Un pedido modificado no puede quedar vacío. Si no va a salir, cancelalo.', errores };
+  }
+  let calculado;
+  try { calculado = aplicarAjuste(base, ajuste); } catch (e) { return { error: e.message }; }
+
+  const antes = { items: JSON.parse(fila.items), total: fila.total, unidades: fila.unidades };
+  const cambios = {
+    ...compararItems(antes.items, items),
+    totalAntes: antes.total, totalDespues: calculado.total,
+    unidadesAntes: antes.unidades, unidadesDespues: unidades,
+    base: calculado.base, ajuste: calculado.ajuste,
+  };
+  db.transaction(() => {
+    if (!fila.original) {
+      db.prepare('UPDATE pedidos SET original = ? WHERE id = ?')
+        .run(JSON.stringify({ ...antes, fecha: fila.creado_en }), fila.id);
+    }
+    db.prepare('UPDATE pedidos SET items = ?, total = ?, unidades = ?, ajuste = ? WHERE id = ?')
+      .run(JSON.stringify(items), calculado.total, unidades, calculado.ajuste ? JSON.stringify(calculado.ajuste) : null, fila.id);
+    registrarEstado(fila.id, 'modificado', { nota: nota || notaPorDefecto, cambios });
+  })();
+  return { cambios, errores };
+}
+
 r.put('/pedidos/:numero/items', conErrores(async (req, res) => {
   const fila = db.prepare('SELECT * FROM pedidos WHERE numero = ?').get(req.params.numero);
   if (!fila) return res.status(404).json({ message: 'No existe ese pedido.' });
@@ -1092,40 +1212,94 @@ r.put('/pedidos/:numero/items', conErrores(async (req, res) => {
     });
   }
 
-  const { items, total: base, unidades, errores } = armarPedido(req.body?.carrito);
-  if (!items.length) {
-    return res.status(400).json({
-      message: 'Un pedido modificado no puede quedar vacío. Si no va a salir, cancelalo.', errores,
+  const rearmado = rearmarPedido(fila, req.body?.carrito, { ajuste: req.body?.ajuste, nota: limpiarNota(req.body?.nota) });
+  if (rearmado.error) return res.status(400).json({ message: rearmado.error, errores: rearmado.errores });
+
+  /*
+   * Rearmar un pedido que esperaba stock ES confirmarlo, con cambios: se revisó
+   * y se decidió qué sale. Si ya estaba confirmado, es un cambio posterior. En
+   * los dos casos al cliente le llega el pedido como queda y lo que cambió.
+   */
+  const aviso = actual === 'pendiente' ? 'confirmado-con-cambios' : 'modificado';
+  const avisoCliente = await avisarClienteDelCambio(fila.numero, aviso, limpiarNota(req.body?.nota), rearmado.cambios);
+  res.json({ pedido: conSeguimiento(leerPedido(fila.numero)), errores: rearmado.errores, avisoCliente });
+}));
+
+/*
+ * PUT /api/admin/pedidos/:numero/confirmar-stock — { disponibles: { sku: n }, nota }
+ *
+ * La revisión del stock, renglón por renglón. Para cada cruce pedido se dice
+ * cuánto hay, entre cero y lo pedido. Si hay todo, el pedido queda confirmado
+ * tal cual; si falta algo, se rearma con lo que hay y queda modificado. En los
+ * dos casos al cliente le llega el pedido como va a salir.
+ *
+ * Sumar artículos o cambiar el precio no es revisar el stock: para eso está el
+ * editor. Por eso acá no entra más de lo pedido ni un cruce que no se pidió.
+ */
+r.put('/pedidos/:numero/confirmar-stock', conErrores(async (req, res) => {
+  const fila = db.prepare('SELECT * FROM pedidos WHERE numero = ?').get(req.params.numero);
+  if (!fila) return res.status(404).json({ message: 'No existe ese pedido.' });
+  const actual = normalizarEstado(fila.estado);
+  if (actual !== 'pendiente') {
+    return res.status(409).json({
+      message: `El pedido ya está ${ESTADOS[actual].etiqueta.toLowerCase()}: el stock se revisa mientras espera confirmación.`,
     });
   }
 
-  let calculado;
-  try { calculado = aplicarAjuste(base, req.body?.ajuste); } catch (e) {
-    return res.status(400).json({ message: e.message });
-  }
-
-  const antes = { items: JSON.parse(fila.items), total: fila.total, unidades: fila.unidades };
-  const guardar = db.transaction(() => {
-    if (!fila.original) {
-      db.prepare('UPDATE pedidos SET original = ? WHERE id = ?')
-        .run(JSON.stringify({ ...antes, fecha: fila.creado_en }), fila.id);
+  const pedidos = new Map();   // sku -> { skuAgrupador, cantidad }
+  let huerfanos = 0;
+  for (const linea of lineasDelPedido(leerPedido(fila.numero))) {
+    for (const c of linea.combinaciones) {
+      if (c.cantidad > 0) pedidos.set(c.sku, { skuAgrupador: linea.skuAgrupador, cantidad: c.cantidad });
     }
-    db.prepare('UPDATE pedidos SET items = ?, total = ?, unidades = ?, ajuste = ? WHERE id = ?')
-      .run(JSON.stringify(items), calculado.total, unidades, calculado.ajuste ? JSON.stringify(calculado.ajuste) : null, fila.id);
-    registrarEstado(fila.id, 'modificado', {
-      nota: limpiarNota(req.body?.nota),
-      cambios: {
-        ...compararItems(antes.items, items),
-        totalAntes: antes.total, totalDespues: calculado.total,
-        unidadesAntes: antes.unidades, unidadesDespues: unidades,
-        base: calculado.base, ajuste: calculado.ajuste,
-      },
-    });
-  });
-  guardar();
+    huerfanos += (linea.huerfanos || []).length;
+  }
 
-  const avisoCliente = await avisarClienteDelCambio(fila.numero, 'modificado', limpiarNota(req.body?.nota));
-  res.json({ pedido: conSeguimiento(leerPedido(fila.numero)), errores, avisoCliente });
+  const disponibles = req.body?.disponibles && typeof req.body.disponibles === 'object' ? req.body.disponibles : {};
+  for (const [sku, valor] of Object.entries(disponibles)) {
+    const p = pedidos.get(sku);
+    if (!p) {
+      return res.status(400).json({ message: 'Hay un artículo que no está en este pedido. Para sumar artículos usá «Modificar artículos y precio».' });
+    }
+    const n = Number(valor);
+    if (!Number.isInteger(n) || n < 0) {
+      return res.status(400).json({ message: 'Las cantidades que hay son números enteros, desde cero.' });
+    }
+    if (n > p.cantidad) {
+      return res.status(400).json({ message: 'No puede haber más de lo que se pidió. Para sumar artículos usá «Modificar artículos y precio».' });
+    }
+  }
+
+  const hay = (sku) => (Object.prototype.hasOwnProperty.call(disponibles, sku) ? Number(disponibles[sku]) : pedidos.get(sku).cantidad);
+  const faltaAlgo = [...pedidos.keys()].some((sku) => hay(sku) < pedidos.get(sku).cantidad);
+  const nota = limpiarNota(req.body?.nota);
+
+  // Hay de todo y todo se puede volver a valorizar: se confirma tal cual, sin rearmar nada.
+  if (!faltaAlgo && !huerfanos) {
+    registrarEstado(fila.id, 'confirmado', { nota: nota || 'Confirmamos el stock de todo lo que pediste.' });
+    const avisoCliente = await avisarClienteDelCambio(fila.numero, 'confirmado', nota);
+    return res.json({ pedido: conSeguimiento(leerPedido(fila.numero)), conCambios: false, avisoCliente });
+  }
+
+  const carrito = new Map();
+  for (const [sku, p] of pedidos) {
+    const n = hay(sku);
+    if (!n) continue;
+    if (!carrito.has(p.skuAgrupador)) carrito.set(p.skuAgrupador, { skuAgrupador: p.skuAgrupador, cantidades: {} });
+    carrito.get(p.skuAgrupador).cantidades[sku] = n;
+  }
+  if (!carrito.size) {
+    return res.status(400).json({ message: 'No hay stock de nada de lo que pidió. Si no va a salir, cancelá el pedido.' });
+  }
+
+  const rearmado = rearmarPedido(fila, [...carrito.values()], {
+    ajuste: fila.ajuste ? JSON.parse(fila.ajuste) : null,
+    nota,
+    notaPorDefecto: 'Revisamos el stock y no teníamos todo: ajustamos el pedido con lo que hay.',
+  });
+  if (rearmado.error) return res.status(400).json({ message: rearmado.error });
+  const avisoCliente = await avisarClienteDelCambio(fila.numero, 'confirmado-con-cambios', nota, rearmado.cambios);
+  res.json({ pedido: conSeguimiento(leerPedido(fila.numero)), conCambios: true, cambios: rearmado.cambios, avisoCliente });
 }));
 
 /*

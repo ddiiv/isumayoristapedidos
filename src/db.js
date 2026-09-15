@@ -66,6 +66,37 @@ const db = new Database(path.join(DATA_DIR, 'isuwaya.db'));
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 
+/*
+ * Las columnas de clientes, en un solo lugar: las usa la base nueva y la
+ * migración que rehace la tabla en una base que ya existe.
+ */
+const COLUMNAS_CLIENTES = `
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  -- Sin contraseña es un cliente "reservado": compró sin crear cuenta. Se lo
+  -- reconoce por el CUIT y se le guardan los datos para la próxima compra.
+  -- El email no es único acá: dos negocios pueden compartir el del contador.
+  -- Lo único que no se repite es el email de una CUENTA (índice más abajo).
+  email         TEXT,
+  password_hash TEXT,
+  -- Los mismos campos que pide el pedido, para que al entrar se completen
+  -- solos. Guardarlos en otra forma obligaría a traducir entre dos formatos
+  -- cada vez, y el día que se agregue un campo se agrega en un solo lado.
+  nombre        TEXT NOT NULL,
+  cuit          TEXT NOT NULL,
+  -- El CUIT sólo con los números: es con lo que se reconoce al cliente.
+  cuit_numero   TEXT,
+  telefono      TEXT NOT NULL,
+  provincia     TEXT,
+  ciudad        TEXT,
+  codigo_postal TEXT,
+  direccion     TEXT,
+  entre_calles  TEXT,
+  forma_envio   TEXT,
+  activo        INTEGER NOT NULL DEFAULT 1,
+  creado_en     TEXT NOT NULL,
+  ultimo_acceso TEXT
+`;
+
 db.exec(`
 CREATE TABLE IF NOT EXISTS categorias (
   id      INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -200,28 +231,7 @@ CREATE TABLE IF NOT EXISTS talles (
   orden   INTEGER NOT NULL DEFAULT 0
 );
 
-CREATE TABLE IF NOT EXISTS clientes (
-  id            INTEGER PRIMARY KEY AUTOINCREMENT,
-  email         TEXT NOT NULL UNIQUE,
-  password_hash TEXT NOT NULL,
-  -- Los mismos campos que pide el pedido, para que al entrar se completen
-  -- solos. Guardarlos en otra forma obligaría a traducir entre dos formatos
-  -- cada vez, y el día que se agregue un campo se agrega en un solo lado.
-  nombre        TEXT NOT NULL,
-  cuit          TEXT NOT NULL,
-  telefono      TEXT NOT NULL,
-  provincia     TEXT,
-  ciudad        TEXT,
-  codigo_postal TEXT,
-  direccion     TEXT,
-  entre_calles  TEXT,
-  forma_envio   TEXT,
-  activo        INTEGER NOT NULL DEFAULT 1,
-  creado_en     TEXT NOT NULL,
-  ultimo_acceso TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_clientes_email ON clientes(email);
-
+CREATE TABLE IF NOT EXISTS clientes (${COLUMNAS_CLIENTES});
 CREATE TABLE IF NOT EXISTS config (
   clave TEXT PRIMARY KEY,
   valor TEXT
@@ -245,6 +255,69 @@ function asegurarColumna(tabla, columna, definicion) {
 }
 
 asegurarColumna('pedidos', 'cliente_id', 'INTEGER');
+
+/*
+ * Clientes sin cuenta: la tabla se rehace una sola vez.
+ *
+ * Exigía email y contraseña, así que quien compraba sin cuenta no quedaba
+ * registrado en ningún lado: no había cómo saber cuántas veces compró ni
+ * completarle los datos la próxima vez. SQLite no deja sacar un NOT NULL de
+ * una columna, así que se copia la tabla a una nueva con las columnas
+ * flexibles y se reemplaza, todo o nada en una transacción. Las claves
+ * foráneas se apagan mientras tanto: borrar la tabla vieja no puede soltar
+ * los pedidos de sus clientes.
+ */
+(() => {
+  const columnas = db.prepare('PRAGMA table_info(clientes)').all();
+  const clave = columnas.find((c) => c.name === 'password_hash');
+  if (clave && clave.notnull === 0 && columnas.some((c) => c.name === 'cuit_numero')) return;
+
+  const nuevas = COLUMNAS_CLIENTES.split('\n').map((l) => l.trim().match(/^([a-z_]+)\s/)?.[1]).filter(Boolean);
+  const comunes = columnas.map((c) => c.name).filter((n) => nuevas.includes(n));
+  db.pragma('foreign_keys = OFF');
+  try {
+    db.transaction(() => {
+      db.exec(`CREATE TABLE clientes_nueva (${COLUMNAS_CLIENTES})`);
+      db.exec(`INSERT INTO clientes_nueva (${comunes.join(', ')}) SELECT ${comunes.join(', ')} FROM clientes`);
+      db.exec('DROP TABLE clientes');
+      db.exec('ALTER TABLE clientes_nueva RENAME TO clientes');
+    })();
+  } finally {
+    db.pragma('foreign_keys = ON');
+  }
+  console.log('  [base] la tabla de clientes ahora admite clientes sin cuenta');
+})();
+
+{
+  const poner = db.prepare('UPDATE clientes SET cuit_numero = ? WHERE id = ?');
+  for (const c of db.prepare('SELECT id, cuit FROM clientes WHERE cuit_numero IS NULL').all()) {
+    poner.run(String(c.cuit || '').replace(/\D/g, ''), c.id);
+  }
+}
+db.exec(`
+  CREATE INDEX IF NOT EXISTS idx_clientes_email ON clientes(email);
+  CREATE INDEX IF NOT EXISTS idx_clientes_cuit  ON clientes(cuit_numero);
+  -- Dos CUENTAS no pueden tener el mismo email: es con lo que se entra.
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_clientes_email_cuenta ON clientes(email) WHERE password_hash IS NOT NULL;
+`);
+
+/*
+ * Si el pedido se hizo con la sesión abierta.
+ *
+ * Todo pedido queda atado a su cliente por CUIT, con cuenta o sin ella. Pero
+ * que alguien cree una cuenta con un CUIT no le da derecho a ver lo que otros
+ * pidieron con ese CUIT antes: en «Mis pedidos» se ven los hechos con la
+ * sesión abierta y los que dejaron el mismo email de la cuenta. Hasta ahora
+ * sólo se ataba un pedido cuando había sesión, así que esos son todos con
+ * sesión.
+ */
+{
+  const habia = db.prepare('PRAGMA table_info(pedidos)').all().some((c) => c.name === 'con_sesion');
+  asegurarColumna('pedidos', 'con_sesion', 'INTEGER NOT NULL DEFAULT 0');
+  if (!habia) db.exec('UPDATE pedidos SET con_sesion = 1 WHERE cliente_id IS NOT NULL');
+}
+// Qué datos del cliente salieron de lo guardado y no del formulario (ver src/clientes.js).
+asegurarColumna('pedidos', 'datos_guardados', 'TEXT');
 asegurarColumna('variantes', 'color_id', 'INTEGER');
 asegurarColumna('variantes', 'talle_id', 'INTEGER');
 // Guía de medidas del producto, en JSON. Cambia por producto: un talle M no

@@ -501,6 +501,7 @@ const momento = (iso, conHora = true) => (iso
   : 'sin fecha');
 
 function vistaPedidos() {
+  if (vista.stock) return vistaStockPedido();
   if (vista.editor) return vistaEditorPedido();
   if (vista.pedido) return vistaPedidoDetalle();
   const t = datos.totales || { pedidos: 0, facturado: 0, unidades: 0 };
@@ -530,13 +531,20 @@ function vistaPedidos() {
         </td>
         <td class="centrado">${falla ? '<span class="pastilla aviso">Revisar</span>' : '<span class="pastilla si">Avisado</span>'}</td>
         <td class="sin-corte">
+          ${p.estado === 'pendiente' ? `<button class="btn btn-mini" data-revisar-stock="${esc(p.numero)}">Revisar stock</button>` : ''}
           <a class="btn borde btn-mini" href="/api/pedidos/${encodeURIComponent(p.numero)}/pedido.pdf">Remito</a>
           <a class="btn borde btn-mini mas-chico" href="/api/pedidos/${encodeURIComponent(p.numero)}/rotulo.pdf">Rótulo</a>
         </td>
       </tr>`;
   }).join('');
 
+  const n = datos.pendientes || 0;
   return `
+    ${n ? `<div class="tarjeta aviso-pendientes">
+      <h3>${n === 1 ? '1 pedido espera' : `${n} pedidos esperan`} la confirmación de stock</h3>
+      <p class="sub">El cliente no sabe si sale hasta que lo confirmen. Revisá qué hay y confirmalo, con cambios si falta algo.</p>
+      ${filtroPedidos.estado === 'pendiente' ? '' : '<button class="btn" data-ver-pendientes>Ver los que esperan stock</button>'}
+    </div>` : ''}
     <div class="tarjeta">
       <h3>Historial de pedidos</h3>
       <p class="sub">Todo lo que entró, con su detalle. Los totales son de lo filtrado.</p>
@@ -675,6 +683,7 @@ function vistaPedidoDetalle() {
           <input id="nota-estado" placeholder="Salió por Andreani, número 40012345">
         </div>
         <div class="acciones">
+          ${p.estado === 'pendiente' ? `<button class="btn" data-revisar-stock="${esc(p.numero)}">Revisar stock y confirmar</button>` : ''}
           ${siguientes.map((e) => `
             <button class="btn ${e === 'cancelado' ? 'borde peligro' : ''}" data-mover-a="${e}">
               ${esc(e === 'confirmado' ? 'Confirmar: hay stock de todo' : 'Marcar ' + ESTADOS[e].toLowerCase())}
@@ -706,6 +715,130 @@ function vistaPedidoDetalle() {
  * alguien toca los precios del catálogo mientras esto está abierto, manda el
  * de él. Por eso el número dice "estimado" hasta que se guarda.
  */
+/*
+ * La revisión del stock de un pedido que espera confirmación.
+ *
+ * Para cada cruce pedido se pone cuánto hay, que arranca en lo pedido: en el
+ * caso de todos los días hay todo y se confirma de un clic. Si falta algo, se
+ * baja el número y el pedido se confirma con los cambios; al cliente le llega
+ * el pedido como queda y lo que cambió. Para sumar otro artículo o cambiar el
+ * precio está el editor, a un botón.
+ */
+function vistaStockPedido() {
+  const e = vista.stock;
+  if (!e.lineas) return '<p class="cargando">Abriendo el pedido…</p>';
+
+  const grillas = e.lineas.map((linea) => {
+    const pedidas = linea.combinaciones.filter((c) => c.cantidad > 0);
+    const huerfanos = linea.huerfanos || [];
+    if (!pedidas.length && !huerfanos.length) return '';
+    const colores = (linea.colores || []).filter((co) => pedidas.some((c) => c.color === co));
+    const talles = (linea.talles || []).filter((ta) => pedidas.some((c) => c.talle === ta));
+    const porCruce = new Map(pedidas.map((c) => [`${c.color}|${c.talle}`, c]));
+    const filas = colores.map((color) => `
+      <tr>
+        <th>${esc(color)}</th>
+        ${talles.map((talle) => {
+          const c = porCruce.get(`${color}|${talle}`);
+          if (!c) return '<td class="sin-cruce">—</td>';
+          return `<td class="celda-stock">
+            <span class="chico">de ${c.cantidad}</span>
+            <input type="number" min="0" max="${c.cantidad}" inputmode="numeric"
+                   data-stock-sku="${esc(c.sku)}" data-stock-linea="${esc(linea.skuAgrupador)}"
+                   data-pedido="${c.cantidad}" data-precio="${c.precio}" value="${e.hay[c.sku] ?? c.cantidad}"
+                   aria-label="Cuántos hay de ${esc(talle)} en ${esc(color)}, de ${c.cantidad} pedidos">
+          </td>`;
+        }).join('')}
+      </tr>`).join('');
+
+    return `<div class="tarjeta">
+      <h4>${esc(linea.titulo)} <span class="apagado">${esc(linea.categoria || '')}</span></h4>
+      ${huerfanos.length ? `<p class="mensaje info">Ya no está en el catálogo, así que no se puede volver a valorizar:
+        ${huerfanos.map((h) => `${esc(h.color || 'Único')} ${esc(h.talle)}×${h.cantidad}`).join(', ')}. Al confirmar, sale del pedido.</p>` : ''}
+      ${pedidas.length ? `
+        <div class="envoltorio-tabla">
+          <table class="datos editor-grilla stock-grilla">
+            <thead><tr><th></th>${talles.map((t) => `<th>${esc(t)}</th>`).join('')}</tr></thead>
+            <tbody>${filas}</tbody>
+          </table>
+        </div>
+        <div class="acciones">
+          <button class="btn texto" data-stock-todo="${esc(linea.skuAgrupador)}">Hay todo</button>
+          <button class="btn texto quitar" data-stock-nada="${esc(linea.skuAgrupador)}">No hay nada de este producto</button>
+        </div>` : ''}
+    </div>`;
+  }).join('');
+
+  return `
+    <p><button class="btn texto" data-volver-stock>← Volver al pedido</button></p>
+    <div class="tarjeta">
+      <h3>Revisar el stock de ${esc(e.numero)}</h3>
+      <p class="sub">Cada casillero arranca en lo que se pidió. Si de algo hay menos, bajá el número; si no hay, ponelo en cero.</p>
+    </div>
+    ${grillas}
+    <div class="tarjeta">
+      <h4>Cómo queda</h4>
+      <div class="totales-fila">
+        <div><span class="chico">PEDIDAS</span><b id="st-pedidas">0</b></div>
+        <div><span class="chico">HAY</span><b id="st-hay">0</b></div>
+        <div><span class="chico">TOTAL ESTIMADO</span><b id="st-total">$ 0</b></div>
+      </div>
+      <p class="sub" id="st-explica"></p>
+      <div class="campo ancho">
+        <label for="st-nota">Nota para el cliente <span class="apagado">(opcional, le llega en el mail)</span></label>
+        <input id="st-nota" value="${esc(e.nota || '')}" placeholder="Lo que faltaba entra la semana que viene; si lo querés, avisanos.">
+      </div>
+      <div class="acciones">
+        <button class="btn" id="st-confirmar" data-confirmar-stock>Confirmar</button>
+        <button class="btn borde" data-stock-editor>Cambiar artículos o precio</button>
+      </div>
+      <p class="chico">El total definitivo lo calcula el servidor al confirmar, con sus precios.</p>
+    </div>`;
+}
+
+/** La cuenta de abajo, sin repintar: repintar con cada tecla le saca el foco al casillero. */
+function refrescarResumenStock() {
+  if (!vista.stock?.lineas || !el('#st-confirmar')) return;
+  let pedidas = 0;
+  let hay = 0;
+  let total = 0;
+  for (const i of raiz.querySelectorAll('[data-stock-sku]')) {
+    const tope = Number(i.dataset.pedido);
+    const n = Math.min(tope, Math.max(0, Math.trunc(Number(i.value) || 0)));
+    pedidas += tope;
+    hay += n;
+    total += n * Number(i.dataset.precio || 0);
+    i.closest('td')?.classList.toggle('falta', n < tope);
+  }
+  const sinCatalogo = vista.stock.lineas.some((l) => (l.huerfanos || []).length);
+  el('#st-pedidas').textContent = pedidas;
+  el('#st-hay').textContent = hay;
+  el('#st-total').textContent = pesos(total);
+  const boton = el('#st-confirmar');
+  boton.disabled = !hay;
+  if (!hay) {
+    boton.textContent = 'No hay nada para confirmar';
+    el('#st-explica').textContent = 'Si no hay nada de lo que pidió, volvé al pedido y marcalo cancelado: al cliente le llega el aviso.';
+  } else if (hay < pedidas || sinCatalogo) {
+    boton.textContent = 'Confirmar con los cambios y avisar al cliente';
+    el('#st-explica').textContent = hay < pedidas
+      ? `Faltan ${pedidas - hay} de ${pedidas} unidades. Al cliente le llega el pedido como queda y lo que cambió.`
+      : 'Al cliente le llega el pedido como queda, sin lo que ya no está en el catálogo.';
+  } else {
+    boton.textContent = 'Confirmar: hay stock de todo';
+    el('#st-explica').textContent = 'Al cliente le llega la confirmación con el pedido.';
+  }
+}
+
+/** Lee los casilleros al modelo, para que repintar no los pierda. */
+function leerStock() {
+  if (!vista.stock?.lineas) return;
+  for (const i of raiz.querySelectorAll('[data-stock-sku]')) {
+    vista.stock.hay[i.dataset.stockSku] = Math.min(Number(i.dataset.pedido), Math.max(0, Math.trunc(Number(i.value) || 0)));
+  }
+  vista.stock.nota = el('#st-nota')?.value || '';
+}
+
 function vistaEditorPedido() {
   const e = vista.editor;
   if (!e.lineas) return '<p class="cargando">Abriendo el pedido…</p>';
@@ -1074,32 +1207,110 @@ function vistaEstadisticas() {
 }
 
 // ══ CLIENTES ══════════════════════════════════════════════════════
+/*
+ * Todos los que compraron, con cuenta o sin ella.
+ *
+ * Cada pedido confirmado deja a su cliente acá, reconocido por el CUIT: el que
+ * no tiene cuenta queda con su lugar reservado, y si un día la crea con ese
+ * CUIT la ocupa sin empezar de cero. Lo que se mira es cuántas veces compró y
+ * cuánto, y a dónde manda.
+ */
+let filtroClientes = { tipo: '', buscar: '' };
+
 function vistaClientes() {
-  const filas = datos.clientes.map((c) => `
-    <tr data-cliente="${c.id}">
-      <td><div class="semi">${esc(c.nombre)}</div><div class="chico">${esc(c.email)}</div></td>
-      <td class="chico">${esc(c.cuit)}<br>${esc(c.telefono)}</td>
-      <td class="chico">${esc(c.ciudad || '—')}, ${esc(c.provincia || '—')}</td>
-      <td class="centrado">${c.pedidos}</td>
-      <td class="chico">${c.ultimo_acceso ? new Date(c.ultimo_acceso).toLocaleDateString('es-AR') : 'nunca'}</td>
-      <td class="centrado">
-        <button class="pastilla pastilla-boton ${c.activo ? 'si' : 'no'}" data-activo="${c.id}">
-          ${c.activo ? 'Activo' : 'Desactivado'}
-        </button>
-      </td>
+  if (vista.cliente) return vistaClienteDetalle();
+  const buscar = filtroClientes.buscar.trim().toLowerCase();
+  const lista = datos.clientes.filter((c) => (!filtroClientes.tipo || (filtroClientes.tipo === 'cuenta') === c.tieneCuenta)
+    && (!buscar || `${c.nombre} ${c.cuit} ${c.email || ''} ${c.telefono}`.toLowerCase().includes(buscar)));
+  const conCuenta = datos.clientes.filter((c) => c.tieneCuenta).length;
+
+  const filas = lista.map((c) => `
+    <tr>
+      <td><button class="btn texto destacado" data-ver-cliente="${c.id}">${esc(c.nombre)}</button>
+        <div class="chico">${esc(c.email || 'sin email')}</div></td>
+      <td class="chico">CUIT ${esc(c.cuit)}<br>${esc(c.telefono)}</td>
+      <td class="centrado"><b>${c.pedidos}</b>${c.cancelados ? `<div class="chico">+${c.cancelados} cancelado${c.cancelados === 1 ? '' : 's'}</div>` : ''}</td>
+      <td class="fuerte">${pesos(c.comprado)}</td>
+      <td class="chico">${c.ultimoPedido ? momento(c.ultimoPedido, false) : '—'}</td>
+      <td class="centrado">${c.tieneCuenta
+        ? `<button class="pastilla pastilla-boton ${c.activo ? 'si' : 'no'}" data-activo="${c.id}">${c.activo ? 'Con cuenta' : 'Cuenta desactivada'}</button>`
+        : '<span class="pastilla">Sin cuenta</span>'}</td>
     </tr>`).join('');
 
   return `
     <div class="tarjeta">
       <h3>Clientes <span class="apagado">(${datos.clientes.length})</span></h3>
       <p class="sub">
-        Se registran solos desde la página. Desactivar a alguien le corta el acceso en
-        el pedido siguiente — no hace falta esperar a que se le venza la sesión.
+        Cada uno que confirma un pedido queda acá, reconocido por su CUIT: ${conCuenta} con cuenta y
+        ${datos.clientes.length - conCuenta} sin cuenta. Las compras no cuentan los pedidos cancelados.
       </p>
+      <div class="campos">
+        <div class="campo">
+          <label for="cl-tipo">Mostrar</label>
+          <select id="cl-tipo">
+            <option value="">Todos</option>
+            <option value="cuenta"${filtroClientes.tipo === 'cuenta' ? ' selected' : ''}>Con cuenta</option>
+            <option value="reservado"${filtroClientes.tipo === 'reservado' ? ' selected' : ''}>Sin cuenta</option>
+          </select>
+        </div>
+        <div class="campo"><label for="cl-buscar">Buscar</label>
+          <input id="cl-buscar" value="${esc(filtroClientes.buscar)}" placeholder="Nombre, CUIT, email o teléfono"></div>
+      </div>
       <div class="envoltorio-tabla">
         <table class="datos">
-          <thead><tr><th>Cliente</th><th>Contacto</th><th>Dónde</th><th>Pedidos</th><th>Último acceso</th><th>Estado</th></tr></thead>
-          <tbody>${filas || '<tr><td colspan="6" class="vacio-tabla">Todavía no se registró nadie.</td></tr>'}</tbody>
+          <thead><tr><th>Cliente</th><th>Contacto</th><th>Compras</th><th>Comprado</th><th>Último pedido</th><th>Cuenta</th></tr></thead>
+          <tbody>${filas || '<tr><td colspan="6" class="vacio-tabla">Nadie con ese filtro.</td></tr>'}</tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+function vistaClienteDetalle() {
+  const d = vista.cliente;
+  if (!d.datos) return '<p class="cargando">Abriendo el cliente…</p>';
+  const { cliente: c, pedidos, direcciones } = d.datos;
+  const compras = pedidos.filter((p) => p.estado !== 'cancelado');
+
+  return `
+    <p><button class="btn texto" data-volver-clientes>← Volver a clientes</button></p>
+    <div class="tarjeta">
+      <h3>${esc(c.nombre)} <span class="pastilla ${c.tieneCuenta ? 'si' : ''}">${c.tieneCuenta ? 'Con cuenta' : 'Sin cuenta'}</span></h3>
+      <p class="sub">
+        CUIT ${esc(c.cuit)} · ${compras.length} ${compras.length === 1 ? 'compra' : 'compras'} · ${pesos(compras.reduce((t, p) => t + p.total, 0))}
+        ${c.tieneCuenta ? '' : '<br>Si crea una cuenta con este CUIT, ocupa este mismo lugar y conserva sus compras.'}
+      </p>
+      <div class="campos">
+        <div class="campo ancho"><label for="cl-nombre">Nombre y apellido</label><input id="cl-nombre" value="${esc(c.nombre)}"></div>
+        <div class="campo"><label for="cl-telefono">Teléfono</label><input id="cl-telefono" value="${esc(c.telefono)}"></div>
+        <div class="campo"><label for="cl-email">Email</label>
+          <input id="cl-email" type="email" value="${esc(c.email || '')}"${c.tieneCuenta ? ' disabled' : ''}></div>
+      </div>
+      ${c.tieneCuenta ? '<p class="chico">El email de una cuenta lo cambia el cliente: es con lo que entra.</p>' : ''}
+      <div class="acciones"><button class="btn" data-guardar-cliente="${c.id}">Guardar datos</button></div>
+    </div>
+
+    <div class="tarjeta">
+      <h4>A dónde mandó</h4>
+      ${direcciones.length ? `<ul class="lista-simple">${direcciones.map((x) => `
+        <li><b>${esc(x.direccion)}</b>, ${esc(x.ciudad)} (${esc(x.codigoPostal)}), ${esc(x.provincia)} — ${esc(x.formaEnvio)}
+          <span class="chico">· ${x.veces} ${x.veces === 1 ? 'vez' : 'veces'}</span></li>`).join('')}</ul>`
+        : '<p class="sub">Todavía no hizo pedidos.</p>'}
+    </div>
+
+    <div class="tarjeta">
+      <h4>Pedidos (${pedidos.length})</h4>
+      <div class="envoltorio-tabla">
+        <table class="datos">
+          <thead><tr><th>Pedido</th><th>Fecha</th><th>Estado</th><th>Unidades</th><th>Total</th><th>Envío</th></tr></thead>
+          <tbody>${pedidos.map((p) => `
+            <tr>
+              <td><button class="btn texto destacado" data-abrir-pedido-cliente="${esc(p.numero)}">${esc(p.numero)}</button></td>
+              <td class="chico">${momento(p.creado_en)}</td>
+              <td><span class="estado-pastilla es-${esc(p.estado)}">${esc(ESTADOS[p.estado] || p.estado)}</span></td>
+              <td class="centrado">${p.unidades}</td>
+              <td class="fuerte">${pesos(p.total)}</td>
+              <td class="chico">${esc(p.envio.ciudad)} · ${esc(p.envio.formaEnvio)}</td>
+            </tr>`).join('') || '<tr><td colspan="6" class="vacio-tabla">Sin pedidos.</td></tr>'}</tbody>
         </table>
       </div>
     </div>`;
@@ -1139,6 +1350,7 @@ function pintar() {
   for (const i of raiz.querySelectorAll('[data-ancho]')) i.style.width = `${i.dataset.ancho}%`;
   for (const i of raiz.querySelectorAll('[data-alto]')) i.style.height = `${i.dataset.alto}%`;
   refrescarTotalEditor();
+  refrescarResumenStock();
   el('#salir').hidden = false;
   seguirAvisos();
 }
@@ -1265,6 +1477,7 @@ async function cargar() {
   datos = {
     productos: p.productos, categorias: cat.categorias, colores: col.colores,
     talles: tal.talles, pedidos: ped.pedidos, totales: ped.totales, clientes: cli.clientes,
+    pendientes: ped.pendientes || 0,
   };
 }
 
@@ -1327,7 +1540,7 @@ raiz.addEventListener('click', (e) => conError(async () => {
 
   const tab = t.closest('[data-tab]');
   if (tab) {
-    vista.tab = tab.dataset.tab; vista.sku = null; vista.pedido = null; vista.editor = null;
+    vista.tab = tab.dataset.tab; vista.sku = null; vista.pedido = null; vista.editor = null; vista.stock = null; vista.cliente = null;
     pintar();
     // Las cuentas se piden al abrir la pestaña y no en cada carga del panel:
     // recorren todos los pedidos del período y nadie las mira desde el catálogo.
@@ -1344,7 +1557,7 @@ raiz.addEventListener('click', (e) => conError(async () => {
   }
 
   if (t.closest('[data-volver]')) { vista.sku = null; detalle = null; pintar(); return; }
-  if (t.closest('[data-volver-pedidos]')) { vista.pedido = null; vista.editor = null; pintar(); return; }
+  if (t.closest('[data-volver-pedidos]')) { vista.pedido = null; vista.editor = null; vista.stock = null; pintar(); return; }
 
   const abrir = t.closest('[data-abrir]');
   if (abrir) {
@@ -1609,6 +1822,95 @@ raiz.addEventListener('click', (e) => conError(async () => {
     return;
   }
 
+  // ── Clientes
+  const verCliente = t.closest('[data-ver-cliente]');
+  if (verCliente) {
+    vista.cliente = { id: verCliente.dataset.verCliente, datos: null };
+    pintar();
+    vista.cliente.datos = await api(`/clientes/${encodeURIComponent(vista.cliente.id)}`);
+    pintar();
+    return;
+  }
+  if (t.closest('[data-volver-clientes]')) { vista.cliente = null; pintar(); return; }
+  const guardarCliente = t.closest('[data-guardar-cliente]');
+  if (guardarCliente) {
+    const id = guardarCliente.dataset.guardarCliente;
+    const cuerpo = { nombre: el('#cl-nombre').value, telefono: el('#cl-telefono').value };
+    if (!el('#cl-email').disabled) cuerpo.email = el('#cl-email').value;
+    await api(`/clientes/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(cuerpo) });
+    vista.cliente.datos = await api(`/clientes/${encodeURIComponent(id)}`);
+    await cargar();
+    mensaje('Datos del cliente guardados.');
+    pintar();
+    return;
+  }
+  const pedidoDelCliente = t.closest('[data-abrir-pedido-cliente]');
+  if (pedidoDelCliente) {
+    // Se busca por número: con los filtros de la solapa de pedidos podría no estar en la lista.
+    const numero = pedidoDelCliente.dataset.abrirPedidoCliente;
+    filtroPedidos = { desde: '', hasta: '', estado: '', buscar: numero };
+    vista.tab = 'pedidos'; vista.cliente = null; vista.pedido = numero;
+    await cargar();
+    sacarDelDetalleSiSeFue(numero);
+    pintar();
+    return;
+  }
+
+  // ── Revisión del stock
+  if (t.closest('[data-ver-pendientes]')) {
+    filtroPedidos.estado = 'pendiente';
+    await cargar();
+    pintar();
+    return;
+  }
+  const revisar = t.closest('[data-revisar-stock]');
+  if (revisar) {
+    const numero = revisar.dataset.revisarStock;
+    vista.pedido = numero;
+    vista.stock = { numero, lineas: null, hay: {}, nota: '' };
+    pintar();
+    const r = await api(`/pedidos/${encodeURIComponent(numero)}/editor`);
+    vista.stock.lineas = r.lineas;
+    pintar();
+    return;
+  }
+  if (t.closest('[data-volver-stock]')) { vista.stock = null; pintar(); return; }
+  const todoONada = t.closest('[data-stock-todo], [data-stock-nada]');
+  if (todoONada) {
+    const nada = todoONada.dataset.stockNada !== undefined;
+    const sku = nada ? todoONada.dataset.stockNada : todoONada.dataset.stockTodo;
+    for (const i of raiz.querySelectorAll('[data-stock-linea]')) {
+      if (i.dataset.stockLinea === sku) i.value = nada ? 0 : i.dataset.pedido;
+    }
+    refrescarResumenStock();
+    return;
+  }
+  if (t.closest('[data-stock-editor]')) {
+    vista.stock = null;
+    vista.editor = { numero: vista.pedido, lineas: null, ajuste: null, nota: '' };
+    pintar();
+    const r = await api(`/pedidos/${encodeURIComponent(vista.pedido)}/editor`);
+    vista.editor = { numero: r.numero, lineas: r.lineas, ajuste: r.ajuste, nota: '' };
+    pintar();
+    return;
+  }
+  if (t.closest('[data-confirmar-stock]')) {
+    leerStock();
+    const numero = vista.stock.numero;
+    const faltan = [...raiz.querySelectorAll('[data-stock-sku]')].some((i) => vista.stock.hay[i.dataset.stockSku] < Number(i.dataset.pedido));
+    // Con cambios le llega al cliente un pedido distinto del que hizo: se pregunta antes.
+    if (faltan && !window.confirm(`¿Confirmar ${numero} con los cambios y avisarle al cliente cómo queda?`)) return;
+    const r = await api(`/pedidos/${encodeURIComponent(numero)}/confirmar-stock`, {
+      method: 'PUT', body: JSON.stringify({ disponibles: vista.stock.hay, nota: vista.stock.nota }),
+    });
+    vista.stock = null;
+    await cargar();
+    sacarDelDetalleSiSeFue(numero);
+    mensaje(`${numero}: ${r.conCambios ? 'confirmado con cambios' : 'confirmado'}.${r.avisoCliente ? ` Aviso al cliente: ${r.avisoCliente}.` : ''}`);
+    pintar();
+    return;
+  }
+
   // ── Seguimiento: rearmar el pedido
   if (t.closest('[data-editar-pedido]')) {
     vista.editor = { numero: vista.pedido, lineas: null, ajuste: null, nota: '' };
@@ -1767,6 +2069,19 @@ raiz.addEventListener('change', (e) => conError(async () => {
  */
 raiz.addEventListener('input', (e) => {
   if (e.target.dataset?.editorSku !== undefined || e.target.id === 'aj-valor') refrescarTotalEditor();
+  if (e.target.dataset?.stockSku !== undefined) refrescarResumenStock();
+  if (e.target.id === 'cl-buscar') {
+    filtroClientes.buscar = e.target.value;
+    pintar();
+    // Repintar saca el foco: se devuelve al buscador con el cursor al final, para seguir escribiendo.
+    const i = el('#cl-buscar');
+    i?.focus();
+    i?.setSelectionRange(i.value.length, i.value.length);
+  }
+});
+
+raiz.addEventListener('change', (e) => {
+  if (e.target.id === 'cl-tipo') { filtroClientes.tipo = e.target.value; pintar(); }
 });
 
 raiz.addEventListener('submit', (e) => conError(async () => {
