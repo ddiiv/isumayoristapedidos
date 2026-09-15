@@ -393,6 +393,27 @@ El logo del encabezado y los íconos de la pestaña (`public/img/`) salen del PN
 del logo, recortado. El de 180 px lleva fondo blanco porque iOS no respeta la
 transparencia en el ícono de la pantalla de inicio.
 
+El remito y el rótulo usan la misma paleta y el logo (`src/recursos/`), con el
+encabezado en blanco: gasta mucho menos tinta que la banda llena de antes, y en
+una etiquetadora térmica no sale un rectángulo negro.
+
+### Liviano en el teléfono
+
+- **Todo sale comprimido** (`src/comprimir.js`, sin paquetes de afuera): el
+  catálogo pasa de 380 KB a 33 KB, la hoja de estilos de 53 a 12 y los módulos
+  del sitio de 91 a 26. Las fotos y los PDF pasan sin tocarse, porque ya vienen
+  comprimidos.
+- **Cada foto tiene tres versiones**: el original; una miniatura de 240×320
+  (unos 5 KB) para las tiras y la fila en pantallas comunes; y una mediana de
+  720×1080 (unos 34 KB) para la fila en pantallas densas y la foto grande del
+  panel. El original —110 KB en promedio, hasta medio mega— ya no baja en
+  ninguna pantalla del cliente. Las versiones de las fotos que ya estaban se
+  generan solas al arrancar el servidor, de a una y en segundo plano.
+- **En el teléfono no hay efectos caros**: sin el difuminado del encabezado ni
+  la luz de fondo, las filas lejos de la pantalla no se dibujan hasta acercarse,
+  y las animaciones son cortas, sólo de posición y transparencia, y se apagan si
+  el sistema pide menos movimiento.
+
 ---
 
 ## Las pruebas

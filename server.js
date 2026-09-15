@@ -10,6 +10,7 @@ const { conSesion } = require('./src/auth');
 const { completarMiniaturas } = require('./src/miniaturas');
 const whatsapp = require('./src/whatsapp');
 const { completarClientesDePedidos } = require('./src/clientes');
+const { comprimir } = require('./src/comprimir');
 
 const app = express();
 const PORT = Number(process.env.PORT) || 8080;
@@ -69,6 +70,9 @@ app.use((req, res, next) => {
   ].join('; '));
   next();
 });
+
+// Todo lo que sale, comprimido: ver src/comprimir.js. Va antes de las rutas y de /public.
+app.use(comprimir);
 
 app.get('/healthz', (req, res) => res.json({ ok: true, datos: DATA_DIR }));
 

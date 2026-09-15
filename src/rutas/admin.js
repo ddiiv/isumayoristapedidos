@@ -7,7 +7,7 @@ const {
   db, FOTOS_DIR, ordenDeTalle,
   ESTADOS, normalizarEstado, puedePasar, registrarEstado, historialDePedido,
 } = require('../db');
-const { hacerMiniatura, nombreMiniatura } = require('../miniaturas');
+const { hacerMiniatura, hacerMedia, nombreMiniatura, nombreMedia } = require('../miniaturas');
 const { pdfPedido } = require('../pdf');
 const { avisarCliente } = require('../notificaciones');
 const whatsapp = require('../whatsapp');
@@ -151,8 +151,10 @@ r.post('/productos/:sku/fotos', subirFoto.single('foto'), async (req, res, next)
      * ocupando el volumen.
      */
     let mini;
+    let media;
     try {
       mini = await hacerMiniatura(req.file.buffer);
+      media = await hacerMedia(req.file.buffer);
     } catch {
       return res.status(400).json({ message: 'Ese archivo no es una imagen que se pueda abrir. Probá con otro JPG, PNG o WebP.' });
     }
@@ -163,16 +165,19 @@ r.post('/productos/:sku/fotos', subirFoto.single('foto'), async (req, res, next)
     const nombreMini = nombreMiniatura(nombre);
     fs.writeFileSync(path.join(FOTOS_DIR, nombreMini), mini);
     const miniatura = `/fotos/${nombreMini}`;
+    const nombreMed = nombreMedia(nombre);
+    fs.writeFileSync(path.join(FOTOS_DIR, nombreMed), media);
+    const rutaMedia = `/fotos/${nombreMed}`;
     const orden = db.prepare('SELECT COALESCE(MAX(orden), -1) + 1 AS n FROM fotos WHERE producto_id = ?')
       .get(producto.id).n;
-    db.prepare('INSERT INTO fotos (producto_id, ruta, color_id, orden, miniatura) VALUES (?,?,?,?,?)')
-      .run(producto.id, ruta, colorId, orden, miniatura);
+    db.prepare('INSERT INTO fotos (producto_id, ruta, color_id, orden, miniatura, media) VALUES (?,?,?,?,?,?)')
+      .run(producto.id, ruta, colorId, orden, miniatura, rutaMedia);
 
     // La primera que se sube queda como principal: es la que se ve en la fila
     // del catálogo, y sin una elegida la fila sale con el hueco gris.
     if (!cuantas) db.prepare('UPDATE productos SET foto = ? WHERE id = ?').run(ruta, producto.id);
 
-    res.json({ ok: true, ruta, miniatura, quedan: tope - cuantas - 1 });
+    res.json({ ok: true, ruta, miniatura, media: rutaMedia, quedan: tope - cuantas - 1 });
   } catch (e) { next(e); }
 });
 
@@ -219,8 +224,8 @@ r.delete('/fotos/:id', (req, res) => {
   // El archivo se borra del volumen: si no, cada foto reemplazada queda
   // ocupando lugar para siempre y el volumen se llena sin que nadie lo note.
   try { fs.unlinkSync(path.join(FOTOS_DIR, path.basename(foto.ruta))); } catch { /* ya no está */ }
-  if (foto.miniatura) {
-    try { fs.unlinkSync(path.join(FOTOS_DIR, path.basename(foto.miniatura))); } catch { /* ya no está */ }
+  for (const version of [foto.miniatura, foto.media].filter(Boolean)) {
+    try { fs.unlinkSync(path.join(FOTOS_DIR, path.basename(version))); } catch { /* ya no está */ }
   }
 
   res.json({ ok: true });

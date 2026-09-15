@@ -334,7 +334,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 20px 128px; }
   width: min(100%, max(480px, var(--ancho-cuadro, 480px)));
   background: var(--papel); z-index: 45; display: flex; flex-direction: column;
   overflow: hidden;
-  transform: translateX(100%); transition: transform .32s var(--curva), box-shadow .32s var(--curva);
+  transform: translateX(100%); transition: transform .32s var(--curva);
 }
 /* La sombra sólo abierto: cerrado, el cajón queda pegado al borde derecho y
    su sombra se asomaría como una franja oscura sobre el catálogo. */
@@ -637,6 +637,20 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 20px 128px; }
   .colores-selector button { padding: 10px 14px; }
   .categorias-lista button { padding: 11px 16px; }
   .cerrar { width: 44px; height: 44px; }
+
+  /*
+   * En el teléfono, nada de vidrio esmerilado ni luz de fondo.
+   *
+   * Difuminar lo que pasa por detrás del encabezado se recalcula en cada cuadro
+   * del desplazamiento, y es de lo más caro que una página le puede pedir a un
+   * celular de gama media: el catálogo se traba justo mientras se baja. Blanco
+   * liso se ve casi igual y no cuesta nada.
+   */
+  header.principal, nav.categorias {
+    background: var(--papel); -webkit-backdrop-filter: none; backdrop-filter: none;
+  }
+  .dialogo { -webkit-backdrop-filter: none; backdrop-filter: none; }
+  body::before { display: none; }
 }
 
 @media (max-width: 620px) {
@@ -747,6 +761,14 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 20px 128px; }
   box-shadow: var(--sombra-1);
   cursor: pointer;
   transition: box-shadow .22s var(--curva), border-color .22s var(--curva);
+  /*
+   * Las filas lejos de la pantalla no se dibujan hasta que se acercan: con cien
+   * productos, el teléfono arma de entrada sólo lo que se ve. El alto de reserva
+   * es para que la barra de desplazamiento no salte mientras se completan, y
+   * `auto` hace que recuerde el alto real una vez dibujada.
+   */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 280px;
 }
 .fila-producto:hover { box-shadow: var(--sombra); border-color: var(--linea-fuerte); }
 
@@ -835,7 +857,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 20px 128px; }
 .fila-pie .en-pedido { font-size: 13px; font-weight: 700; color: var(--verde); }
 
 @media (max-width: 640px) {
-  .fila-producto { grid-template-columns: 122px 1fr; gap: 12px; padding: 6px; border-radius: 16px; }
+  .fila-producto { grid-template-columns: 122px 1fr; gap: 12px; padding: 6px; border-radius: 16px; contain-intrinsic-size: auto 340px; }
   .carrusel { border-radius: 10px; }
   .fila-datos { padding: 6px 6px 6px 0; gap: 10px; }
   .fila-encabezado h3 { font-size: 15.5px; }

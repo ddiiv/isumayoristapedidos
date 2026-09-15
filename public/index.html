@@ -11,6 +11,12 @@
 <link rel="preload" href="/fuentes/InstrumentSans-Regular.ttf" as="font" type="font/ttf" crossorigin>
 <link rel="stylesheet" href="/css/estilos.css">
 <link rel="stylesheet" href="/css/seguimiento.css">
+<!-- Los módulos que app.js importa, pedidos de entrada y en paralelo: si no,
+     el navegador los descubre recién al leer app.js, uno detrás del otro. -->
+<link rel="modulepreload" href="/js/util.js">
+<link rel="modulepreload" href="/js/panel.js">
+<link rel="modulepreload" href="/js/pedido.js">
+<link rel="modulepreload" href="/js/sesion.js">
 </head>
 <body>
 

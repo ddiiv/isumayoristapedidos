@@ -466,7 +466,7 @@ function vistaFotos() {
   return `
     <div class="fotos-producto">
       <div class="carrusel-panel" tabindex="0" aria-label="Fotos del producto. Con las flechas del teclado se pasan.">
-        <img src="${esc(f.ruta)}" alt="${esc(actual.titulo)}${f.color ? ` en ${esc(f.color)}` : ''}">
+        <img src="${esc(f.media || f.ruta)}" alt="${esc(actual.titulo)}${f.color ? ` en ${esc(f.color)}` : ''}" decoding="async">
         ${fotos.length > 1 ? `
           <button class="carrusel-ir antes" data-paso="-1" aria-label="Foto anterior">‹</button>
           <button class="carrusel-ir despues" data-paso="1" aria-label="Foto siguiente">›</button>` : ''}

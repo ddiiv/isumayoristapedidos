@@ -516,6 +516,26 @@ const planilla = path.join(__dirname, 'catalogo-isuwaya.xlsx');
   chk('pero el CSS se sigue cacheando',   false, (await cabeceras('/css/estilos.css')).includes('no-store'));
   chk('y el JavaScript también',          false, (await cabeceras('/js/admin.js')).includes('no-store'));
 
+  /*
+   * Todo viajaba sin comprimir: 350 KB de catálogo en un teléfono con datos. Se
+   * pide como un navegador —aceptando brotli—, como uno viejo que sólo sabe
+   * gzip y como algo que no acepta ninguna, y se mira que el texto llegue entero.
+   */
+  const codificacion = async (ruta, acepta) => {
+    const r = await fetch(`${API}${ruta}`, { headers: { 'Accept-Encoding': acepta } });
+    const texto = await r.text();
+    return { enc: r.headers.get('content-encoding'), vary: r.headers.get('vary') || '', texto };
+  };
+  const cssBr = await codificacion('/css/estilos.css', 'br, gzip');
+  chk('el CSS sale comprimido con brotli', ['br', true], [cssBr.enc, /accept-encoding/i.test(cssBr.vary)]);
+  chk('y se descomprime entero', true, cssBr.texto.includes('--degrade') && cssBr.texto.includes('prefers-reduced-motion'));
+  const catBr = await codificacion('/api/catalogo', 'br');
+  chk('el catálogo también sale comprimido', 'br', catBr.enc);
+  chk('y sigue siendo el JSON de siempre', true, Array.isArray(JSON.parse(catBr.texto).productos));
+  chk('con gzip si es lo único que acepta', 'gzip', (await codificacion('/js/app.js', 'gzip')).enc);
+  chk('sin comprimir si no acepta ninguna', null, (await codificacion('/css/estilos.css', 'identity')).enc);
+  chk('y con brotli apagado (q=0) usa gzip', 'gzip', (await codificacion('/css/estilos.css', 'br;q=0, gzip')).enc);
+
   const panelSinCookie = await fetch(`${API}/api/admin/clientes`);
   chk('sin sesión el panel no da ni un cliente', 401, panelSinCookie.status);
 
@@ -688,6 +708,11 @@ const planilla = path.join(__dirname, 'catalogo-isuwaya.xlsx');
   chk('cada foto trae su miniatura', true, typeof miniatura === 'string' && miniatura.endsWith('.webp'));
   const miniServida = await pedir(miniatura, { crudo: true });
   chk('la miniatura se sirve y es una imagen', [200, true], [miniServida.status, String(miniServida.tipo).includes('image/webp')]);
+  // La mediana es la que ven la fila del catálogo en pantallas densas y la foto grande del panel.
+  const media = conFotos.fotos.find((f) => f.ruta === deColor.json?.ruta)?.media;
+  chk('y su versión mediana', true, typeof media === 'string' && media.endsWith('-med.webp'));
+  const mediaServida = await pedir(media, { crudo: true });
+  chk('la mediana se sirve y es una imagen', [200, true], [mediaServida.status, String(mediaServida.tipo).includes('image/webp')]);
   const trucho = new FormData();
   trucho.append('foto', new Blob([Buffer.from('esto no es una imagen')], { type: 'image/png' }), 'trucha.png');
   chk('un archivo que no es imagen rebota aunque diga que sí', 400,
@@ -700,6 +725,7 @@ const planilla = path.join(__dirname, 'catalogo-isuwaya.xlsx');
   chk('y se borran sin dejar rastro', 0,
     (despues.fotos || []).filter((f) => [general.json?.ruta, deColor.json?.ruta].includes(f.ruta)).length);
   chk('y la miniatura se borra con la foto', 404, (await pedir(miniatura, { crudo: true })).status);
+  chk('y la mediana también', 404, (await pedir(media, { crudo: true })).status);
 
   tit('22b. HASTA CINCO FOTOS POR COLOR');
   /*

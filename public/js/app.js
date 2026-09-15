@@ -227,7 +227,14 @@ function carruselPorDentro(producto, color, i) {
   const fotos = fotosDe(producto, color || null);
   const k = Math.min(Math.max(0, i), fotos.length - 1);
   const f = fotos[k];
-  return `<img src="${esc(f.ruta)}" alt="${esc(producto.titulo)}${f.color ? ` en ${esc(f.color)}` : ''}" loading="lazy">
+  /*
+   * En la fila la foto se ve de 120 a 190 píxeles de ancho: en una pantalla
+   * común alcanza la miniatura y en una densa la mediana. El original de
+   * 1280×1920 no baja nunca acá; antes bajaba en cada fila.
+   */
+  const chica = f.miniatura || f.media || f.ruta;
+  const densa = f.media || f.ruta;
+  return `<img src="${esc(chica)}" srcset="${esc(chica)} 1x, ${esc(densa)} 2x" alt="${esc(producto.titulo)}${f.color ? ` en ${esc(f.color)}` : ''}" loading="lazy" decoding="async">
     ${fotos.length > 1 ? `
       <button class="carrusel-ir antes" data-paso="-1" aria-label="Foto anterior">‹</button>
       <button class="carrusel-ir despues" data-paso="1" aria-label="Foto siguiente">›</button>` : ''}

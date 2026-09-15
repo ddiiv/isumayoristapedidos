@@ -102,7 +102,7 @@ r.get('/catalogo', (req, res) => {
    * orden en que las acomodó el panel.
    */
   const fotos = db.prepare(`
-    SELECT f.producto_id, f.ruta, f.miniatura, c.nombre AS color
+    SELECT f.producto_id, f.ruta, f.miniatura, f.media, c.nombre AS color
     FROM fotos f LEFT JOIN colores c ON c.id = f.color_id
     ORDER BY f.producto_id, f.orden, f.id`).all();
 
@@ -111,7 +111,9 @@ r.get('/catalogo', (req, res) => {
   const fotosPorProducto = new Map();
   for (const f of fotos) {
     if (!fotosPorProducto.has(f.producto_id)) fotosPorProducto.set(f.producto_id, []);
-    fotosPorProducto.get(f.producto_id).push({ ruta: f.ruta, color: f.color || null, miniatura: f.miniatura || null });
+    fotosPorProducto.get(f.producto_id).push({
+      ruta: f.ruta, color: f.color || null, miniatura: f.miniatura || null, media: f.media || null,
+    });
   }
 
   const salida = productos.map((p) => {

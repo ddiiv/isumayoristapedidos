@@ -343,6 +343,8 @@ asegurarColumna('pedidos', 'actualizado_en', 'TEXT');
 asegurarColumna('pedidos', 'aviso_cliente', 'TEXT');
 // La versión chica de cada foto, para las miniaturas (ver src/miniaturas.js).
 asegurarColumna('fotos', 'miniatura', 'TEXT');
+// Y la mediana, para la fila del catálogo en pantallas densas y la foto grande del panel.
+asegurarColumna('fotos', 'media', 'TEXT');
 
 /*
  * Correcciones de color hechas en el panel, que la planilla no deshace.

@@ -1,3 +1,5 @@
+const fs = require('node:fs');
+const path = require('node:path');
 const PDFDocument = require('pdfkit');
 
 /*
@@ -9,9 +11,38 @@ const PDFDocument = require('pdfkit');
  * tijera, y el rótulo termina torcido sobre el paquete.
  */
 
-const AZUL  = '#01317a';
-const VERDE = '#027010';
-const GRIS  = '#5b6470';
+/*
+ * La paleta del logo, la misma del sitio (public/css/estilos.css): azul acero
+ * para los títulos y lo que ubica, verde del logo para los colores del pedido
+ * y el recuadro del envío, y el degradé entero sólo en la franja de arriba y en
+ * la caja del total.
+ *
+ * Impresos en blanco y negro los tonos salen como grises oscuros, y todos están
+ * elegidos para que el texto blanco encima se siga leyendo.
+ */
+const AZUL    = '#2a5d96';
+const VERDE   = '#2e6a48';
+const TEAL    = '#2f6e7e';
+const GRIS    = '#5c6c76';
+const TINTA   = '#15232c';
+const TINTA_2 = '#33434d';
+const LINEA   = '#e3e9ec';
+const FONDO   = '#edf3f6';
+const DEGRADE = [[0, '#305eb3'], [0.3, '#326a99'], [0.52, '#376e87'], [0.76, '#316055'], [1, '#2e5a3e']];
+
+function degrade(doc, x, y, ancho, alto, radio = 0) {
+  const g = doc.linearGradient(x, y, x + ancho, y);
+  for (const [punto, color] of DEGRADE) g.stop(punto, color);
+  (radio ? doc.roundedRect(x, y, ancho, alto, radio) : doc.rect(x, y, ancho, alto)).fill(g);
+}
+
+/*
+ * El logo se lee una vez al arrancar. Si faltara el archivo el papel sale
+ * igual, sin dibujo: un remito sin logo sirve; un remito que no se genera, no.
+ */
+let LOGO = null;
+try { LOGO = fs.readFileSync(path.join(__dirname, 'recursos', 'logo-isuwaya.png')); } catch { LOGO = null; }
+const PROPORCION_LOGO = 340 / 266;
 
 const pesos = (n) => '$ ' + Number(n || 0).toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 
@@ -121,11 +152,26 @@ async function pdfPedido(pedido) {
   const PISO = doc.page.height - 70;   // de acá para abajo es el pie
   const TECHO = 50;                    // arranque del contenido en una hoja nueva
 
-  doc.rect(40, 40, ancho, 54).fill(AZUL);
-  doc.fillColor('#fff').font('Helvetica-Bold').fontSize(18).text('ISUWAYA MAYORISTA', 54, 56);
-  doc.font('Helvetica').fontSize(9).text('Pedido mayorista', 54, 78);
-  doc.font('Helvetica-Bold').fontSize(14).text(texto(pedido.numero), 40, 58, { width: ancho - 14, align: 'right', lineBreak: false });
-  doc.font('Helvetica').fontSize(9).text(fecha(pedido.creado_en), 40, 78, { width: ancho - 14, align: 'right' });
+  /*
+   * Encabezado claro, como el del sitio: la franja con el degradé del logo, el
+   * logo, y la marca y el número en tinta sobre el blanco del papel. Además de
+   * parecerse a la página, gasta mucho menos tinta que la banda llena de antes.
+   */
+  degrade(doc, 40, 40, ancho, 4);
+  let xMarca = 40;
+  if (LOGO) {
+    const altoLogo = 36;
+    doc.image(LOGO, 40, 52, { height: altoLogo });
+    xMarca = 40 + altoLogo * PROPORCION_LOGO + 10;
+  }
+  doc.font('Helvetica-Bold').fontSize(18);
+  const anchoIsuwaya = doc.widthOfString('ISUWAYA ');
+  doc.fillColor(TINTA).text('ISUWAYA', xMarca, 55, { lineBreak: false });
+  doc.fillColor(TEAL).text('MAYORISTA', xMarca + anchoIsuwaya, 55, { lineBreak: false });
+  doc.fillColor(GRIS).font('Helvetica').fontSize(9).text('Pedido mayorista', xMarca, 77, { lineBreak: false });
+  doc.fillColor(TINTA).font('Helvetica-Bold').fontSize(14).text(texto(pedido.numero), 40, 57, { width: ancho, align: 'right', lineBreak: false });
+  doc.fillColor(GRIS).font('Helvetica').fontSize(9).text(fecha(pedido.creado_en), 40, 77, { width: ancho, align: 'right', lineBreak: false });
+  doc.strokeColor(LINEA).lineWidth(1).moveTo(40, 100).lineTo(40 + ancho, 100).stroke();
 
   let y = 112;
 
@@ -136,7 +182,7 @@ async function pdfPedido(pedido) {
   let categoriaActual = null;
 
   const encabezadoDeCategoria = (nombre, continua) => {
-    doc.rect(40, y, ancho, 17).fill('#eef2f7');
+    doc.roundedRect(40, y, ancho, 17, 3).fill(FONDO);
     doc.fillColor(AZUL).font('Helvetica-Bold').fontSize(9)
       .text(texto(nombre).toUpperCase() + (continua ? ' (continúa)' : ''), 46, y + 5, { width: ancho - 12, lineBreak: false });
     y += 23;
@@ -153,7 +199,7 @@ async function pdfPedido(pedido) {
   // ── Datos del cliente
   doc.fillColor(AZUL).font('Helvetica-Bold').fontSize(11).text('CLIENTE', 40, y);
   y += 16;
-  doc.strokeColor('#dfe3e8').lineWidth(1).moveTo(40, y).lineTo(40 + ancho, y).stroke();
+  doc.strokeColor(LINEA).lineWidth(1).moveTo(40, y).lineTo(40 + ancho, y).stroke();
   y += 8;
 
   const campos = [
@@ -184,7 +230,7 @@ async function pdfPedido(pedido) {
     fila.forEach(([etiqueta, valor], col) => {
       const x = 40 + col * (ancho / 2);
       doc.fillColor(GRIS).font('Helvetica').fontSize(7.5).text(etiqueta.toUpperCase(), x, y);
-      doc.fillColor('#111').font('Helvetica-Bold').fontSize(9.5)
+      doc.fillColor(TINTA).font('Helvetica-Bold').fontSize(9.5)
         .text(valorDe(valor), x, y + 9, { width: anchoValor });
     });
     y += 9 + altoValor + 8;
@@ -264,12 +310,12 @@ async function pdfPedido(pedido) {
       saltarSiHaceFalta(Math.min(alto, PISO - TECHO - 1));
 
       const titulo = texto(it.titulo) || '—';
-      doc.fillColor('#111').font('Helvetica-Bold').fontSize(9.5).text(titulo, 46, y, { width: ANCHO_TITULO });
+      doc.fillColor(TINTA).font('Helvetica-Bold').fontSize(9.5).text(titulo, 46, y, { width: ANCHO_TITULO });
       let alturaCabecera = doc.heightOfString(titulo, { width: ANCHO_TITULO });
 
       // Las cantidades se alinean con la primera línea del título, que es donde
       // las busca el ojo aunque el nombre del producto ocupe tres renglones.
-      doc.fillColor('#111').font('Helvetica').fontSize(9)
+      doc.fillColor(TINTA).font('Helvetica').fontSize(9)
         .text(`${it.unidades ?? 0} u.`, 40, y, { width: ancho - 90, align: 'right', lineBreak: false });
       doc.font('Helvetica-Bold').text(pesos(it.subtotal), 40, y, { width: ancho - 14, align: 'right', lineBreak: false });
 
@@ -291,7 +337,7 @@ async function pdfPedido(pedido) {
         const altoLinea = altoDeLinea(linea);
         saltarSiHaceFalta(altoLinea);
         doc.fillColor(VERDE).font('Helvetica-Bold').fontSize(8.5).text(texto(linea.color) || 'Único', 60, y, { width: ANCHO_COLOR });
-        doc.fillColor('#333').font('Helvetica').fontSize(8.5).text(tallesDe(linea), 172, y, { width: ANCHO_TALLES });
+        doc.fillColor(TINTA_2).font('Helvetica').fontSize(8.5).text(tallesDe(linea), 172, y, { width: ANCHO_TALLES });
         y += altoLinea;
       }
 
@@ -309,7 +355,7 @@ async function pdfPedido(pedido) {
   categoriaActual = null;   // el total no va abajo del encabezado de una categoría
   saltarSiHaceFalta(60);
   y += 6;
-  doc.rect(40, y, ancho, 46).fill(AZUL);
+  degrade(doc, 40, y, ancho, 46, 8);
   doc.fillColor('#fff').font('Helvetica').fontSize(9).text('TOTAL DEL PEDIDO', 54, y + 10, { lineBreak: false });
   doc.font('Helvetica-Bold').fontSize(9)
     .text(`${pedido.unidades ?? 0} unidades`, 54, y + 25, { lineBreak: false });
@@ -418,10 +464,21 @@ async function pdfRotulo(pedido) {
    */
   const recortar = altoCon(base) > disponible;
 
-  doc.rect(0, 0, 10 * CM, 1.5 * CM).fill(AZUL);
-  doc.fillColor('#fff').font('Helvetica-Bold').fontSize(13).text('ISUWAYA', M, 0.35 * CM, { lineBreak: false });
-  doc.font('Helvetica').fontSize(7.5).text('MAYORISTA', M, 0.85 * CM, { lineBreak: false });
-  doc.font('Helvetica-Bold').fontSize(10)
+  /*
+   * Encabezado blanco con la franja del logo, igual que el remito. En una
+   * etiquetadora térmica la banda llena de antes salía como un rectángulo
+   * negro que no decía nada.
+   */
+  degrade(doc, 0, 0, 10 * CM, 0.14 * CM);
+  let xMarca = M;
+  if (LOGO) {
+    const altoLogo = 0.9 * CM;
+    doc.image(LOGO, M, 0.36 * CM, { height: altoLogo });
+    xMarca = M + altoLogo * PROPORCION_LOGO + 6;
+  }
+  doc.fillColor(TINTA).font('Helvetica-Bold').fontSize(13).text('ISUWAYA', xMarca, 0.38 * CM, { lineBreak: false });
+  doc.fillColor(TEAL).font('Helvetica-Bold').fontSize(7.5).text('MAYORISTA', xMarca, 0.88 * CM, { lineBreak: false });
+  doc.fillColor(TINTA).font('Helvetica-Bold').fontSize(10)
     .text(texto(pedido.numero), 0, 0.42 * CM, { width: 10 * CM - M, align: 'right', lineBreak: false });
   /*
    * La fecha del pedido, abajo del número y en la misma esquina.
@@ -431,15 +488,16 @@ async function pdfRotulo(pedido) {
    * Va chica a propósito: no compite con la dirección, que es lo que el rótulo
    * tiene que gritar.
    */
-  doc.font('Helvetica').fontSize(7.5)
+  doc.fillColor(GRIS).font('Helvetica').fontSize(7.5)
     .text(fecha(pedido.creado_en), 0, 0.92 * CM, { width: 10 * CM - M, align: 'right', lineBreak: false });
+  doc.strokeColor(LINEA).lineWidth(1).moveTo(M, 1.5 * CM).lineTo(10 * CM - M, 1.5 * CM).stroke();
 
   let y = yInicio;
   for (const l of lineas) {
     const cuerpo = base * l.peso;
     doc.fillColor(GRIS).font('Helvetica').fontSize(6.8).text(l.et.toUpperCase(), M, y, { lineBreak: false });
     y += 7;
-    doc.fillColor('#111').font('Helvetica-Bold').fontSize(cuerpo);
+    doc.fillColor(TINTA).font('Helvetica-Bold').fontSize(cuerpo);
     const opciones = recortar
       ? { width: ancho, height: Math.max(cuerpo * 2.4, (disponible / lineas.length) - 14), ellipsis: true }
       : { width: ancho };
