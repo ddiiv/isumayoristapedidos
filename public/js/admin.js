@@ -1373,6 +1373,7 @@ const ESTADO_WHATSAPP = {
   'esperando-qr': ['aviso', 'Esperando que escanees el QR'],
   conectado: ['si', 'Conectado'],
   reconectando: ['aviso', 'Reconectando…'],
+  'esperando-lugar': ['aviso', 'Esperando a que se libere la sesión'],
   desvinculado: ['no', 'Desvinculado'],
   error: ['no', 'Con error'],
 };
@@ -1388,7 +1389,7 @@ async function cargarAvisos() {
 function seguirAvisos() {
   clearTimeout(timerAvisos);
   const conexion = datos.avisos?.whatsapp?.conexion;
-  if (vista.tab !== 'avisos' || !['conectando', 'esperando-qr', 'reconectando'].includes(conexion)) return;
+  if (vista.tab !== 'avisos' || !['conectando', 'esperando-qr', 'reconectando', 'esperando-lugar'].includes(conexion)) return;
   timerAvisos = setTimeout(() => conError(async () => {
     if (vista.tab !== 'avisos') return;
     await cargarAvisos();
@@ -1400,6 +1401,26 @@ function vistaAvisos() {
   if (!datos.avisos) return '<p class="cargando">Mirando cómo están los avisos…</p>';
   const { mail, whatsapp: w } = datos.avisos;
   const [clase, etiqueta] = ESTADO_WHATSAPP[w.conexion] || ['no', w.conexion];
+
+  /*
+   * Cuándo y por qué se cortó la última vez.
+   *
+   * Es el dato con el que se entiende si el número se salió por el teléfono,
+   * por un deploy con dos copias peleando la sesión o por la red. Sin esto, lo
+   * único que se veía era que "se desvinculó solo".
+   */
+  const MOTIVO_CORTE = {
+    desvincular: 'se desvinculó: hay que escanear otro QR',
+    ceder: 'otra copia del servidor tomó la sesión',
+    reconectar: 'se cortó la conexión y volvió sola',
+    reiniciar: 'el reinicio normal de la vinculación',
+    esperar: 'el QR venció sin escanearse',
+  };
+  const corte = w.ultimoCorte?.cuando
+    ? `<p class="chico">Último corte: ${esc(momento(w.ultimoCorte.cuando))}${
+      MOTIVO_CORTE[w.ultimoCorte.accion] ? ` — ${esc(MOTIVO_CORTE[w.ultimoCorte.accion])}` : ''}${
+      w.ultimoCorte.codigo ? ` (código ${esc(String(w.ultimoCorte.codigo))})` : ''}.</p>`
+    : '';
 
   let cuerpo;
   if (w.conexion === 'esperando-qr' && w.qr) {
@@ -1433,13 +1454,15 @@ function vistaAvisos() {
         ${grupos ? '<button class="btn" data-wa-grupo>Guardar grupo</button>' : '<button class="btn borde" data-wa-buscar>Buscar grupos</button>'}
         ${w.grupo ? '<button class="btn borde" data-wa-prueba>Mandar mensaje de prueba</button>' : ''}
         <button class="btn texto quitar" data-wa-desvincular>Desvincular</button>
-      </div>`;
+      </div>
+      ${corte}`;
   } else if (['conectando', 'reconectando'].includes(w.conexion)) {
     cuerpo = '<p class="cargando">Conectando con WhatsApp…</p>';
   } else {
     cuerpo = `
       ${w.error ? `<p class="mensaje error">${esc(w.error)}</p>` : ''}
-      <div class="acciones"><button class="btn" data-wa-vincular>Vincular WhatsApp</button></div>`;
+      <div class="acciones"><button class="btn" data-wa-vincular>Vincular WhatsApp</button></div>
+      ${corte}`;
   }
 
   return `

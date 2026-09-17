@@ -92,6 +92,83 @@ const socketFalso = () => {
     chk(`${nombre}: 409 con explicación`, [409, true], [e?.status, Boolean(e?.message)]);
   }
 
+  tit('5. CADA CORTE DE WHATSAPP TIENE SU RESPUESTA');
+  /*
+   * El número se desvinculaba solo. Una de las causas era tratar todos los
+   * cortes igual: al corte 440 —otra copia del servidor tomó la sesión— se le
+   * respondía reconectando, las dos copias se echaban entre sí y WhatsApp
+   * terminaba sacando el dispositivo del teléfono.
+   */
+  const corte = (codigo, extra) => whatsapp.decidirCorte(codigo, extra).accion;
+  chk('el reinicio que pide WhatsApp al vincular se hace en el acto', 'reiniciar', corte(515));
+  chk('desvinculado desde el teléfono: hay que escanear de nuevo', 'desvincular', corte(401));
+  chk('número bloqueado: no se insiste', 'desvincular', corte(403));
+  chk('otra copia tomó la sesión: se le cede, no se pelea', 'ceder', corte(440));
+  chk('cortes de red: se reconecta', ['reconectar', 'reconectar', 'reconectar'], [corte(408), corte(428), corte(503)]);
+  chk('y sin código también', 'reconectar', corte(undefined));
+  chk('sesión ilegible: primero reintenta', 'reconectar', corte(500, { rotas: 0 }));
+  chk('y si sigue rota, pide QR nuevo', 'desvincular', corte(500, { rotas: 2 }));
+  chk('si el QR nunca se escaneó, queda apagado y no genera códigos para nadie', 'esperar', corte(428, { vinculado: false }));
+
+  tit('6. UNA SOLA COPIA DEL SERVIDOR USA LA SESIÓN');
+  /*
+   * El cerrojo con latido en el volumen: al desplegar, la copia nueva espera a
+   * que la vieja suelte la sesión en vez de disputársela.
+   */
+  fs.mkdirSync(whatsapp.CARPETA, { recursive: true });
+  const cerrojo = path.join(whatsapp.CARPETA, 'en-uso.json');
+  const ponerCerrojo = (instancia, hace) => fs.writeFileSync(
+    cerrojo, JSON.stringify({ instancia, pid: 1, cuando: Date.now() - hace }),
+  );
+  ponerCerrojo('otra-copia', 5000);
+  chk('una copia que sigue latiendo se respeta', true, Boolean(whatsapp.cerrojoDeOtraCopia()));
+  ponerCerrojo('otra-copia', 120000);
+  chk('una que dejó de latir no cuenta: la sesión quedó libre', null, whatsapp.cerrojoDeOtraCopia());
+  ponerCerrojo(whatsapp.INSTANCIA, 1000);
+  chk('y el cerrojo propio no se estorba a sí mismo', null, whatsapp.cerrojoDeOtraCopia());
+  /*
+   * Dentro de un contenedor el proceso suele ser el 1, así que dos copias
+   * distintas comparten número: lo que las distingue es el identificador.
+   */
+  ponerCerrojo('otra-copia-con-el-mismo-pid', 3000);
+  chk('dos copias con el mismo número de proceso se distinguen igual', true,
+    Boolean(whatsapp.cerrojoDeOtraCopia()));
+  fs.rmSync(cerrojo, { force: true });
+
+  tit('7. LA SESIÓN ROTA SE RESTAURA DEL RESPALDO');
+  /*
+   * La librería guarda las credenciales con una escritura común: si el proceso
+   * muere justo ahí —un deploy, un reinicio—, el archivo queda cortado, y al
+   * arrancar la librería crea una identidad nueva en silencio. Desde afuera se
+   * ve como que el número "se salió solo" y en el teléfono queda un dispositivo
+   * fantasma. De cada sesión buena queda un respaldo.
+   */
+  const creds = path.join(whatsapp.CARPETA, 'creds.json');
+  const respaldo = path.join(whatsapp.CARPETA, 'creds-respaldo.json');
+  const sesionBuena = JSON.stringify({
+    me: { id: '5493511234567:1@s.whatsapp.net' },
+    registered: true,
+    noiseKey: { private: { type: 'Buffer', data: [1, 2, 3] } },
+  });
+  fs.mkdirSync(whatsapp.CARPETA, { recursive: true });
+  fs.writeFileSync(creds, sesionBuena);
+  whatsapp.respaldarCredenciales();
+  chk('de una sesión vinculada queda respaldo', true, fs.existsSync(respaldo));
+
+  fs.writeFileSync(creds, '{"me":{"id":"549351');   // cortada a la mitad, como en un apagón
+  chk('una sesión cortada se restaura sola', true, whatsapp.restaurarCredenciales());
+  chk('y queda igual a la que andaba', sesionBuena, fs.readFileSync(creds, 'utf8'));
+  chk('con la sesión sana no se toca nada', false, whatsapp.restaurarCredenciales());
+
+  fs.rmSync(creds, { force: true });
+  chk('si el archivo desapareció, también vuelve', true, whatsapp.restaurarCredenciales());
+
+  fs.writeFileSync(respaldo, JSON.stringify({ registered: false }));
+  fs.writeFileSync(creds, 'roto');
+  chk('un respaldo sin vincular no pisa nada', false, whatsapp.restaurarCredenciales());
+  fs.rmSync(creds, { force: true });
+  fs.rmSync(respaldo, { force: true });
+
   console.log(`\n\x1b[1m─────────────────────────────\x1b[0m\n  \x1b[32mPasaron: ${ok}\x1b[0m   \x1b[31mFallaron: ${ko}\x1b[0m`);
   fs.rmSync(process.env.DATA_DIR, { recursive: true, force: true });
   process.exit(ko ? 1 : 0);

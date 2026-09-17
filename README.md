@@ -123,8 +123,22 @@ con el teléfono —como WhatsApp Web— y se elige el grupo.
 - **La sesión se guarda en el volumen** (`/data/whatsapp-sesion`): un deploy no
   obliga a escanear de nuevo. Si se desvincula desde el teléfono, la solapa lo
   muestra y hay que volver a escanear.
-- **Una sola réplica del servicio.** Dos copias del servidor con la misma sesión
-  se desconectan entre sí.
+- **Una sola réplica del servicio.** Dos copias con la misma sesión se echan
+  entre sí, y de esa pelea WhatsApp termina sacando el dispositivo del teléfono.
+  Para que un deploy no lo provoque —Railway levanta la copia nueva antes de
+  bajar la vieja—, el servidor deja un cerrojo con latido en el volumen: la
+  copia nueva espera a que la vieja suelte la sesión, y si WhatsApp avisa que
+  otra copia la tomó, ésta le cede en vez de disputarla.
+- **La sesión tiene respaldo.** La librería guarda las credenciales con una
+  escritura común: si el proceso muere justo ahí, el archivo queda cortado y al
+  arrancar se crearía una identidad nueva, en silencio, dejando un dispositivo
+  fantasma en el teléfono. De cada sesión buena queda un respaldo en la misma
+  carpeta y, si el archivo aparece roto, se restaura solo.
+- **Si se corta, vuelve solo.** Se reintenta siempre que haya sesión guardada
+  —esperando cada vez un poco más, hasta un minuto— y un vigilante revisa cada
+  minuto que la conexión siga viva, porque a veces el socket muere sin avisar.
+  En la solapa **Avisos** se ve el estado y, si hubo un corte, cuándo fue y por
+  qué.
 - Si WhatsApp está cortado, el pedido entra igual y el mail sale igual; el
   pedido queda con la marca de que el WhatsApp no salió.
 
