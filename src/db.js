@@ -242,6 +242,9 @@ CREATE TABLE IF NOT EXISTS eventos (
 CREATE INDEX IF NOT EXISTS idx_eventos_tipo   ON eventos(tipo, creado_en);
 CREATE INDEX IF NOT EXISTS idx_eventos_prod   ON eventos(producto_id, tipo, creado_en);
 CREATE INDEX IF NOT EXISTS idx_eventos_visita ON eventos(visita, creado_en);
+-- El reporte cuenta visitas filtrando sólo por fecha: sin este índice recorre
+-- la tabla entera, y es la que más crece de toda la base.
+CREATE INDEX IF NOT EXISTS idx_eventos_fecha  ON eventos(creado_en);
 
 CREATE TABLE IF NOT EXISTS colores (
   id      INTEGER PRIMARY KEY AUTOINCREMENT,
