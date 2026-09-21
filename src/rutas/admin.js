@@ -112,9 +112,22 @@ const fotosDelColor = (productoId, colorId) => db.prepare(
   'SELECT COUNT(*) n FROM fotos WHERE producto_id = ? AND color_id = ?',
 ).get(productoId, colorId).n;
 
+/*
+ * Hasta treinta fotos por tanda.
+ *
+ * Cargar un producto de doce colores de a una foto son veinte vueltas de elegir
+ * archivo, esperar y repetir. De a tanda se eligen todas juntas y el panel dice
+ * qué entró y qué no.
+ *
+ * Este tope es el de la TANDA, no el del producto: las que no entran por el
+ * máximo del producto o de un color se rechazan una por una, con el motivo, y
+ * las demás de la misma tanda entran igual.
+ */
+const MAX_POR_TANDA = 30;
+
 const subirFoto = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 6 * 1024 * 1024 },
+  limits: { fileSize: 6 * 1024 * 1024, files: MAX_POR_TANDA },
   fileFilter: (req, file, cb) => {
     // Se mira el tipo declarado Y se renombra con nuestra extensión: un archivo
     // llamado "foto.php" servido desde el volumen es un problema de otra clase.
@@ -123,62 +136,118 @@ const subirFoto = multer({
   },
 });
 
-r.post('/productos/:sku/fotos', subirFoto.single('foto'), async (req, res, next) => {
+/*
+ * Se aceptan los dos nombres de campo: `fotos` para la tanda y `foto` para una
+ * sola, que es como lo mandaba el panel antes. Los errores de multer se
+ * traducen acá: "Too many files" no le dice nada a nadie.
+ */
+const recibirFotos = (req, res, next) => subirFoto.fields([
+  { name: 'fotos', maxCount: MAX_POR_TANDA },
+  { name: 'foto', maxCount: MAX_POR_TANDA },
+])(req, res, (e) => {
+  if (e?.code === 'LIMIT_FILE_COUNT') {
+    return res.status(400).json({ message: `De a ${MAX_POR_TANDA} fotos por vez como máximo.` });
+  }
+  if (e?.code === 'LIMIT_FILE_SIZE') {
+    return res.status(400).json({ message: 'Cada foto puede pesar hasta 6 MB.' });
+  }
+  if (e?.code === 'LIMIT_UNEXPECTED_FILE') {
+    return res.status(400).json({ message: 'Mandá las fotos en el campo "fotos".' });
+  }
+  return next(e);
+});
+
+r.post('/productos/:sku/fotos', recibirFotos, async (req, res, next) => {
   try {
-    if (!req.file) return res.status(400).json({ message: 'Falta la imagen.' });
+    const archivos = [...(req.files?.fotos || []), ...(req.files?.foto || [])];
+    if (!archivos.length) return res.status(400).json({ message: 'Falta la imagen.' });
+
     const producto = db.prepare('SELECT id FROM productos WHERE sku_agrupador = ?').get(req.params.sku);
     if (!producto) return res.status(404).json({ message: 'No existe ese producto.' });
 
-    const cuantas = db.prepare('SELECT COUNT(*) n FROM fotos WHERE producto_id = ?').get(producto.id).n;
-    const tope = topeDeFotos(producto.id);
-    if (cuantas >= tope) {
-      return res.status(400).json({
-        message: `Este producto ya tiene ${tope} fotos, que es el máximo. Borrá alguna antes de subir otra.`,
-      });
-    }
-
-    // Se mira antes de escribir el archivo: una foto rechazada no tiene que quedar ocupando el volumen.
+    // El color vale para toda la tanda: se eligen juntas las fotos de un color.
     const colorId = req.body?.colorId ? Number(req.body.colorId) : null;
-    if (colorId && fotosDelColor(producto.id, colorId) >= MAX_POR_COLOR) {
-      return res.status(400).json({
-        message: `Ese color ya tiene ${MAX_POR_COLOR} fotos. Borrá alguna o subila como foto general.`,
-      });
+    const tope = topeDeFotos(producto.id);
+    let cuantas = db.prepare('SELECT COUNT(*) n FROM fotos WHERE producto_id = ?').get(producto.id).n;
+    let enElColor = colorId ? fotosDelColor(producto.id, colorId) : 0;
+
+    const subidas = [];
+    const rechazadas = [];
+
+    for (const archivo of archivos) {
+      const nombreOriginal = String(archivo.originalname || 'foto').slice(0, 80);
+
+      // Los topes se miran foto por foto y no al principio: dentro de la misma
+      // tanda pueden entrar las primeras y no las últimas.
+      if (cuantas >= tope) {
+        rechazadas.push({ nombre: nombreOriginal, motivo: `el producto llegó a su máximo de ${tope} fotos` });
+        continue;
+      }
+      if (colorId && enElColor >= MAX_POR_COLOR) {
+        rechazadas.push({ nombre: nombreOriginal, motivo: `ese color ya tiene ${MAX_POR_COLOR} fotos` });
+        continue;
+      }
+
+      /*
+       * Las versiones chicas se hacen ANTES de escribir nada. Si sharp no puede
+       * abrir el archivo, no es una imagen aunque el navegador diga que sí, y no
+       * tiene que quedar ocupando el volumen.
+       */
+      let mini;
+      let media;
+      try {
+        mini = await hacerMiniatura(archivo.buffer);
+        media = await hacerMedia(archivo.buffer);
+      } catch {
+        rechazadas.push({ nombre: nombreOriginal, motivo: 'no es una imagen que se pueda abrir' });
+        continue;
+      }
+
+      const nombre = `${crypto.randomBytes(12).toString('hex')}${TIPOS_FOTO[archivo.mimetype]}`;
+      const nombreMini = nombreMiniatura(nombre);
+      const nombreMed = nombreMedia(nombre);
+      fs.writeFileSync(path.join(FOTOS_DIR, nombre), archivo.buffer);
+      fs.writeFileSync(path.join(FOTOS_DIR, nombreMini), mini);
+      fs.writeFileSync(path.join(FOTOS_DIR, nombreMed), media);
+
+      const ruta = `/fotos/${nombre}`;
+      const miniatura = `/fotos/${nombreMini}`;
+      const rutaMedia = `/fotos/${nombreMed}`;
+      const orden = db.prepare('SELECT COALESCE(MAX(orden), -1) + 1 AS n FROM fotos WHERE producto_id = ?')
+        .get(producto.id).n;
+      db.prepare('INSERT INTO fotos (producto_id, ruta, color_id, orden, miniatura, media) VALUES (?,?,?,?,?,?)')
+        .run(producto.id, ruta, colorId, orden, miniatura, rutaMedia);
+
+      // La primera de todas queda como principal: es la que se ve en la fila del
+      // catálogo, y sin una elegida la fila sale con el hueco gris.
+      if (!cuantas) db.prepare('UPDATE productos SET foto = ? WHERE id = ?').run(ruta, producto.id);
+
+      cuantas += 1;
+      if (colorId) enElColor += 1;
+      subidas.push({ nombre: nombreOriginal, ruta, miniatura, media: rutaMedia });
     }
 
     /*
-     * La miniatura se hace antes de guardar nada. Si sharp no puede abrir el
-     * archivo, no es una imagen aunque el navegador diga que sí —hasta acá sólo
-     * se miraba el tipo que declara el navegador— y no tiene que quedar
-     * ocupando el volumen.
+     * Si no entró ninguna es un error del pedido y se contesta 400 con el motivo
+     * de la primera, que es lo que esperaba quien subía una sola foto.
      */
-    let mini;
-    let media;
-    try {
-      mini = await hacerMiniatura(req.file.buffer);
-      media = await hacerMedia(req.file.buffer);
-    } catch {
-      return res.status(400).json({ message: 'Ese archivo no es una imagen que se pueda abrir. Probá con otro JPG, PNG o WebP.' });
+    if (!subidas.length) {
+      return res.status(400).json({
+        message: rechazadas[0] ? `No se pudo subir: ${rechazadas[0].motivo}.` : 'No se pudo subir ninguna foto.',
+        rechazadas,
+      });
     }
 
-    const nombre = `${crypto.randomBytes(12).toString('hex')}${TIPOS_FOTO[req.file.mimetype]}`;
-    fs.writeFileSync(path.join(FOTOS_DIR, nombre), req.file.buffer);
-    const ruta = `/fotos/${nombre}`;
-    const nombreMini = nombreMiniatura(nombre);
-    fs.writeFileSync(path.join(FOTOS_DIR, nombreMini), mini);
-    const miniatura = `/fotos/${nombreMini}`;
-    const nombreMed = nombreMedia(nombre);
-    fs.writeFileSync(path.join(FOTOS_DIR, nombreMed), media);
-    const rutaMedia = `/fotos/${nombreMed}`;
-    const orden = db.prepare('SELECT COALESCE(MAX(orden), -1) + 1 AS n FROM fotos WHERE producto_id = ?')
-      .get(producto.id).n;
-    db.prepare('INSERT INTO fotos (producto_id, ruta, color_id, orden, miniatura, media) VALUES (?,?,?,?,?,?)')
-      .run(producto.id, ruta, colorId, orden, miniatura, rutaMedia);
-
-    // La primera que se sube queda como principal: es la que se ve en la fila
-    // del catálogo, y sin una elegida la fila sale con el hueco gris.
-    if (!cuantas) db.prepare('UPDATE productos SET foto = ? WHERE id = ?').run(ruta, producto.id);
-
-    res.json({ ok: true, ruta, miniatura, media: rutaMedia, quedan: tope - cuantas - 1 });
+    res.json({
+      ok: true,
+      subidas,
+      rechazadas,
+      quedan: Math.max(0, tope - cuantas),
+      // De a una, la respuesta sigue siendo la de antes.
+      ruta: subidas[0].ruta,
+      miniatura: subidas[0].miniatura,
+      media: subidas[0].media,
+    });
   } catch (e) { next(e); }
 });
 
@@ -395,6 +464,7 @@ r.get('/productos/:sku', (req, res) => {
     colores: coloresDelProducto,
     talles: tallesDelProducto,
     maxFotos: topeDeFotos(p.id),
+    maxPorTanda: MAX_POR_TANDA,
   });
 });
 

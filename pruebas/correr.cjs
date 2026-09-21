@@ -727,6 +727,56 @@ const planilla = path.join(__dirname, 'catalogo-isuwaya.xlsx');
   chk('y la miniatura se borra con la foto', 404, (await pedir(miniatura, { crudo: true })).status);
   chk('y la mediana también', 404, (await pedir(media, { crudo: true })).status);
 
+  tit('22e. FOTOS DE A TANDA');
+  /*
+   * Cargar un producto de doce colores de a una foto son veinte vueltas. De a
+   * tanda entran juntas, y las que no entran por los topes se rechazan una por
+   * una con el motivo, sin tirar abajo la tanda entera.
+   */
+  const conFoto2 = productos.find((x) => x.sku !== conFoto.sku && !(x.fotos || []).length) || conFoto;
+  const rutaTanda = `/api/admin/productos/${encodeURIComponent(conFoto2.sku)}/fotos`;
+  const tanda = (cuantas, { nombre = 'fotos', rotas = 0 } = {}) => {
+    const tandaFd = new FormData();
+    for (let tandaI = 0; tandaI < cuantas; tandaI += 1) {
+      const contenido = tandaI < rotas ? Buffer.from('esto no es una imagen') : png;
+      tandaFd.append(nombre, new Blob([contenido], { type: 'image/png' }), `prueba-${tandaI}.png`);
+    }
+    return pedir(rutaTanda, { metodo: 'POST', cuerpo: tandaFd, admin: true });
+  };
+
+  const tres = await tanda(3);
+  chk('entran las tres de una', [200, 3], [tres.status, tres.json?.subidas?.length]);
+  chk('y ninguna queda afuera', 0, tres.json?.rechazadas?.length);
+  chk('la respuesta sigue trayendo la primera, como cuando era de a una', true,
+    typeof tres.json?.ruta === 'string' && tres.json.ruta.startsWith('/fotos/'));
+
+  const tandaMezcla = await tanda(3, { rotas: 2 });
+  chk('en una tanda mezclada entra lo que sirve', [200, 1, 2],
+    [tandaMezcla.status, tandaMezcla.json?.subidas?.length, tandaMezcla.json?.rechazadas?.length]);
+  chk('y dice por qué rebotó cada una', 'no es una imagen que se pueda abrir',
+    tandaMezcla.json?.rechazadas?.[0]?.motivo);
+
+  chk('si no sirve ninguna, es un error del pedido', 400, (await tanda(2, { rotas: 2 })).status);
+  chk('de a más de 30 por vez no se puede', 400, (await tanda(31)).status);
+  chk('el campo de una sola foto sigue andando', 200, (await tanda(1, { nombre: 'foto' })).status);
+
+  /*
+   * El tope del producto se respeta dentro de la tanda: se piden muchas más de
+   * las que entran y el resto rebota con el motivo, en vez de pasarse.
+   */
+  const antesDelTope = (await pedir(`/api/admin/productos/${encodeURIComponent(conFoto2.sku)}`, { admin: true })).json;
+  const lugarQueQueda = antesDelTope.maxFotos - antesDelTope.fotos.length;
+  const pasada = await tanda(Math.min(30, lugarQueQueda + 3));
+  chk('no se pasa del máximo del producto', lugarQueQueda, pasada.json?.subidas?.length);
+  chk('y las que sobran dicen que el producto está lleno', true,
+    /máximo de \d+ fotos/.test(pasada.json?.rechazadas?.[0]?.motivo || ''));
+  const despuesDelTope = (await pedir(`/api/admin/productos/${encodeURIComponent(conFoto2.sku)}`, { admin: true })).json;
+  chk('el producto queda justo en su tope', despuesDelTope.maxFotos, despuesDelTope.fotos.length);
+
+  for (const foto of despuesDelTope.fotos) {
+    await pedir(`/api/admin/fotos/${foto.id}`, { metodo: 'DELETE', admin: true });
+  }
+
   tit('22c. LA MEDICIÓN DE LO QUE SE MIRA');
   /*
    * La tienda informa qué se mira y con eso se ordena el catálogo. Todo lo que

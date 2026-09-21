@@ -182,8 +182,10 @@ function vistaProducto() {
       </p>
       ${detalle.fotos.length < detalle.maxFotos
         ? `<form class="subida" id="form-foto">
-             <input type="file" name="foto" accept="image/jpeg,image/png,image/webp" required>
-             <button class="btn">Subir foto</button>
+             <input type="file" name="fotos" accept="image/jpeg,image/png,image/webp" multiple required>
+             <button class="btn">Subir fotos</button>
+             <span class="chico">Se pueden elegir varias a la vez: hasta ${detalle.maxPorTanda || 30} por tanda.
+               En este producto entran ${detalle.maxFotos - detalle.fotos.length} más.</span>
            </form>`
         : `<p class="mensaje info">Llegaste al máximo de ${detalle.maxFotos}. Borrá alguna para subir otra.</p>`}
       <ul class="fotos-grilla">${fotos || '<li class="apagado">Todavía no hay fotos.</li>'}</ul>
@@ -2330,11 +2332,27 @@ raiz.addEventListener('submit', (e) => conError(async () => {
   }
 
   if (f.id === 'form-foto') {
-    const fd = new FormData(f);
-    await api(`/productos/${encodeURIComponent(vista.sku)}/fotos`, { method: 'POST', body: fd });
+    /*
+     * Subir treinta fotos lleva su tiempo: de cada una se hacen la miniatura y
+     * la mediana. Sin avisar, el botón parece colgado y se vuelve a apretar.
+     */
+    const cuantas = f.querySelector('input[type="file"]').files?.length || 0;
+    if (!cuantas) return;
+    const boton = f.querySelector('button');
+    boton.disabled = true;
+    boton.textContent = cuantas === 1 ? 'Subiendo…' : `Subiendo ${cuantas} fotos…`;
+
+    const r = await api(`/productos/${encodeURIComponent(vista.sku)}/fotos`, { method: 'POST', body: new FormData(f) });
     detalle = await api(`/productos/${encodeURIComponent(vista.sku)}`);
     await cargar();
-    mensaje('Foto subida.');
+
+    const subidas = r.subidas?.length ?? 1;
+    const afuera = r.rechazadas || [];
+    // Los motivos se repiten entre fotos: se dicen una sola vez.
+    const motivos = [...new Set(afuera.map((x) => x.motivo))].join('; ');
+    mensaje(`${subidas} foto${subidas === 1 ? '' : 's'} subida${subidas === 1 ? '' : 's'}.`
+      + (afuera.length ? ` ${afuera.length} quedaron afuera: ${motivos}.` : ''),
+      afuera.length ? 'info' : 'ok');
     pintar();
   }
 }));

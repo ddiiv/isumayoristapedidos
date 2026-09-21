@@ -265,14 +265,23 @@ para que la pantalla no arranque en gris.
 **Vertical 3:4**, tipo 1440 × 1920 — la proporción con la que se recortan en el
 catálogo y en el panel del producto. Una foto apaisada se recorta arriba y abajo.
 
-Hasta **20 por producto**. A cada una se le puede asignar un color, y entonces se
-muestra al elegir ese color: la lista ofrece **sólo los colores que ese producto
-tiene**, porque con los treinta y seis del catálogo se puede etiquetar la foto de
-un pantalón negro como "Salmon" y esa foto no se muestra nunca.
+Hasta **20 por producto, o cinco por cada color que venda si eso da más** —una
+remera en doce colores llega a sesenta—, y **cinco por color** como máximo. A
+cada foto se le puede asignar un color, y entonces se muestra al elegir ese
+color: la lista ofrece **sólo los colores que ese producto tiene**, porque con
+los treinta y seis del catálogo se puede etiquetar la foto de un pantalón negro
+como "Salmon" y esa foto no se muestra nunca.
 
-Cada foto tiene además una **miniatura** de 240×320 en WebP —unos 5 KB contra
-unos 100 KB de la foto entera—, que usan la tira del panel del producto y la
-grilla del admin. Se genera al subir la foto; las que ya estaban se completan
+**Se suben de a varias: hasta 30 por tanda.** Se eligen todas juntas en el panel
+y entran las que quepan. Las que no entren —porque el producto llegó a su
+máximo, porque ese color ya tiene cinco, o porque el archivo no es una imagen de
+verdad— se rechazan **una por una, con el motivo**, sin tirar abajo el resto de
+la tanda. El panel avisa cuántas entraron y por qué quedaron afuera las otras.
+
+De cada foto se guardan tres versiones: el original, una **miniatura** de 240×320
+en WebP —unos 5 KB contra unos 110 KB del original— para las tiras y la fila del
+catálogo, y una **mediana** de 720×1080 —unos 34 KB— para la foto grande del
+producto y las pantallas densas. Se genera al subir la foto; las que ya estaban se completan
 solas al arrancar el servidor, sin correr nada. Si alguna no se pudo generar,
 la pantalla usa la foto entera. Al hacerla se abre el archivo, así que lo que
 no es una imagen de verdad se rechaza aunque el navegador diga que es un JPG.
