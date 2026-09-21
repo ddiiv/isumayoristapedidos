@@ -11,6 +11,7 @@ const { completarMiniaturas } = require('./src/miniaturas');
 const whatsapp = require('./src/whatsapp');
 const { completarClientesDePedidos } = require('./src/clientes');
 const { comprimir } = require('./src/comprimir');
+const eventos = require('./src/eventos');
 
 const app = express();
 const PORT = Number(process.env.PORT) || 8080;
@@ -154,6 +155,13 @@ const server = app.listen(PORT, () => {
   try { completarClientesDePedidos(); } catch (e) { console.error('  clientes:', e.message); }
   // Si el WhatsApp del grupo ya estaba vinculado, se reconecta solo: un deploy no obliga a escanear de nuevo.
   whatsapp.arrancarSiHaySesion();
+  /*
+   * Los eventos de la tienda duran seis meses: sirven para ver tendencias, no
+   * para archivar lo que mira cada uno. Se poda al arrancar y una vez por día.
+   */
+  const podar = () => { try { eventos.podar(); } catch (e) { console.error('  eventos:', e.message); } };
+  podar();
+  setInterval(podar, 24 * 60 * 60 * 1000).unref();
 });
 
 for (const senal of ['SIGTERM', 'SIGINT']) {

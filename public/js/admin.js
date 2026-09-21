@@ -27,6 +27,7 @@ let datos = { productos: [], categorias: [], colores: [], talles: [], pedidos: [
 let detalle = null;      // producto abierto
 let filtroPedidos = { desde: '', hasta: '', estado: '', buscar: '' };
 let filtroEstadisticas = { desde: '', hasta: '' };
+let filtroTrafico = { dias: 30 };
 let aviso = null;
 
 const api = async (ruta, opciones = {}) => {
@@ -1320,14 +1321,15 @@ function vistaClienteDetalle() {
 const TABS = [
   ['catalogo', 'Catálogo'], ['colores', 'Colores'], ['talles', 'Talles'],
   ['masivo', 'Precios en masa'], ['pedidos', 'Pedidos'],
-  ['estadisticas', 'Estadísticas'], ['clientes', 'Clientes'], ['avisos', 'Avisos'],
+  ['estadisticas', 'Estadísticas'], ['trafico', 'Tráfico'],
+  ['clientes', 'Clientes'], ['avisos', 'Avisos'],
 ];
 
 function pintar() {
   const vistas = {
     catalogo: vistaCatalogo, colores: vistaColores, talles: vistaTalles,
     masivo: vistaMasivo, pedidos: vistaPedidos, estadisticas: vistaEstadisticas,
-    clientes: vistaClientes, avisos: vistaAvisos,
+    trafico: vistaTrafico, clientes: vistaClientes, avisos: vistaAvisos,
   };
   raiz.innerHTML = `
     <div class="tabs">
@@ -1483,6 +1485,155 @@ function vistaAvisos() {
     </div>`;
 }
 
+// ══ TRÁFICO ═══════════════════════════════════════════════════════
+/*
+ * Qué se mira en la tienda, no sólo qué se pidió.
+ *
+ * Sale de la medición propia (src/eventos.js). Empezó a registrar el día que se
+ * instaló: de antes no hay nada, y la pantalla lo dice en vez de mostrar ceros,
+ * que se leen como "no entró nadie".
+ */
+function vistaTrafico() {
+  if (!datos.trafico) return '<p class="cargando">Juntando lo que se miró…</p>';
+  const t = datos.trafico;
+  const n = (v) => Number(v || 0).toLocaleString('es-AR');
+  const porcentaje = (v) => (v === null || v === undefined ? '—' : `${v} %`);
+
+  const periodo = [7, 30, 90].map((d) => `<button class="btn ${t.periodo.dias === d ? '' : 'texto'}"
+    data-trafico-dias="${d}">${d} días</button>`).join('');
+
+  const FUENTE = {
+    eventos: 'El catálogo se ordena sumando lo que se mira y lo que se pide. Una unidad pedida pesa como varias fichas abiertas: comprar vale más que mirar.',
+    pedidos: 'Todavía no se registró ningún gesto en este período, así que el orden lo llevan las unidades pedidas de cada producto.',
+    'sin datos': 'Sin gestos ni pedidos en el período, el catálogo queda en el orden manual del panel.',
+  };
+
+  if (!t.visitas.total) {
+    return `
+      <div class="tarjeta">
+        <h3>Tráfico de la tienda</h3>
+        <div class="acciones">${periodo}</div>
+        <p class="mensaje info">Todavía no hay visitas registradas en estos ${t.periodo.dias} días.
+          La medición guarda lo que se mira desde que se instaló: si recién se desplegó, acá no va a haber
+          nada hasta que entre la primera persona. No se inventan números.</p>
+        <p class="sub">${esc(FUENTE[t.fuenteDelOrden] || '')}</p>
+      </div>`;
+  }
+
+  const abandonados = t.productos.filter((p) => p.abandonos > 0)
+    .sort((a, b) => b.abandonos - a.abandonos).slice(0, 10);
+
+  const filaProducto = (p, i) => `
+    <tr>
+      <td>${i + 1}</td>
+      <td>${esc(p.titulo)}${p.alta && p.alta >= t.periodo.desde ? ' <span class="pastilla si">nuevo</span>' : ''}
+        <br><span class="chico">${esc(p.sku)}</span></td>
+      <td>${esc(p.categoria || '—')}</td>
+      <td>${n(p.impresiones)}</td>
+      <td><b>${n(p.vistas)}</b></td>
+      <td>${n(p.clicks)}</td>
+      <td>${n(p.carritos)}</td>
+      <td>${n(p.unidadesPedidas)}</td>
+      <td>${porcentaje(p.tasaClick)}</td>
+      <td>${porcentaje(p.tasaCarrito)}</td>
+      <td><b>${n(p.puntaje)}</b></td>
+    </tr>`;
+
+  const NOVEDAD = [['', 'Sin clasificar'], ['1', 'Modelo nuevo'], ['0', 'Ya existía en el negocio']];
+
+  return `
+    <div class="tarjeta">
+      <h3>Tráfico de la tienda</h3>
+      <p class="sub">Últimos ${t.periodo.dias} días. ${esc(FUENTE[t.fuenteDelOrden] || '')}</p>
+      <div class="acciones">${periodo}</div>
+      <div class="tarjetas-numero">
+        <div><span>VISITAS</span><b>${n(t.visitas.total)}</b><small>${n(t.visitas.conCuenta)} con la cuenta abierta</small></div>
+        <div><span>FICHAS ABIERTAS</span><b>${n(t.totales.vistas)}</b><small>${n(t.totales.impresiones)} filas vistas</small></div>
+        <div><span>CLICKS</span><b>${n(t.totales.clicks)}</b><small>${n(t.totales.categoria)} cambios de categoría</small></div>
+        <div class="verde"><span>LLEGARON AL CARRITO</span><b>${n(t.conversion.conCarrito)}</b><small>${porcentaje(t.conversion.tasaCarrito)} de las visitas</small></div>
+        <div class="verde"><span>TERMINARON EN PEDIDO</span><b>${n(t.conversion.conPedido)}</b><small>${porcentaje(t.conversion.tasaPedido)} de las visitas</small></div>
+        <div class="ambar"><span>CARRITOS ABANDONADOS</span><b>${n(t.abandono.carritos)}</b><small>${pesos(t.abandono.valorPromedio)} promedio</small></div>
+      </div>
+    </div>
+
+    <div class="tarjeta">
+      <h3>Productos más vistos</h3>
+      <p class="sub">Este es el orden con el que se muestran en la tienda, de mayor a menor puntaje.
+        "Filas vistas" es cuántas veces el producto quedó a la vista en la lista; "fichas abiertas", cuántas
+        veces alguien entró a cargarlo. El puntaje suma los gestos y las unidades
+        pedidas de los últimos 30 días, y es exactamente lo que decide el orden del catálogo.</p>
+      <div class="envoltorio-tabla">
+        <table class="datos">
+          <thead><tr><th>#</th><th>Producto</th><th>Categoría</th><th>Filas vistas</th><th>Fichas</th>
+            <th>Clicks</th><th>Al carrito</th><th>U. pedidas</th><th>% click</th><th>% carrito</th>
+            <th>Puntaje</th></tr></thead>
+          <tbody>${t.productos.map(filaProducto).join('')}</tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="tarjeta">
+      <h3>Por categoría</h3>
+      <div class="envoltorio-tabla">
+        <table class="datos">
+          <thead><tr><th>Categoría</th><th>Veces abierta</th><th>Filas vistas</th><th>Fichas</th><th>Clicks</th></tr></thead>
+          <tbody>${t.porCategoria.map((c) => `
+            <tr><td>${esc(c.nombre)}</td><td>${n(c.aperturas)}</td><td>${n(c.impresiones)}</td>
+              <td>${n(c.vistas)}</td><td>${n(c.clicks)}</td></tr>`).join('')}</tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="tarjeta">
+      <h3>Carritos abandonados</h3>
+      <p class="sub">Un carrito abandonado es una visita que cargó productos y se fue sin confirmar el pedido.</p>
+      <div class="tarjetas-numero">
+        <div class="ambar"><span>CARRITOS</span><b>${n(t.abandono.carritos)}</b></div>
+        <div class="ambar"><span>VALOR PROMEDIO</span><b>${pesos(t.abandono.valorPromedio)}</b></div>
+        <div class="ambar"><span>VALOR TOTAL</span><b>${pesos(t.abandono.valorTotal)}</b><small>${n(t.abandono.unidades)} unidades</small></div>
+        <div><span>PRODUCTOS AFECTADOS</span><b>${n(t.abandono.productosAfectados)}</b></div>
+      </div>
+      ${abandonados.length ? `
+        <h4>Los que más quedan sin pedir</h4>
+        <div class="envoltorio-tabla">
+          <table class="datos">
+            <thead><tr><th>Producto</th><th>Veces abandonado</th><th>Plata que quedó sin pedir</th><th>Fichas abiertas</th></tr></thead>
+            <tbody>${abandonados.map((p) => `
+              <tr><td>${esc(p.titulo)}</td><td>${n(p.abandonos)}</td>
+                <td>${pesos(p.valorAbandonado)}</td><td>${n(p.vistas)}</td></tr>`).join('')}</tbody>
+          </table>
+        </div>` : '<p class="sub">Todavía no quedó ningún carrito sin confirmar en este período.</p>'}
+    </div>
+
+    <div class="tarjeta">
+      <h3>Productos nuevos <span class="pastilla si">${t.nuevos.length}</span></h3>
+      <p class="sub">Los que entraron a la plataforma en los últimos 30 días. La fecha es la del alta acá,
+        que no dice si el modelo es nuevo o si ya estaba en el negocio: eso se marca en esta tabla y queda
+        registrado.${t.altasDesde ? ` Las altas se registran desde el ${esc(momento(t.altasDesde, false))};
+        lo cargado antes no tiene fecha y no figura como nuevo.` : ''}</p>
+      ${t.nuevos.length ? `
+        <div class="envoltorio-tabla">
+          <table class="datos">
+            <thead><tr><th>Producto</th><th>Categoría</th><th>Alta en la plataforma</th><th>Qué es</th></tr></thead>
+            <tbody>${t.nuevos.map((p) => `
+              <tr>
+                <td>${esc(p.titulo)}<br><span class="chico">${esc(p.sku)}</span></td>
+                <td>${esc(p.categoria || '—')}</td>
+                <td>${esc(momento(p.alta))}</td>
+                <td><select class="select-mini" data-novedad data-sku="${esc(p.sku)}">
+                  ${NOVEDAD.map(([v, etq]) => `<option value="${v}"${String(p.novedad ?? '') === v ? ' selected' : ''}>${etq}</option>`).join('')}
+                </select></td>
+              </tr>`).join('')}</tbody>
+          </table>
+        </div>` : '<p class="sub">Ningún producto nuevo en los últimos 30 días.</p>'}
+    </div>`;
+}
+
+/** Trae el reporte de tráfico del período elegido. */
+async function cargarTrafico() {
+  datos.trafico = await api(`/trafico?dias=${filtroTrafico.dias}`);
+}
+
 /** Trae las estadísticas del período elegido. */
 async function cargarEstadisticas() {
   const q = new URLSearchParams(Object.entries(filtroEstadisticas).filter(([, v]) => v)).toString();
@@ -1567,6 +1718,10 @@ raiz.addEventListener('click', (e) => conError(async () => {
     pintar();
     // Las cuentas se piden al abrir la pestaña y no en cada carga del panel:
     // recorren todos los pedidos del período y nadie las mira desde el catálogo.
+    if (vista.tab === 'trafico' && !datos.trafico) {
+      await cargarTrafico();
+      pintar();
+    }
     if (vista.tab === 'estadisticas' && !datos.estadisticas) {
       await cargarEstadisticas();
       pintar();
@@ -1997,6 +2152,16 @@ raiz.addEventListener('click', (e) => conError(async () => {
     return;
   }
 
+  const dias = t.closest('[data-trafico-dias]');
+  if (dias) {
+    filtroTrafico.dias = Number(dias.dataset.traficoDias) || 30;
+    datos.trafico = null;
+    pintar();
+    await cargarTrafico();
+    pintar();
+    return;
+  }
+
   const periodo = t.closest('[data-periodo]');
   if (periodo) {
     const dias = Number(periodo.dataset.periodo);
@@ -2106,6 +2271,24 @@ raiz.addEventListener('input', (e) => {
 raiz.addEventListener('change', (e) => {
   if (e.target.id === 'cl-tipo') { filtroClientes.tipo = e.target.value; pintar(); }
 });
+
+/*
+ * Modelo nuevo o producto viejo recién cargado.
+ *
+ * La plataforma sabe cuándo se cargó, no si el modelo es nuevo. Lo dice acá
+ * una persona y queda guardado con el producto.
+ */
+raiz.addEventListener('change', (e) => conError(async () => {
+  const s = e.target;
+  if (s.dataset?.novedad === undefined) return;
+  await api(`/productos/${encodeURIComponent(s.dataset.sku)}`, {
+    method: 'PUT',
+    body: JSON.stringify({ novedad: s.value === '' ? null : Number(s.value) }),
+  });
+  mensaje('Anotado.');
+  await cargarTrafico();
+  pintar();
+}));
 
 raiz.addEventListener('submit', (e) => conError(async () => {
   e.preventDefault();

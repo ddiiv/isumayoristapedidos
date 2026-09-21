@@ -11,6 +11,7 @@ const { hacerMiniatura, hacerMedia, nombreMiniatura, nombreMedia } = require('..
 const { pdfPedido } = require('../pdf');
 const { avisarCliente } = require('../notificaciones');
 const whatsapp = require('../whatsapp');
+const eventos = require('../eventos');
 const { seVeEnCuenta } = require('../clientes');
 const { importarPlanilla } = require('../excel');
 const { ordenarCatalogo } = require('../normalizar');
@@ -260,6 +261,20 @@ r.put('/productos/:sku', (req, res) => {
   if (req.body?.titulo !== undefined) { campos.push('titulo = ?'); valores.push(String(req.body.titulo).trim()); }
   if (req.body?.descripcion !== undefined) {
     campos.push('descripcion = ?'); valores.push(String(req.body.descripcion).trim() || null);
+  }
+  /*
+   * Modelo nuevo de verdad, o viejo recién cargado.
+   *
+   * La fecha de alta la pone la plataforma sola, pero no sabe si el modelo es
+   * nuevo o si estaba hace años en el negocio y recién ahora entró acá. Eso lo
+   * dice una persona: 1 = modelo nuevo · 0 = ya existía · nulo = sin clasificar.
+   */
+  if (req.body?.novedad !== undefined) {
+    const v = req.body.novedad === null ? null : Number(req.body.novedad);
+    if (v !== null && v !== 0 && v !== 1) {
+      return res.status(400).json({ message: 'La novedad es 1 (modelo nuevo), 0 (ya existía) o nula.' });
+    }
+    campos.push('novedad = ?'); valores.push(v);
   }
   if (req.body?.categoriaId !== undefined) {
     const id = req.body.categoriaId ? Number(req.body.categoriaId) : null;
@@ -1320,6 +1335,19 @@ r.put('/pedidos/:numero/confirmar-stock', conErrores(async (req, res) => {
  * detalle vive como JSON adentro de la fila, y desarmarlo con json_each deja
  * consultas que nadie vuelve a poder leer para un catálogo de este tamaño.
  */
+/*
+ * GET /api/admin/trafico
+ *
+ * Qué se mira en la tienda: vistas, clicks, carritos abandonados y el ranking
+ * de productos. Sale de la tabla de eventos, que se empezó a llenar el día que
+ * se instaló la medición: de antes no hay nada, y el panel lo dice en vez de
+ * mostrar ceros como si nadie hubiera entrado.
+ */
+r.get('/trafico', (req, res) => {
+  const dias = Math.min(365, Math.max(1, Math.trunc(Number(req.query.dias) || 30)));
+  res.json({ ...eventos.reporte({ dias }), nuevos: eventos.nuevos(30) });
+});
+
 r.get('/estadisticas', (req, res) => {
   const { desde, hasta } = periodo(req.query);
 

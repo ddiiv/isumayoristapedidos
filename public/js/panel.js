@@ -10,6 +10,7 @@
  */
 
 import { el, esc, pesos, enteroPositivo } from './util.js';
+import { medir } from './medir.js';
 import {
   estado, productoPorSku, cuentaDeEntrada, guardarCarrito,
   refrescarFlotante, pintarCatalogo, fotosDe, coloresConFotos, pintarMuestras,
@@ -99,6 +100,7 @@ export function abrirPanel(sku) {
 
   devolverFocoA = document.activeElement;
   actual = producto;
+  medir('producto', { sku: producto.sku });
   borrador = clonar(estado.carrito[sku] || { curvas: 0, cantidades: {} });
   borrador.cantidades = borrador.cantidades || {};
   borrador.curvasPorColor = borrador.curvasPorColor || {};
@@ -626,6 +628,7 @@ el('#panel-agregar').addEventListener('click', () => {
   if (!actual) return;
   const c = cuentaDeEntrada(actual.sku, borrador);
   if (c.unidades > 0) {
+    medir('carrito', { sku: actual.sku, unidades: c.unidades, valor: Math.round(c.subtotal) });
     estado.carrito[actual.sku] = {
       curvas: borrador.curvas || 0,
       curvasPorColor: borrador.curvasPorColor || {},

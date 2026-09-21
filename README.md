@@ -430,6 +430,53 @@ una etiquetadora térmica no sale un rectángulo negro.
 
 ---
 
+## La medición del tráfico
+
+Qué se mira en la tienda, para poder ordenar el catálogo con eso en vez de a mano.
+
+**Qué se guarda.** Un evento por gesto: catálogo abierto, categoría abierta, fila
+vista (un segundo en pantalla), ficha abierta, click, producto agregado al
+carrito, carrito abandonado y pedido confirmado. Cada uno lleva el producto o la
+categoría, la fecha y un identificador al azar de la visita, que vive en la
+pestaña y se borra al cerrar el navegador. Si quien mira ya entró con su cuenta
+queda también su ficha de cliente; si no, es anónimo. **No se guarda la IP ni el
+navegador.** Los eventos se borran solos a los seis meses.
+
+Los eventos de un cliente identificado son datos personales (Ley 25.326): si
+alguna vez se usan para algo más que ordenar el catálogo, hay que decirlo en la
+página.
+
+**Cómo se ordena el catálogo.** Cada producto suma, de los últimos 30 días:
+
+| Gesto | Puntos |
+|---|---|
+| La fila quedó a la vista | 1 |
+| Click en el producto | 2 |
+| Ficha abierta | 4 |
+| Agregado al carrito | 8 |
+| Cada pedido en el que apareció | 10 |
+| Tamaño de lo pedido | raíz de las unidades × 2 |
+
+Las unidades van amortiguadas a propósito: un mayorista que se lleva novecientas
+unidades de un producto en un solo pedido no lo vuelve el más buscado del
+catálogo, y contándolas derecho ese producto quedaba clavado primero un mes.
+El `orden` manual del panel sigue existiendo y queda como desempate. La cuenta se
+rehace como mucho cada cinco segundos.
+
+**«Productos Nuevos» es un filtro por fecha de alta, no una categoría.** El
+producto sigue estando en Remeras y además aparece ahí durante 30 días. La fecha
+la pone la plataforma al importar (`productos.creado_en`); lo que se cargó antes
+de esta versión no tiene fecha y **no** figura como nuevo: no se le inventa una.
+Como la fecha de alta no dice si el modelo es nuevo o si estaba hace años en el
+negocio y recién se cargó, eso se marca a mano en el panel → Tráfico.
+
+**El reporte** está en el panel → Tráfico: visitas, fichas abiertas, clicks,
+conversión, carritos abandonados con la plata que quedó sin pedir, el ranking de
+productos con el mismo puntaje que ordena la tienda, y la lista de altas
+recientes.
+
+---
+
 ## Las pruebas
 
 ```bash

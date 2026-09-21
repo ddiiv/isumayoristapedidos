@@ -10,6 +10,7 @@ import { pesos, esc, el } from './util.js';
 import { abrirPanel, cerrarPanel } from './panel.js';
 import { abrirDialogo, cerrarDialogo } from './pedido.js';
 import { cargarSesion } from './sesion.js';
+import { medir, alIrse } from './medir.js';
 
 export const estado = {
   categorias: [],
@@ -26,7 +27,23 @@ export const estado = {
    * lugar movería lo que el cliente había cargado a otro producto.
    */
   carrito: {},
+  // Cuántos productos entraron a la plataforma hace menos de 30 días.
+  nuevos: 0,
 };
+
+/*
+ * "Productos Nuevos" no es una categoría de la base.
+ *
+ * Es un filtro por fecha de alta: un producto nuevo sigue estando en su
+ * categoría de siempre —una remera nueva está en Remeras— y además aparece acá
+ * durante sus primeros 30 días. Meterlo como categoría de verdad lo sacaría de
+ * donde la gente lo busca, y al cumplir 30 días habría que moverlo a mano.
+ */
+export const NUEVOS = 'nuevos';
+
+const fechaCorta = (iso) => (iso
+  ? new Date(iso).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: '2-digit' })
+  : '');
 
 const CLAVE_CARRITO = 'isuwaya.carrito.v1';
 
@@ -161,7 +178,9 @@ function filaProducto(producto) {
       <div class="fila-datos">
         <div class="fila-encabezado">
           <div>
-            <h3>${esc(producto.titulo)}</h3>
+            <h3>${esc(producto.titulo)}${producto.nuevo
+              ? ` <span class="pastilla-nuevo" title="Se cargó el ${esc(fechaCorta(producto.altaEn))}">Nuevo</span>`
+              : ''}</h3>
             <p class="sku">${esc(producto.sku)}${producto.modelo ? ` · ${esc(producto.modelo)}` : ''}</p>
           </div>
           <div class="fila-precio">${pesos(producto.precio)}<small>por unidad</small></div>
@@ -279,9 +298,12 @@ export function pintarCatalogo() {
    * Si la búsqueda quedara encerrada en la categoría activa, escribir algo que
    * está en otra da cero resultados y parece que el producto no existe.
    */
-  const enCategoria = estado.categoriaActiva && !palabras.length
-    ? estado.productos.filter((p) => p.categoriaId === estado.categoriaActiva)
-    : estado.productos;
+  let enCategoria = estado.productos;
+  if (estado.categoriaActiva && !palabras.length) {
+    enCategoria = estado.categoriaActiva === NUEVOS
+      ? estado.productos.filter((p) => p.nuevo)
+      : estado.productos.filter((p) => p.categoriaId === estado.categoriaActiva);
+  }
   const visibles = palabras.length
     ? enCategoria.filter((p) => coincide(p, palabras))
     : enCategoria;
@@ -315,7 +337,49 @@ export function pintarCatalogo() {
     .join('');
 
   pintarMuestras(cont);
+  observarFilas(cont);
 }
+
+/*
+ * Qué filas llegó a ver la gente.
+ *
+ * Una fila cuenta como vista recién cuando estuvo un segundo en pantalla: al
+ * bajar rápido pasan veinte por el camino y ninguna se miró. Se cuenta una sola
+ * vez por visita, así que bajar y volver a subir no infla el número.
+ */
+let mirador = null;
+function observarFilas(raiz) {
+  if (!('IntersectionObserver' in window)) return;
+  if (!mirador) {
+    const relojes = new WeakMap();
+    mirador = new IntersectionObserver((entradas) => {
+      for (const entrada of entradas) {
+        const fila = entrada.target;
+        if (entrada.isIntersecting) {
+          if (relojes.has(fila)) continue;
+          relojes.set(fila, setTimeout(() => {
+            medir('impresion', { sku: fila.dataset.sku }, { unaVezPor: `imp:${fila.dataset.sku}` });
+            mirador.unobserve(fila);
+          }, 1000));
+        } else {
+          clearTimeout(relojes.get(fila));
+          relojes.delete(fila);
+        }
+      }
+    }, { threshold: 0.5 });
+  }
+  for (const fila of raiz.querySelectorAll('.fila-producto[data-sku]')) mirador.observe(fila);
+}
+
+/*
+ * El carrito que se fue sin pedido. Un evento por producto, con lo que tenía
+ * cargado: así el panel puede decir qué productos se abandonan más, no sólo
+ * cuántos carritos.
+ */
+alIrse(() => Object.entries(estado.carrito).map(([sku, entrada]) => {
+  const c = cuentaDeEntrada(sku, entrada);
+  return { tipo: 'abandono', sku, unidades: c.unidades, valor: Math.round(c.subtotal) };
+}).filter((e) => e.unidades > 0));
 
 /*
  * El color de cada cuadrito se pone desde JavaScript, no con `style=`.
@@ -338,6 +402,10 @@ function pintarCategorias() {
   );
   cont.innerHTML = [
     `<button data-cat="" aria-current="${estado.categoriaActiva === null}">Todo el catálogo</button>`,
+    estado.nuevos
+      ? `<button data-cat="${NUEVOS}" aria-current="${estado.categoriaActiva === NUEVOS}">`
+        + `Productos Nuevos <span class="cuenta-cat">${estado.nuevos}</span></button>`
+      : '',
     ...conProductos.map((c) =>
       `<button data-cat="${c.id}" aria-current="${estado.categoriaActiva === c.id}">${esc(c.nombre)}</button>`),
   ].join('');
@@ -360,6 +428,8 @@ async function iniciar() {
     const datos = await r.json();
     estado.categorias = datos.categorias;
     estado.productos = datos.productos;
+    estado.nuevos = datos.nuevos || 0;
+    medir('catalogo');
   } catch {
     el('#catalogo').innerHTML = `<div class="vacio"><h3>No pudimos cargar el catálogo</h3>
       <p>Actualizá la página en un momento.</p></div>`;
@@ -392,7 +462,9 @@ async function iniciar() {
 el('#categorias').addEventListener('click', (e) => {
   const b = e.target.closest('button[data-cat]');
   if (!b) return;
-  estado.categoriaActiva = b.dataset.cat ? Number(b.dataset.cat) : null;
+  const cat = b.dataset.cat;
+  estado.categoriaActiva = cat ? (cat === NUEVOS ? NUEVOS : Number(cat)) : null;
+  medir('categoria', typeof estado.categoriaActiva === 'number' ? { categoria: estado.categoriaActiva } : {});
   /*
    * Elegir una categoría borra la búsqueda.
    *
@@ -455,7 +527,10 @@ el('#catalogo').addEventListener('click', (e) => {
   if (Date.now() - deslizoHace < 500 && e.target.closest('.carrusel')) return;
 
   const fila = e.target.closest('.fila-producto[data-sku]');
-  if (fila) abrirPanel(fila.dataset.sku);
+  if (fila) {
+    medir('click', { sku: fila.dataset.sku });
+    abrirPanel(fila.dataset.sku);
+  }
 });
 
 /*

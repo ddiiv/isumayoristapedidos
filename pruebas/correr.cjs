@@ -727,6 +727,69 @@ const planilla = path.join(__dirname, 'catalogo-isuwaya.xlsx');
   chk('y la miniatura se borra con la foto', 404, (await pedir(miniatura, { crudo: true })).status);
   chk('y la mediana también', 404, (await pedir(media, { crudo: true })).status);
 
+  tit('22c. LA MEDICIÓN DE LO QUE SE MIRA');
+  /*
+   * La tienda informa qué se mira y con eso se ordena el catálogo. Todo lo que
+   * llega mal formado se descarta sin romper nada: es medición, no un pedido, y
+   * un error acá no puede ensuciar la pantalla de alguien que está comprando.
+   */
+  const visita = `qa${Math.random().toString(16).slice(2, 12)}`;
+  const skuMedido = productos[productos.length - 1].sku;
+  // Un producto de control, igual de abajo en la lista, al que nadie mira:
+  // sirve para ver que lo que sube es lo mirado y no cualquier cosa.
+  const skuControl = productos[productos.length - 2].sku;
+  const medir = (cuerpo) => pedir('/api/eventos', { metodo: 'POST', cuerpo });
+  chk('un lote válido entra y contesta sin cuerpo', 204,
+    (await medir({ visita, eventos: [{ tipo: 'catalogo' }, { tipo: 'producto', sku: skuMedido }] })).status);
+  chk('una visita con formato inventado no rompe nada', 204,
+    (await medir({ visita: 'no es válida!', eventos: [{ tipo: 'catalogo' }] })).status);
+  chk('un tipo de evento que no existe tampoco', 204,
+    (await medir({ visita, eventos: [{ tipo: 'robar-todo', sku: skuMedido }] })).status);
+  chk('ni un cuerpo vacío', 204, (await medir({})).status);
+  chk('ni un evento de un producto que no existe', 204,
+    (await medir({ visita, eventos: [{ tipo: 'producto', sku: 'NO-EXISTE-ESTE-SKU' }] })).status);
+
+  const trafico = (await pedir('/api/admin/trafico?dias=1', { admin: true })).json;
+  chk('el panel ve la visita', true, (trafico?.visitas?.total || 0) >= 1);
+  const medido = (trafico?.productos || []).find((p) => p.sku === skuMedido);
+  chk('y la ficha abierta de ese producto', true, (medido?.vistas || 0) >= 1);
+  chk('los tipos inventados no dejaron nada', ['catalogo', 'categoria', 'impresiones', 'vistas', 'clicks', 'carritos'],
+    Object.keys(trafico?.totales || {}));
+
+  /*
+   * Lo más mirado va primero. Se manda un puñado de aperturas de ficha del
+   * último producto del catálogo y se mira que suba a la cabeza de su categoría.
+   */
+  const ordenAntes = (await pedir('/api/catalogo')).json.productos;
+  const posicionAntes = ordenAntes.findIndex((p) => p.sku === skuMedido);
+  for (let i = 0; i < 25; i += 1) {
+    await medir({ visita: `${visita}${i}`, eventos: [{ tipo: 'producto', sku: skuMedido }, { tipo: 'click', sku: skuMedido }] });
+  }
+  // La cuenta se rehace como mucho cada cinco segundos: se espera a que toque.
+  await new Promise((r) => setTimeout(r, 5600));
+  const ordenDespues = (await pedir('/api/catalogo')).json.productos;
+  const posicionDespues = ordenDespues.findIndex((p) => p.sku === skuMedido);
+  chk('el más mirado sube en el catálogo', true, posicionDespues < posicionAntes,
+    `antes ${posicionAntes}, después ${posicionDespues}`);
+  chk('y pasa al producto de al lado, que nadie miró', true,
+    posicionDespues < ordenDespues.findIndex((p) => p.sku === skuControl));
+
+  tit('22d. LOS PRODUCTOS NUEVOS SE DISTINGUEN POR FECHA DE ALTA');
+  /*
+   * "Nuevo" es una fecha, no una etiqueta que alguien se acuerda de poner. Los
+   * que ya estaban antes de que se registraran las altas no tienen fecha y no
+   * figuran como nuevos: no se les inventa una.
+   */
+  const conAlta = ordenDespues.filter((p) => p.altaEn);
+  const sinAlta = ordenDespues.filter((p) => !p.altaEn);
+  chk('cada producto dice si es nuevo y desde cuándo', true,
+    ordenDespues.every((p) => 'nuevo' in p && 'altaEn' in p));
+  chk('los que no tienen fecha de alta no son nuevos', true, sinAlta.every((p) => p.nuevo === false));
+  chk('y los nuevos tienen alta de los últimos 30 días', true,
+    conAlta.filter((p) => p.nuevo).every((p) => Date.now() - Date.parse(p.altaEn) <= 31 * 86400000));
+  chk('el catálogo dice cuántos son nuevos', true,
+    (await pedir('/api/catalogo')).json.nuevos === ordenDespues.filter((p) => p.nuevo).length);
+
   tit('22b. HASTA CINCO FOTOS POR COLOR');
   /*
    * La regla del negocio: hasta cinco fotos por color, y el producto 20 o cinco

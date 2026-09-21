@@ -5,6 +5,7 @@ const clientes = require('../clientes');
 const { pdfPedido, pdfRotulo } = require('../pdf');
 const { avisarPedido, avisarCliente } = require('../notificaciones');
 const auth = require('../auth');
+const eventos = require('../eventos');
 
 const r = express.Router();
 
@@ -44,10 +45,31 @@ const demasiadosPedidos = limitador(10);
 const demasiadosPapeles = limitador(60);
 // La búsqueda por CUIT: una por pedido alcanza y sobra, y así nadie recorre CUITs de a miles.
 const demasiadasBusquedas = limitador(20);
+// La medición manda lotes, no eventos sueltos: con uno cada diez segundos por
+// visita sobra, y este techo deja lugar a varias personas detrás de la misma IP.
+const demasiadosEventos = limitador(60);
 
 const frenar = (mirar) => (req, res, next) => (mirar(req)
   ? res.status(429).json({ message: 'Estás yendo muy rápido. Esperá un momento y probá de nuevo.' })
   : next());
+
+/*
+ * POST /api/eventos
+ *
+ * Lo que la tienda informa de lo que se mira: fichas abiertas, clicks, lo que
+ * entra al carrito y lo que queda abandonado al cerrar la pestaña. Llega en
+ * lotes y se contesta sin cuerpo: es medición, y ninguna pantalla espera nada.
+ *
+ * Nunca falla para afuera. Un error midiendo no puede ensuciar la pantalla de
+ * alguien que está comprando, así que lo que no se entiende se descarta.
+ */
+r.post('/eventos', frenar(demasiadosEventos), (req, res) => {
+  try {
+    // El cliente queda atado al evento sólo si ya tenía la sesión abierta.
+    eventos.registrar(req.body, { clienteId: req.sesion?.cliente?.id || null });
+  } catch { /* la tienda sigue andando igual */ }
+  res.status(204).end();
+});
 
 /*
  * GET /api/catalogo
@@ -65,7 +87,7 @@ r.get('/catalogo', (req, res) => {
 
   const productos = db.prepare(`
     SELECT p.id, p.sku_agrupador, p.titulo, p.precio, p.foto, p.modelo, p.genero,
-           p.categoria_id, p.guia_talles, p.descripcion
+           p.categoria_id, p.guia_talles, p.descripcion, p.creado_en, p.novedad
     FROM productos p
     WHERE p.visible = 1
     ORDER BY p.orden, p.titulo`).all();
@@ -116,6 +138,17 @@ r.get('/catalogo', (req, res) => {
     });
   }
 
+  /*
+   * El orden lo decide lo que la gente mira, no el número de fila.
+   *
+   * `orden` quedó como desempate y como la forma de forzar algo a mano desde el
+   * panel. Mientras no haya eventos suficientes manda la demanda de los
+   * pedidos: así el catálogo está bien ordenado desde el primer día y no desde
+   * dentro de un mes (ver src/eventos.js).
+   */
+  const { mapa: puntajes } = eventos.popularidad();
+  const HACE_30_DIAS = new Date(Date.now() - 30 * 86_400_000).toISOString();
+
   const salida = productos.map((p) => {
     const vs = porProducto.get(p.id) || [];
     // Con su hex, para pintar el cuadrito sin una segunda consulta.
@@ -131,6 +164,10 @@ r.get('/catalogo', (req, res) => {
       sku: p.sku_agrupador,
       titulo: p.titulo,
       categoriaId: p.categoria_id,
+      // Cuándo entró a la plataforma, y si eso fue hace menos de 30 días. Nulo
+      // = se cargó antes de que se registraran las altas, no que sea viejo.
+      altaEn: p.creado_en || null,
+      nuevo: Boolean(p.creado_en && p.creado_en >= HACE_30_DIAS),
       precio: p.precio,
       modelo: p.modelo,
       genero: p.genero,
@@ -149,8 +186,20 @@ r.get('/catalogo', (req, res) => {
       precioPorCurva: vs.reduce((t, v) => t + (v.precio ?? p.precio), 0),
     };
   }).filter((p) => p.combinaciones.length > 0);
+  /*
+   * Los más mirados primero, dentro de cada categoría.
+   *
+   * El navegador agrupa por categoría respetando este orden, así que alcanza
+   * con ordenar la lista entera. Lo que empata queda como venía de la consulta
+   * —`orden` y después título—, porque ordenar en JavaScript conserva el orden
+   * previo de los empatados.
+   */
+  const idPorSku = new Map(productos.map((p) => [p.sku_agrupador, p.id]));
+  const puntajeDe = (p) => puntajes.get(idPorSku.get(p.sku));
+  salida.sort((a, b) => ((puntajeDe(b)?.puntajeFinal || 0) - (puntajeDe(a)?.puntajeFinal || 0))
+    || ((puntajeDe(b)?.unidades || 0) - (puntajeDe(a)?.unidades || 0)));
 
-  res.json({ categorias, productos: salida });
+  res.json({ categorias, productos: salida, nuevos: salida.filter((p) => p.nuevo).length });
 });
 
 // POST /api/pedidos/previsualizar — valoriza sin guardar nada.

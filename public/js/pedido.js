@@ -12,6 +12,7 @@ import {
   guardarCarrito, refrescarFlotante, pintarCatalogo,
 } from './app.js';
 import { sesion, abrirCuenta } from './sesion.js';
+import { medir, olvidarCarrito } from './medir.js';
 
 const dialogo = el('#dialogo');
 const cuerpo = el('#dialogo-cuerpo');
@@ -412,6 +413,14 @@ async function confirmar(boton) {
   enviando = true;
   boton.disabled = true;
   boton.textContent = 'Enviando…';
+  /*
+   * Lo que va en el pedido se anota ANTES de mandarlo: al confirmar, el carrito
+   * se vacía, y después ya no hay de dónde sacar qué se pidió.
+   */
+  const loPedido = Object.entries(estado.carrito).map(([sku, entrada]) => {
+    const c = cuentaDeEntrada(sku, entrada);
+    return { sku, unidades: c.unidades, valor: Math.round(c.subtotal) };
+  }).filter((x) => x.unidades > 0);
   try {
     const r = await fetch('/api/pedidos', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -427,6 +436,9 @@ async function confirmar(boton) {
       return;
     }
     confirmado = datos;
+    for (const p of loPedido) medir('pedido', p);
+    // Ya no es un carrito abandonado: se confirmó.
+    olvidarCarrito();
     paso = 'listo';
     pintar();
   } catch {

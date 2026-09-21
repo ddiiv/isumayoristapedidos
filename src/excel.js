@@ -137,9 +137,15 @@ async function importarPlanilla(buffer) {
   const insCategoria = db.prepare(`INSERT INTO categorias (nombre, orden) VALUES (?, 0)
                                    ON CONFLICT(nombre) DO NOTHING`);
   const buscarCategoria = db.prepare('SELECT id FROM categorias WHERE nombre = ?');
+  /*
+   * `creado_en` sólo se escribe al dar de alta: una reimportación actualiza
+   * precios y títulos, pero un producto no vuelve a ser nuevo porque se subió
+   * la planilla otra vez.
+   */
+  const ahora = new Date().toISOString();
   const upsertProducto = db.prepare(`
-    INSERT INTO productos (sku_agrupador, titulo, categoria_id, modelo, genero, precio)
-    VALUES (@sku, @titulo, @categoriaId, @modelo, @genero, @precio)
+    INSERT INTO productos (sku_agrupador, titulo, categoria_id, modelo, genero, precio, creado_en)
+    VALUES (@sku, @titulo, @categoriaId, @modelo, @genero, @precio, @ahora)
     ON CONFLICT(sku_agrupador) DO UPDATE SET
       titulo = excluded.titulo, categoria_id = excluded.categoria_id,
       modelo = excluded.modelo, genero = excluded.genero, precio = excluded.precio`);
@@ -183,6 +189,7 @@ async function importarPlanilla(buffer) {
       if (categoria) resumen.categorias = db.prepare('SELECT COUNT(*) c FROM categorias').get().c;
 
       upsertProducto.run({
+        ahora,
         sku: agrupador,
         titulo,
         categoriaId: categoria?.id ?? null,

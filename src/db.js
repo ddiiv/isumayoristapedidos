@@ -210,6 +210,39 @@ CREATE TABLE IF NOT EXISTS faltantes (
 );
 CREATE INDEX IF NOT EXISTS idx_faltantes ON faltantes(fecha);
 
+/*
+ * Lo que mira la gente en la tienda.
+ *
+ * Hasta acá el portal sólo guardaba pedidos confirmados: no había forma de
+ * saber qué se miró y no se pidió, ni dónde se abandona. Sin eso, ordenar el
+ * catálogo "por lo más visto" es adivinar.
+ *
+ * Qué se guarda y qué no:
+ *  · El tipo de evento, el producto o la categoría, y cuándo.
+ *  · Un identificador al azar de la visita, que vive en la pestaña y se borra
+ *    al cerrar el navegador. Sirve para contar visitas y recorridos.
+ *  · El cliente, SÓLO si ya inició sesión. Si no, queda en nulo: anónimo.
+ *  · No se guarda la IP, ni el navegador, ni nada que identifique a quien no
+ *    inició sesión.
+ *
+ * Los eventos viejos se borran solos (ver src/eventos.js): son para mirar
+ * tendencias de los últimos meses, no un archivo histórico.
+ */
+CREATE TABLE IF NOT EXISTS eventos (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  tipo         TEXT NOT NULL,
+  producto_id  INTEGER REFERENCES productos(id) ON DELETE CASCADE,
+  categoria_id INTEGER REFERENCES categorias(id) ON DELETE SET NULL,
+  visita       TEXT NOT NULL,
+  cliente_id   INTEGER REFERENCES clientes(id) ON DELETE SET NULL,
+  unidades     INTEGER,
+  valor        REAL,
+  creado_en    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_eventos_tipo   ON eventos(tipo, creado_en);
+CREATE INDEX IF NOT EXISTS idx_eventos_prod   ON eventos(producto_id, tipo, creado_en);
+CREATE INDEX IF NOT EXISTS idx_eventos_visita ON eventos(visita, creado_en);
+
 CREATE TABLE IF NOT EXISTS colores (
   id      INTEGER PRIMARY KEY AUTOINCREMENT,
   nombre  TEXT NOT NULL UNIQUE,
@@ -345,6 +378,27 @@ asegurarColumna('pedidos', 'aviso_cliente', 'TEXT');
 asegurarColumna('fotos', 'miniatura', 'TEXT');
 // Y la mediana, para la fila del catálogo en pantallas densas y la foto grande del panel.
 asegurarColumna('fotos', 'media', 'TEXT');
+
+/*
+ * Cuándo entró cada producto A LA PLATAFORMA.
+ *
+ * Es la fecha de alta acá, que no es lo mismo que "producto nuevo" del
+ * negocio: un modelo de hace tres años cargado ayer tiene alta de ayer. Por eso
+ * va aparte `novedad`, que lo dice una persona desde el panel:
+ *   1 = modelo nuevo de verdad · 0 = ya estaba en el negocio, recién se carga
+ *   nulo = sin clasificar todavía.
+ *
+ * Los productos que ya estaban cuando se agregó esta columna quedan en nulo:
+ * nadie registró cuándo se cargaron y no se va a inventar una fecha.
+ */
+asegurarColumna('productos', 'creado_en', 'TEXT');
+asegurarColumna('productos', 'novedad', 'INTEGER');
+
+/*
+ * Desde cuándo se registran las altas. Lo anterior a esta fecha es "sin dato",
+ * y el panel lo dice en vez de mostrar un catálogo entero como recién llegado.
+ */
+if (!leerConfig('altas_desde')) guardarConfig('altas_desde', new Date().toISOString());
 
 /*
  * Correcciones de color hechas en el panel, que la planilla no deshace.
