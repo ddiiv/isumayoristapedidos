@@ -43,13 +43,24 @@ const chk = (t, esperado, obtenido) => {
 };
 const tit = (t) => console.log(`\n\x1b[1m${t}\x1b[0m`);
 
+/*
+ * Cada llamada va con una IP distinta, salvo que la prueba pida una fija.
+ *
+ * Confirmar pedidos tiene un techo de diez por minuto por IP, y la última
+ * sección lo prueba a propósito llenándolo. Sin esto, correr la suite dos veces
+ * seguidas hacía fallar media docena de comprobaciones de la segunda corrida
+ * —el techo seguía disparado— y parecía un problema del portal.
+ */
+const ipDePrueba = () => `10.${1 + Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}.${1 + Math.floor(Math.random() * 250)}`;
+
 let cookieAdmin = '';
-async function pedir(ruta, { metodo = 'GET', cuerpo, admin = false, crudo = false } = {}) {
+async function pedir(ruta, { metodo = 'GET', cuerpo, admin = false, crudo = false, ip = null } = {}) {
   const r = await fetch(`${API}${ruta}`, {
     method: metodo,
     headers: {
       ...(cuerpo instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
       ...(admin && cookieAdmin ? { Cookie: cookieAdmin } : {}),
+      'X-Forwarded-For': ip || ipDePrueba(),
     },
     body: cuerpo instanceof FormData ? cuerpo : (cuerpo ? JSON.stringify(cuerpo) : undefined),
   });
@@ -766,12 +777,22 @@ const planilla = path.join(__dirname, 'catalogo-isuwaya.xlsx');
    */
   const antesDelTope = (await pedir(`/api/admin/productos/${encodeURIComponent(conFoto2.sku)}`, { admin: true })).json;
   const lugarQueQueda = antesDelTope.maxFotos - antesDelTope.fotos.length;
-  const pasada = await tanda(Math.min(30, lugarQueQueda + 3));
-  chk('no se pasa del máximo del producto', lugarQueQueda, pasada.json?.subidas?.length);
-  chk('y las que sobran dicen que el producto está lleno', true,
-    /máximo de \d+ fotos/.test(pasada.json?.rechazadas?.[0]?.motivo || ''));
+  /*
+   * Se piden más de las que entran, pero nunca más de 30, que es el tope de la
+   * tanda. Con un producto de muchos colores puede haber más lugar que 30: ahí
+   * entran las 30 y no sobra ninguna, y eso también tiene que dar bien.
+   */
+  const aMandar = Math.min(30, lugarQueQueda + 3);
+  const entran = Math.min(aMandar, lugarQueQueda);
+  const pasada = await tanda(aMandar);
+  chk('entra lo que hay lugar, sin pasarse del máximo del producto', entran, pasada.json?.subidas?.length);
+  chk(aMandar > lugarQueQueda ? 'y las que sobran dicen que el producto está lleno' : 'y no sobra ninguna porque entraban todas',
+    true,
+    aMandar > lugarQueQueda
+      ? /máximo de \d+ fotos/.test(pasada.json?.rechazadas?.[0]?.motivo || '')
+      : (pasada.json?.rechazadas || []).length === 0);
   const despuesDelTope = (await pedir(`/api/admin/productos/${encodeURIComponent(conFoto2.sku)}`, { admin: true })).json;
-  chk('el producto queda justo en su tope', despuesDelTope.maxFotos, despuesDelTope.fotos.length);
+  chk('y el producto queda con las que entraron', antesDelTope.fotos.length + entran, despuesDelTope.fotos.length);
 
   for (const foto of despuesDelTope.fotos) {
     await pedir(`/api/admin/fotos/${foto.id}`, { metodo: 'DELETE', admin: true });
@@ -892,8 +913,11 @@ const planilla = path.join(__dirname, 'catalogo-isuwaya.xlsx');
    * dueño. Sin techo, un script con CUITs generados le llena la casilla.
    */
   let frenado = 0;
+  // Todas desde la MISMA IP: el techo es por IP, y con una distinta cada vez no
+  // se dispararía nunca.
+  const laMismaIp = ipDePrueba();
   for (let i = 0; i < 14; i += 1) {
-    const r = await pedir('/api/pedidos', { metodo: 'POST', cuerpo: { cliente: {}, carrito: [] } });
+    const r = await pedir('/api/pedidos', { metodo: 'POST', cuerpo: { cliente: {}, carrito: [] }, ip: laMismaIp });
     if (r.status === 429) frenado += 1;
   }
   chk('a la ráfaga la corta', true, frenado > 0);

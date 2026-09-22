@@ -42,6 +42,26 @@ const configurado = () => Boolean(URL_BASE && TOKEN && NEGOCIO);
 
 const EVENTOS = ['alta', 'confirmado', 'modificado', 'enviado', 'entregado', 'cancelado'];
 
+/*
+ * Ningún error que se guarde o se muestre lleva la dirección de STOCKER.
+ *
+ * Los errores de red la traen adentro —"ENOTFOUND backend.railway.internal",
+ * "request to https://… failed"— y de ahí pasan al panel, que se mira desde
+ * cualquier lado y termina en capturas de pantalla. El backend de STOCKER no
+ * tiene dominio público justamente para que nadie sepa dónde golpear: no vamos
+ * a publicarlo nosotros en un mensaje de error.
+ */
+function sinDireccion(texto) {
+  let limpio = String(texto ?? '');
+  limpio = limpio.replace(/https?:\/\/[^\s"']+/gi, 'STOCKER');
+  if (URL_BASE) {
+    let host = URL_BASE;
+    try { host = new URL(URL_BASE).hostname; } catch { /* se usa tal cual */ }
+    if (host) limpio = limpio.split(host).join('STOCKER');
+  }
+  return limpio.slice(0, 200);
+}
+
 const recortar = (v, largo) => {
   const t = String(v ?? '').trim();
   return t ? t.slice(0, largo) : null;
@@ -215,7 +235,7 @@ async function mandar(cuerpo) {
    * donde alguien puede hacer algo.
    */
   const definitivo = r.status >= 400 && r.status < 500 && ![408, 429].includes(r.status);
-  return { ok: false, definitivo, motivo: `${r.status} ${texto.slice(0, 200)}` };
+  return { ok: false, definitivo, motivo: sinDireccion(`${r.status} ${texto}`) };
 }
 
 /**
@@ -241,7 +261,7 @@ async function procesarCola({ tope = TOPE_POR_VUELTA } = {}) {
     try {
       resultado = await mandar(fila.cuerpo);
     } catch (e) {
-      resultado = { ok: false, motivo: String(e?.message || e).slice(0, 200) };
+      resultado = { ok: false, motivo: sinDireccion(e?.message || e) };
     }
 
     if (resultado.ok) {
@@ -315,14 +335,22 @@ function estadoPublico() {
   const ultimoError = db.prepare(`
     SELECT numero, ultimo_error, intentos FROM stocker_cola
     WHERE estado = 'error' ORDER BY id DESC LIMIT 1`).get();
+  /*
+   * A propósito NO salen la dirección de STOCKER ni el número de negocio.
+   *
+   * El panel se abre desde cualquier computadora y termina en capturas de
+   * pantalla; esos dos datos son el mapa para golpearle la puerta a un backend
+   * que justamente no tiene dominio público. Para saber a dónde apunta, están
+   * las variables del servidor, que las ve quien administra el deploy.
+   */
   return {
     configurado: true,
-    destino: `${URL_BASE}${RUTA}`,
-    negocio: NEGOCIO,
     pendientes: cuenta.pendiente || 0,
     enviados: cuenta.enviado || 0,
     conError: cuenta.error || 0,
-    ultimoError: ultimoError || null,
+    ultimoError: ultimoError
+      ? { ...ultimoError, ultimo_error: sinDireccion(ultimoError.ultimo_error) }
+      : null,
   };
 }
 
@@ -338,5 +366,5 @@ function arrancar() {
 
 module.exports = {
   configurado, anotar, procesarCola, reintentar, estadoPublico, arrancar,
-  cuerpoDelPedido, lineasDelPedido, EVENTOS,
+  cuerpoDelPedido, lineasDelPedido, sinDireccion, EVENTOS,
 };

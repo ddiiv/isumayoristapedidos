@@ -1506,8 +1506,8 @@ function vistaAvisos() {
       <h3>STOCKER <span class="pastilla ${s.configurado ? (s.conError ? 'aviso' : 'si') : 'no'}">${
         s.configurado ? (s.conError ? `${s.conError} con error` : 'conectado') : 'sin configurar'}</span></h3>
       ${s.configurado
-        ? `<p class="sub">Los pedidos se mandan a <b>${esc(s.destino)}</b> (negocio ${esc(String(s.negocio))}).
-             Al confirmarlos, STOCKER aparta el stock; al marcarlos enviados, lo descuenta.</p>
+        ? `<p class="sub">Al confirmar un pedido, STOCKER aparta el stock; al marcarlo enviado, lo descuenta.
+             A dónde se manda no se muestra acá a propósito: está en las variables del servidor.</p>
            <div class="tarjetas-numero">
              <div><span>ENVIADOS</span><b>${s.enviados}</b></div>
              <div class="${s.pendientes ? 'ambar' : ''}"><span>ESPERANDO</span><b>${s.pendientes}</b></div>

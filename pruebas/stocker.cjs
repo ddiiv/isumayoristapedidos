@@ -167,8 +167,28 @@ function armarDatos() {
   chk('y se puede volver a poner en la fila', 1, stocker.reintentar('ISU-000777'));
   rechazador.kill();
 
-  tit('6. SIN CONFIGURAR, NO SE ENCOLA NADA');
-  chk('el estado dice qué falta', true, stocker.estadoPublico().configurado);
+  tit('6. NI LA DIRECCIÓN DE STOCKER NI EL NEGOCIO SALEN DEL SERVIDOR');
+  /*
+   * El panel se abre desde cualquier computadora y termina en capturas de
+   * pantalla. La dirección del backend de STOCKER y el número de negocio son el
+   * mapa para golpearle la puerta a un servicio que justamente no tiene dominio
+   * público: no pueden viajar al navegador, ni siquiera dentro de un error.
+   */
+  const publico = stocker.estadoPublico();
+  const comoTexto = JSON.stringify(publico);
+  chk('el estado dice si está configurado', true, publico.configurado);
+  chk('pero no lleva la dirección', [false, false],
+    [Object.hasOwn(publico, 'destino'), comoTexto.includes(String(PUERTO))]);
+  chk('ni el número de negocio', [false, false],
+    [Object.hasOwn(publico, 'negocio'), comoTexto.includes('"negocioId"')]);
+  chk('ni el token', false, comoTexto.includes('token-de-prueba'));
+
+  chk('una dirección adentro de un error se reemplaza', 'request to STOCKER failed',
+    stocker.sinDireccion('request to http://127.0.0.1:4599/integraciones/isuwaya/pedidos failed'));
+  chk('y el host suelto también', 'ENOTFOUND STOCKER', stocker.sinDireccion('ENOTFOUND 127.0.0.1'));
+  chk('el error guardado del 400 no tiene dirección', false,
+    String(db.prepare(`SELECT ultimo_error FROM stocker_cola WHERE evento = 'entregado'`).get().ultimo_error)
+      .includes(String(PUERTO)));
 
   console.log(`\n\x1b[1m─────────────────────────────\x1b[0m\n  \x1b[32mPasaron: ${ok}\x1b[0m   \x1b[31mFallaron: ${ko}\x1b[0m`);
   fs.rmSync(CARPETA, { recursive: true, force: true });
