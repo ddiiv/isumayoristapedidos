@@ -1,29 +1,41 @@
 # ISUWAYA MAYORISTA → STOCKER
 
-Contrato de la integración, para quien implemente el lado de STOCKER.
+Contrato de la integración. **El lado de STOCKER ya está hecho** (v3.07 y v3.08):
+lo que sigue describe cómo quedó, no cómo se imaginó.
 
-Lo escribió el lado de ISUWAYA leyendo los modelos reales de STOCKER
-(`back/stocker/src/models/index.js`) y su cola de ventas online
-(`src/services/colaVentasOnlineService.js`). Cada campo sale ya recortado al
-largo de la columna a la que va.
+Lo escribió el lado de ISUWAYA leyendo los modelos reales de STOCKER; cada campo
+sale ya recortado al largo de la columna a la que va. La primera versión de este
+documento proponía reusar la cola de ventas online de Mercado Libre, que aparta
+stock y decide sola. **No se hizo así**, y la diferencia importa: un pedido
+mayorista se hace a pedido —sin stock— y lo decide una persona.
 
 ---
 
 ## El circuito
 
-ISUWAYA es el catálogo mayorista; STOCKER es el stock y las ventas. El circuito
-es el mismo que STOCKER ya tiene para Mercado Libre y Jumpseller:
+ISUWAYA es el catálogo mayorista; STOCKER es el stock y las ventas:
 
-| Momento en ISUWAYA | Evento que viaja | Qué debería hacer STOCKER |
-|---|---|---|
-| El cliente confirma el pedido | `alta` | Encolar y **apartar** el stock (`colaVentasOnlineService.encolar` con `plataforma: 'isuwaya'`) |
-| Se coordina y se confirma el stock | `confirmado` | Guardar la forma de pago y la ficha del cliente. El stock ya está apartado |
-| Se rearma por faltantes | `modificado` | Ajustar lo apartado a las líneas nuevas |
-| Se marca enviado | `enviado` | **Despachar**: acá egresa el stock de verdad, con su cliente y su forma de pago |
-| Se marca entregado | `entregado` | Informativo |
-| Se cancela | `cancelado` | Liberar lo apartado |
+| Momento en ISUWAYA | Qué hace STOCKER |
+|---|---|
+| El cliente confirma el pedido | Abre una **solicitud mayorista** en estado *por revisar*. No toca inventario, no numera nada, no aparece en ninguna métrica |
+| Mientras la solicitud sigue pendiente | Cada envío reemplaza a la anterior: vale el último. Una entrega vieja que llega tarde se descarta por `secuencia` |
+| Alguien la **acepta** en STOCKER | Nace la venta: con el local, el empleado y la caja de quien aprueba, cobrada en el momento o dejada a cobrar en la cuenta corriente |
+| Alguien la **rechaza** | Queda rechazada con su motivo. Nunca fue una venta |
+| El pedido avanza allá (`enviado`, `entregado`) | Se guarda ese estado y nada más: que el pedido siga su curso no es un cambio del pedido |
+| El pedido cambia DESPUÉS de aceptado | La venta no se toca. El cambio se anota y la pantalla lo muestra para que una persona resuelva |
+| Se cancela allá antes de revisarla | La solicitud queda cancelada y ya no se puede aceptar |
 
-Un pedido puede llegar varias veces con el mismo evento: ver *Idempotencia*.
+`evento` viaja y se guarda, pero STOCKER no decide por él: decide por el estado
+de la solicitud y por lo que trae el cuerpo. Un pedido puede llegar varias veces
+con el mismo evento: ver *Idempotencia*.
+
+### El stock, que es lo que más cambió
+
+STOCKER no aparta nada al recibir. Al aceptar, si no hay stock **avisa cuántas
+unidades faltan de cada artículo y no vende**; quien aprueba mira la percha y
+confirma. Recién ahí se dan de alta esas unidades y la venta se las lleva. Es el
+mismo camino que usa el mostrador cuando la percha tiene algo que el inventario
+no, y es lo esperable acá: el pedido mayorista se produce contra el pedido.
 
 ---
 
@@ -36,6 +48,13 @@ Content-Type: application/json
 ```
 
 - **Token**: uno solo, compartido, que identifica a ISUWAYA. Va en el header, nunca en la URL.
+  Lo emite el dueño desde STOCKER (`POST /api/integraciones` con `{"origen":"isuwaya"}`) y **se
+  muestra una sola vez**. Emitir uno nuevo apaga el anterior.
+- **El `businessId` NO sale del cuerpo**: sale del token. `negocioId` viaja y se ignora, a
+  propósito — si el negocio viniera de afuera, una credencial cualquiera podría escribirle ventas a
+  otro cliente de STOCKER. `STOCKER_NEGOCIO` queda sólo como referencia.
+- **La ruta cuelga de `/api`**: con `STOCKER_RUTA` por omisión, `STOCKER_URL` tiene que terminar en
+  `/api` (o poner `STOCKER_RUTA=/api/integraciones/isuwaya/pedidos`).
 - **Red**: el backend de STOCKER no tiene dominio público a propósito. Hay dos
   caminos y los dos funcionan con este contrato:
   1. **Mismo proyecto de Railway**: `STOCKER_URL=http://backend.railway.internal:PUERTO`.
@@ -137,8 +156,9 @@ El cuerpo de la respuesta no se usa: alcanza con el código.
 
 ## Idempotencia
 
-`(negocioId, plataforma, pedidoExterno)` identifica el pedido, igual que hoy con
-Mercado Libre y Jumpseller. El mismo evento puede llegar más de una vez —la cola
+`(negocio del token, origen, pedidoExterno)` identifica el pedido, y en STOCKER
+eso es un índice único de verdad, no un SELECT previo: dos entregas simultáneas
+del mismo pedido no pueden crear dos solicitudes. El mismo evento puede llegar más de una vez —la cola
 de ISUWAYA reintenta— y **no** tiene que descontar dos veces.
 
 `secuencia` crece en cada envío de ese pedido. Si llega una secuencia menor a la
@@ -155,7 +175,7 @@ volver a mandar el estado actual.
 |---|---|
 | `STOCKER_URL` | Base del backend. Sin barra final |
 | `STOCKER_TOKEN` | El token del header `Authorization` |
-| `STOCKER_NEGOCIO` | `businessId` del negocio en STOCKER |
+| `STOCKER_NEGOCIO` | Referencia nada más: STOCKER saca el negocio del token |
 | `STOCKER_RUTA` | Opcional. Por omisión `/integraciones/isuwaya/pedidos` |
 | `STOCKER_CADA_MS` | Opcional. Cada cuánto sale la cola (20 s) |
 | `STOCKER_TIMEOUT_MS` | Opcional. Cuánto espera cada llamada (15 s) |
