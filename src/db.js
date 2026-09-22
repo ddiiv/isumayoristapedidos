@@ -246,6 +246,36 @@ CREATE INDEX IF NOT EXISTS idx_eventos_visita ON eventos(visita, creado_en);
 -- la tabla entera, y es la que más crece de toda la base.
 CREATE INDEX IF NOT EXISTS idx_eventos_fecha  ON eventos(creado_en);
 
+/*
+ * Lo que hay que contarle a STOCKER, y todavía no se pudo.
+ *
+ * El pedido se confirma en ISUWAYA aunque STOCKER esté caído: el cliente ya
+ * apretó el botón y su pedido no puede depender de que otro sistema conteste.
+ * Así que cada cambio que le interesa a STOCKER —el alta, la confirmación con
+ * su forma de pago, el rearmado, el envío, la cancelación— se anota acá y se
+ * manda después, reintentando.
+ *
+ * Cada fila lleva el pedido ENTERO tal como quedó, no el cambio: reintentar es
+ * volver a mandar el estado actual, sin importar cuántas veces llegue ni en qué
+ * orden. La secuencia es el id de esta misma fila, y le sirve a STOCKER para
+ * descartar una entrega vieja que llegó tarde.
+ */
+CREATE TABLE IF NOT EXISTS stocker_cola (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  pedido_id   INTEGER NOT NULL REFERENCES pedidos(id) ON DELETE CASCADE,
+  numero      TEXT NOT NULL,
+  evento      TEXT NOT NULL,
+  cuerpo      TEXT NOT NULL,
+  estado      TEXT NOT NULL DEFAULT 'pendiente',
+  intentos    INTEGER NOT NULL DEFAULT 0,
+  ultimo_error TEXT,
+  creado_en   TEXT NOT NULL,
+  enviado_en  TEXT,
+  proximo_en  TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_stocker_cola ON stocker_cola(estado, proximo_en);
+CREATE INDEX IF NOT EXISTS idx_stocker_pedido ON stocker_cola(pedido_id, id);
+
 CREATE TABLE IF NOT EXISTS colores (
   id      INTEGER PRIMARY KEY AUTOINCREMENT,
   nombre  TEXT NOT NULL UNIQUE,
@@ -396,6 +426,17 @@ asegurarColumna('fotos', 'media', 'TEXT');
  */
 asegurarColumna('productos', 'creado_en', 'TEXT');
 asegurarColumna('productos', 'novedad', 'INTEGER');
+
+/*
+ * Cómo se pagó el pedido. Lo elige el administrador al confirmar el stock, que
+ * es cuando se sabe de verdad, y viaja a STOCKER para que la venta quede con su
+ * forma de pago y no como un cobro sin identificar.
+ */
+asegurarColumna('pedidos', 'pago_forma', 'TEXT');
+asegurarColumna('pedidos', 'pago_condicion', 'TEXT');
+// Cómo va la sincronización con STOCKER: pendiente | enviado | error | apagado.
+asegurarColumna('pedidos', 'stocker_estado', 'TEXT');
+asegurarColumna('pedidos', 'stocker_error', 'TEXT');
 
 /*
  * Desde cuándo se registran las altas. Lo anterior a esta fecha es "sin dato",

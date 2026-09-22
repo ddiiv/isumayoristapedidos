@@ -12,6 +12,7 @@ const whatsapp = require('./src/whatsapp');
 const { completarClientesDePedidos } = require('./src/clientes');
 const { comprimir } = require('./src/comprimir');
 const eventos = require('./src/eventos');
+const stocker = require('./src/stocker');
 
 const app = express();
 const PORT = Number(process.env.PORT) || 8080;
@@ -162,6 +163,13 @@ const server = app.listen(PORT, () => {
   const podar = () => { try { eventos.podar(); } catch (e) { console.error('  eventos:', e.message); } };
   podar();
   setInterval(podar, 24 * 60 * 60 * 1000).unref();
+
+  /*
+   * Los pedidos que STOCKER todavía no vio salen ahora: si el servicio estuvo
+   * caído, en la cola quedaron esperando (ver src/stocker.js).
+   */
+  console.log(`  stocker ${stocker.configurado() ? 'conectado' : 'sin configurar (los pedidos no se le mandan)'}`);
+  stocker.arrancar();
 });
 
 for (const senal of ['SIGTERM', 'SIGINT']) {

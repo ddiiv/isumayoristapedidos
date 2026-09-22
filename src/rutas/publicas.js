@@ -6,6 +6,7 @@ const { pdfPedido, pdfRotulo } = require('../pdf');
 const { avisarPedido, avisarCliente } = require('../notificaciones');
 const auth = require('../auth');
 const eventos = require('../eventos');
+const stocker = require('../stocker');
 
 const r = express.Router();
 
@@ -302,6 +303,19 @@ r.post('/pedidos', frenar(demasiadosPedidos), async (req, res, next) => {
     const avisos = { ...avisosNegocio, cliente: avisoCliente };
     db.prepare('UPDATE pedidos SET aviso_mail = ?, aviso_whatsapp = ?, aviso_cliente = ? WHERE id = ?')
       .run(avisos.mail, avisos.whatsapp, avisos.cliente, pedido.id);
+
+    /*
+     * Y a STOCKER, para que aparte el stock.
+     *
+     * Se anota en su cola y se manda en segundo plano: el pedido del cliente ya
+     * está guardado y no puede depender de que otro sistema conteste a tiempo.
+     * Si STOCKER está caído, la cola reintenta sola (ver src/stocker.js).
+     */
+    try {
+      stocker.anotar(db.prepare('SELECT * FROM pedidos WHERE id = ?').get(pedido.id), 'alta');
+    } catch (e) {
+      console.error('  stocker:', e.message);
+    }
 
     res.status(201).json({
       numero: pedido.numero,

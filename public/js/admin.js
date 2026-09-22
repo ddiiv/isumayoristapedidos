@@ -791,6 +791,29 @@ function vistaStockPedido() {
         <label for="st-nota">Nota para el cliente <span class="apagado">(opcional, le llega en el mail)</span></label>
         <input id="st-nota" value="${esc(e.nota || '')}" placeholder="Lo que faltaba entra la semana que viene; si lo querés, avisanos.">
       </div>
+      <!--
+        Cómo se pagó: se elige acá porque es el momento en que se sabe. El
+        cliente pide sin pagar y la forma se acuerda al coordinar. Viaja a
+        STOCKER para que la venta quede con su forma de pago.
+      -->
+      <div class="campos">
+        <div class="campo">
+          <label for="st-pago">Cómo se pagó <span class="apagado">(va a STOCKER)</span></label>
+          <input id="st-pago" list="formas-de-pago" value="${esc(e.pagoForma || '')}" placeholder="Transferencia">
+          <datalist id="formas-de-pago">
+            ${['Transferencia', 'Efectivo', 'Depósito bancario', 'Cheque', 'Mercado Pago', 'Cuenta corriente']
+              .map((f) => `<option value="${f}">`).join('')}
+          </datalist>
+        </div>
+        <div class="campo">
+          <label for="st-condicion">Condición</label>
+          <select id="st-condicion">
+            <option value="contado"${e.pagoCondicion === 'cuenta_corriente' || e.pagoCondicion === 'financiado' ? '' : ' selected'}>Contado</option>
+            <option value="cuenta_corriente"${e.pagoCondicion === 'cuenta_corriente' ? ' selected' : ''}>Cuenta corriente</option>
+            <option value="financiado"${e.pagoCondicion === 'financiado' ? ' selected' : ''}>Financiado</option>
+          </select>
+        </div>
+      </div>
       <div class="acciones">
         <button class="btn" id="st-confirmar" data-confirmar-stock>Confirmar</button>
         <button class="btn borde" data-stock-editor>Cambiar artículos o precio</button>
@@ -840,6 +863,8 @@ function leerStock() {
     vista.stock.hay[i.dataset.stockSku] = Math.min(Number(i.dataset.pedido), Math.max(0, Math.trunc(Number(i.value) || 0)));
   }
   vista.stock.nota = el('#st-nota')?.value || '';
+  vista.stock.pagoForma = el('#st-pago')?.value || '';
+  vista.stock.pagoCondicion = el('#st-condicion')?.value || 'contado';
 }
 
 function vistaEditorPedido() {
@@ -1469,7 +1494,37 @@ function vistaAvisos() {
       ${corte}`;
   }
 
+  const s = datos.avisos.stocker || { configurado: false, falta: [] };
+  /*
+   * STOCKER: qué pasó con los pedidos que se le mandaron.
+   *
+   * El pedido del cliente se guarda igual aunque STOCKER esté caído, así que
+   * esta tarjeta es el único lugar donde se ve que algo quedó sin sincronizar.
+   */
+  const tarjetaStocker = `
+    <div class="tarjeta">
+      <h3>STOCKER <span class="pastilla ${s.configurado ? (s.conError ? 'aviso' : 'si') : 'no'}">${
+        s.configurado ? (s.conError ? `${s.conError} con error` : 'conectado') : 'sin configurar'}</span></h3>
+      ${s.configurado
+        ? `<p class="sub">Los pedidos se mandan a <b>${esc(s.destino)}</b> (negocio ${esc(String(s.negocio))}).
+             Al confirmarlos, STOCKER aparta el stock; al marcarlos enviados, lo descuenta.</p>
+           <div class="tarjetas-numero">
+             <div><span>ENVIADOS</span><b>${s.enviados}</b></div>
+             <div class="${s.pendientes ? 'ambar' : ''}"><span>ESPERANDO</span><b>${s.pendientes}</b></div>
+             <div class="${s.conError ? 'rojo' : ''}"><span>CON ERROR</span><b>${s.conError}</b></div>
+           </div>
+           ${s.ultimoError ? `<p class="mensaje error">Último error, en ${esc(s.ultimoError.numero)} tras
+             ${s.ultimoError.intentos} intentos: ${esc(String(s.ultimoError.ultimo_error || '').slice(0, 200))}</p>` : ''}
+           <div class="acciones">
+             <button class="btn borde" data-stocker-reintentar>Reintentar los que no salieron</button>
+           </div>`
+        : `<p class="mensaje info">Los pedidos no se le mandan a STOCKER: falta cargar
+             ${esc((s.falta || []).join(', ') || 'la configuración')} en las variables del servidor.
+             El portal funciona igual, pero el stock hay que descontarlo a mano.</p>`}
+    </div>`;
+
   return `
+    ${tarjetaStocker}
     <div class="tarjeta">
       <h3>Mail</h3>
       ${mail.configurado
@@ -2074,6 +2129,17 @@ raiz.addEventListener('click', (e) => conError(async () => {
     pintar();
     return;
   }
+  if (t.closest('[data-stocker-reintentar]')) {
+    const r = await api('/stocker/reintentar', { method: 'POST', body: JSON.stringify({}) });
+    await cargarAvisos();
+    mensaje(r.mandados
+      ? `${r.mandados} pedido${r.mandados === 1 ? '' : 's'} salieron para STOCKER.`
+      : `Se volvieron a poner en la fila ${r.reencolados}. Ninguno salió todavía: ${r.fallados} siguen fallando.`,
+    r.fallados ? 'info' : 'ok');
+    pintar();
+    return;
+  }
+
   if (t.closest('[data-confirmar-stock]')) {
     leerStock();
     const numero = vista.stock.numero;
@@ -2081,7 +2147,12 @@ raiz.addEventListener('click', (e) => conError(async () => {
     // Con cambios le llega al cliente un pedido distinto del que hizo: se pregunta antes.
     if (faltan && !window.confirm(`¿Confirmar ${numero} con los cambios y avisarle al cliente cómo queda?`)) return;
     const r = await api(`/pedidos/${encodeURIComponent(numero)}/confirmar-stock`, {
-      method: 'PUT', body: JSON.stringify({ disponibles: vista.stock.hay, nota: vista.stock.nota }),
+      method: 'PUT',
+      body: JSON.stringify({
+        disponibles: vista.stock.hay,
+        nota: vista.stock.nota,
+        pago: { forma: vista.stock.pagoForma, condicion: vista.stock.pagoCondicion },
+      }),
     });
     vista.stock = null;
     await cargar();

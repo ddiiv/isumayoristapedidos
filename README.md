@@ -439,6 +439,41 @@ una etiquetadora térmica no sale un rectángulo negro.
 
 ---
 
+## STOCKER: apartar y descontar el stock
+
+Los pedidos de ISUWAYA van a STOCKER, que es donde vive el stock y donde se
+registran las ventas. El circuito es el mismo que STOCKER ya usa con Mercado
+Libre y Jumpseller:
+
+1. **El cliente confirma el pedido** → STOCKER lo encola y **aparta** el stock.
+   La mercadería queda comprometida y ningún otro canal la vende.
+2. **Se coordina con el cliente y se confirma el stock** → en esa misma pantalla
+   se elige **cómo se pagó** (es el momento en que se sabe de verdad), y eso
+   viaja a STOCKER para que la venta quede con su forma de pago y su cliente.
+3. **Se marca enviado** → STOCKER **descuenta** el stock definitivamente.
+
+Cancelar libera lo apartado, y rearmar el pedido por faltantes ajusta lo que
+quedó comprometido.
+
+**El pedido del cliente no depende de STOCKER.** Si STOCKER está caído, el
+pedido se guarda y se atiende igual: cada cambio queda en una cola
+(`stocker_cola`) que reintenta sola, esperando cada vez un poco más, hasta un
+día y medio. Un cuerpo que STOCKER rechaza con 4xx no se reintenta para siempre:
+queda en error, se ve en el panel → **Avisos** y hay un botón para volver a
+mandarlo. Cada envío lleva el pedido entero, así que reintentar es volver a
+mandar el estado actual: no importa cuántas veces llegue ni en qué orden.
+
+La traducción que hace ISUWAYA: el pedido guarda el SKU del producto padre con
+el detalle por color y talle, y STOCKER descuenta por **SKU de variante**. Esa
+resolución se hace contra el catálogo —que salió de la misma planilla de
+STOCKER— al momento de mandar.
+
+El contrato completo (campos, largos, eventos, idempotencia y las dos formas de
+conectar en Railway) está en **`INTEGRACION-STOCKER.md`**, escrito para el lado
+de STOCKER.
+
+---
+
 ## La medición del tráfico
 
 Qué se mira en la tienda, para poder ordenar el catálogo con eso en vez de a mano.

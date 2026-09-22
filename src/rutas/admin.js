@@ -12,6 +12,7 @@ const { pdfPedido } = require('../pdf');
 const { avisarCliente } = require('../notificaciones');
 const whatsapp = require('../whatsapp');
 const eventos = require('../eventos');
+const stocker = require('../stocker');
 const { seVeEnCuenta } = require('../clientes');
 const { importarPlanilla } = require('../excel');
 const { ordenarCatalogo } = require('../normalizar');
@@ -1129,6 +1130,34 @@ const conErrores = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next
 const EDITABLES = ['pendiente', 'confirmado', 'modificado'];
 
 /*
+ * Cómo se pagó, elegido al confirmar.
+ *
+ * Es el único momento en que se sabe de verdad: el cliente pide sin pagar y la
+ * forma se acuerda al coordinar. Viaja a STOCKER para que la venta quede con su
+ * forma de pago y no como un cobro sin identificar.
+ */
+function guardarPago(pedidoId, pago) {
+  if (!pago || typeof pago !== 'object') return null;
+  const forma = String(pago.forma ?? '').trim().slice(0, 60) || null;
+  const condicion = String(pago.condicion ?? '').trim().slice(0, 20).toLowerCase() || null;
+  if (condicion && !['contado', 'cuenta_corriente', 'financiado'].includes(condicion)) {
+    return { error: 'La condición de pago es contado, cuenta_corriente o financiado.' };
+  }
+  db.prepare('UPDATE pedidos SET pago_forma = ?, pago_condicion = ? WHERE id = ?')
+    .run(forma, condicion, pedidoId);
+  return { forma, condicion };
+}
+
+/** Le cuenta a STOCKER cómo quedó el pedido. Nunca voltea la respuesta del panel. */
+function avisarAStocker(pedidoId, evento) {
+  try {
+    stocker.anotar(db.prepare('SELECT * FROM pedidos WHERE id = ?').get(pedidoId), evento);
+  } catch (e) {
+    console.error('  stocker:', e.message);
+  }
+}
+
+/*
  * Avisarle al cliente lo que cambió en su pedido.
  *
  * Sólo los pasos que cambian lo que va a recibir: que se confirmó el stock, que
@@ -1169,7 +1198,15 @@ r.put('/pedidos/:numero/estado', conErrores(async (req, res) => {
     });
   }
 
+  const pago = guardarPago(fila.id, req.body?.pago);
+  if (pago?.error) return res.status(400).json({ message: pago.error });
+
   registrarEstado(fila.id, destino, { nota: limpiarNota(req.body?.nota) });
+  /*
+   * A STOCKER: "enviado" es lo que le dice que despache —ahí egresa el stock de
+   * verdad— y "cancelado" lo que libera lo apartado.
+   */
+  avisarAStocker(fila.id, destino);
   const avisoCliente = await avisarClienteDelCambio(fila.numero, destino, limpiarNota(req.body?.nota));
   res.json({ pedido: conSeguimiento(leerPedido(fila.numero)), avisoCliente });
 }));
@@ -1360,6 +1397,9 @@ r.put('/pedidos/:numero/confirmar-stock', conErrores(async (req, res) => {
     }
   }
 
+  const pago = guardarPago(fila.id, req.body?.pago);
+  if (pago?.error) return res.status(400).json({ message: pago.error });
+
   const hay = (sku) => (Object.prototype.hasOwnProperty.call(disponibles, sku) ? Number(disponibles[sku]) : pedidos.get(sku).cantidad);
   const faltaAlgo = [...pedidos.keys()].some((sku) => hay(sku) < pedidos.get(sku).cantidad);
   const nota = limpiarNota(req.body?.nota);
@@ -1367,6 +1407,7 @@ r.put('/pedidos/:numero/confirmar-stock', conErrores(async (req, res) => {
   // Hay de todo y todo se puede volver a valorizar: se confirma tal cual, sin rearmar nada.
   if (!faltaAlgo && !huerfanos) {
     registrarEstado(fila.id, 'confirmado', { nota: nota || 'Confirmamos el stock de todo lo que pediste.' });
+    avisarAStocker(fila.id, 'confirmado');
     const avisoCliente = await avisarClienteDelCambio(fila.numero, 'confirmado', nota);
     return res.json({ pedido: conSeguimiento(leerPedido(fila.numero)), conCambios: false, avisoCliente });
   }
@@ -1388,6 +1429,8 @@ r.put('/pedidos/:numero/confirmar-stock', conErrores(async (req, res) => {
     notaPorDefecto: 'Revisamos el stock y no teníamos todo: ajustamos el pedido con lo que hay.',
   });
   if (rearmado.error) return res.status(400).json({ message: rearmado.error });
+  // Lo apartado en STOCKER ya no coincide con lo que va a salir: se le manda el pedido rearmado.
+  avisarAStocker(fila.id, 'modificado');
   const avisoCliente = await avisarClienteDelCambio(fila.numero, 'confirmado-con-cambios', nota, rearmado.cambios);
   res.json({ pedido: conSeguimiento(leerPedido(fila.numero)), conCambios: true, cambios: rearmado.cambios, avisoCliente });
 }));
@@ -1826,7 +1869,24 @@ const estadoDelMail = () => ({
   destino: process.env.PEDIDOS_EMAIL || null,
 });
 
-r.get('/avisos', (req, res) => res.json({ whatsapp: whatsapp.estadoPublico(), mail: estadoDelMail() }));
+r.get('/avisos', (req, res) => res.json({
+  whatsapp: whatsapp.estadoPublico(),
+  mail: estadoDelMail(),
+  stocker: stocker.estadoPublico(),
+}));
+
+/*
+ * POST /api/admin/stocker/reintentar
+ *
+ * Vuelve a poner en la fila lo que quedó en error. Sin esto, un pedido que
+ * falló doce veces se queda afuera para siempre y hay que tocarle la base.
+ */
+r.post('/stocker/reintentar', conErrores(async (req, res) => {
+  const numero = req.body?.numero ? String(req.body.numero).trim() : null;
+  const reencolados = stocker.reintentar(numero);
+  const resultado = await stocker.procesarCola();
+  res.json({ reencolados, ...resultado, stocker: stocker.estadoPublico() });
+}));
 r.post('/whatsapp/vincular', conAviso(async (req, res) => res.json(await whatsapp.vincular())));
 r.post('/whatsapp/desvincular', conAviso(async (req, res) => res.json(await whatsapp.desvincular())));
 r.get('/whatsapp/grupos', conAviso(async (req, res) => res.json({ grupos: await whatsapp.grupos() })));
