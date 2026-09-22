@@ -167,6 +167,24 @@ function armarDatos() {
   chk('y se puede volver a poner en la fila', 1, stocker.reintentar('ISU-000777'));
   rechazador.kill();
 
+  tit('5b. EL 404 VIENE CON LA PISTA DE POR QUÉ');
+  /*
+   * La ruta de STOCKER cuelga de /api y la dirección configurada casi siempre
+   * se pone sin él: es el primer error que aparece al conectar esto. El panel
+   * lo dice en vez de dejar a alguien media hora mirando logs.
+   */
+  const cuatrocientosCuatro = spawn(process.execPath, [path.join(__dirname, 'stocker-de-prueba.cjs'), String(PUERTO), CARPETA], {
+    env: { ...process.env, TOKEN: 'token-de-prueba', FALLAR: '404' }, stdio: 'ignore',
+  });
+  await esperar(600);
+  db.prepare(`UPDATE pedidos SET estado = 'cancelado' WHERE id = ?`).run(pedido.id);
+  stocker.anotar(db.prepare('SELECT * FROM pedidos WHERE id = ?').get(pedido.id), 'cancelado');
+  await stocker.procesarCola();
+  chk('la pista habla del /api', true, /\/api/.test(stocker.estadoPublico().pista || ''));
+  chk('y no dice a dónde se manda', false, (stocker.estadoPublico().pista || '').includes(String(PUERTO)));
+  cuatrocientosCuatro.kill();
+  await esperar(200);
+
   tit('6. NI LA DIRECCIÓN DE STOCKER NI EL NEGOCIO SALEN DEL SERVIDOR');
   /*
    * El panel se abre desde cualquier computadora y termina en capturas de

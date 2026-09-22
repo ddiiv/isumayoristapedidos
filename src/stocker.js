@@ -4,14 +4,18 @@ const { db } = require('./db');
  * Lo que ISUWAYA le cuenta a STOCKER.
  *
  * STOCKER es el sistema de stock y ventas del negocio; ISUWAYA es el catálogo
- * mayorista donde el cliente arma el pedido. El circuito es el mismo que STOCKER
- * ya tiene para Mercado Libre y Jumpseller:
+ * mayorista donde el cliente arma el pedido:
  *
- *   1. El cliente confirma el pedido acá  → STOCKER lo encola y APARTA el stock.
- *      La mercadería queda comprometida y nadie más la vende.
- *   2. Se coordina con el cliente, se confirma el stock y se elige cómo pagó.
- *   3. El pedido sale  → STOCKER lo despacha: ahí recién EGRESA el stock, con
- *      su cliente y su forma de pago.
+ *   1. El cliente confirma el pedido acá  → allá se abre una SOLICITUD
+ *      mayorista "por revisar". No toca inventario ni numera nada.
+ *   2. Se coordina con el cliente, se confirma el stock y se elige cómo pagó:
+ *      cada envío reemplaza al anterior mientras la solicitud siga pendiente.
+ *   3. Alguien la ACEPTA en STOCKER  → ahí nace la venta, con su cliente y su
+ *      forma de pago, y ahí se resuelve el stock. Un pedido mayorista se
+ *      produce contra el pedido, así que quien aprueba mira la percha.
+ *
+ * Lo que decide es el estado de la solicitud allá, no el evento que mandamos:
+ * acá se informa lo que pasó y del otro lado una persona resuelve.
  *
  * ── Por qué una cola y no una llamada directa ──────────────────────
  *
@@ -37,8 +41,13 @@ const CADA = Number(process.env.STOCKER_CADA_MS) || 20_000;
 const TOPE_INTENTOS = 12;      // con la espera creciente, son casi dos días de reintentos
 const TOPE_POR_VUELTA = 20;
 
-/** Sin las tres variables no hay a dónde mandar: la integración queda apagada. */
-const configurado = () => Boolean(URL_BASE && TOKEN && NEGOCIO);
+/*
+ * Con la dirección y el token alcanza: STOCKER saca de su token a qué negocio
+ * entra el pedido. `STOCKER_NEGOCIO` viaja como referencia y allá se ignora —si
+ * el negocio viniera de afuera, una credencial cualquiera podría escribirle
+ * ventas a otro cliente de STOCKER—.
+ */
+const configurado = () => Boolean(URL_BASE && TOKEN);
 
 const EVENTOS = ['alta', 'confirmado', 'modificado', 'enviado', 'entregado', 'cancelado'];
 
@@ -325,9 +334,7 @@ function estadoPublico() {
   if (!configurado()) {
     return {
       configurado: false,
-      falta: ['STOCKER_URL', 'STOCKER_TOKEN', 'STOCKER_NEGOCIO'].filter(
-        (v) => !process.env[v],
-      ),
+      falta: ['STOCKER_URL', 'STOCKER_TOKEN'].filter((v) => !process.env[v]),
     };
   }
   const por = db.prepare(`SELECT estado, COUNT(*) n FROM stocker_cola GROUP BY estado`).all();
@@ -350,6 +357,15 @@ function estadoPublico() {
     conError: cuenta.error || 0,
     ultimoError: ultimoError
       ? { ...ultimoError, ultimo_error: sinDireccion(ultimoError.ultimo_error) }
+      : null,
+    /*
+     * El 404 es el error más probable al configurar esto, y el motivo es casi
+     * siempre el mismo: la ruta de STOCKER cuelga de /api y la dirección no lo
+     * incluye. Decirlo acá ahorra la media hora de mirar logs, sin revelar a
+     * dónde se manda.
+     */
+    pista: /^404/.test(String(ultimoError?.ultimo_error || ''))
+      ? 'STOCKER contesta que esa ruta no existe. Con la ruta por omisión, la dirección configurada tiene que terminar en /api.'
       : null,
   };
 }

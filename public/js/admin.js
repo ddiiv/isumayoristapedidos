@@ -1506,7 +1506,8 @@ function vistaAvisos() {
       <h3>STOCKER <span class="pastilla ${s.configurado ? (s.conError ? 'aviso' : 'si') : 'no'}">${
         s.configurado ? (s.conError ? `${s.conError} con error` : 'conectado') : 'sin configurar'}</span></h3>
       ${s.configurado
-        ? `<p class="sub">Al confirmar un pedido, STOCKER aparta el stock; al marcarlo enviado, lo descuenta.
+        ? `<p class="sub">Cuando un cliente confirma un pedido, en STOCKER se abre una solicitud mayorista
+             para revisar; cada cambio de acá la actualiza. La venta nace allá cuando alguien la acepta.
              A dónde se manda no se muestra acá a propósito: está en las variables del servidor.</p>
            <div class="tarjetas-numero">
              <div><span>ENVIADOS</span><b>${s.enviados}</b></div>
@@ -1514,7 +1515,8 @@ function vistaAvisos() {
              <div class="${s.conError ? 'rojo' : ''}"><span>CON ERROR</span><b>${s.conError}</b></div>
            </div>
            ${s.ultimoError ? `<p class="mensaje error">Último error, en ${esc(s.ultimoError.numero)} tras
-             ${s.ultimoError.intentos} intentos: ${esc(String(s.ultimoError.ultimo_error || '').slice(0, 200))}</p>` : ''}
+             ${s.ultimoError.intentos} intentos: ${esc(String(s.ultimoError.ultimo_error || '').slice(0, 200))}
+             ${s.pista ? `<br><b>${esc(s.pista)}</b>` : ''}</p>` : ''}
            <div class="acciones">
              <button class="btn borde" data-stocker-reintentar>Reintentar los que no salieron</button>
            </div>`

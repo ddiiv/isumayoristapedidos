@@ -439,21 +439,25 @@ una etiquetadora térmica no sale un rectángulo negro.
 
 ---
 
-## STOCKER: apartar y descontar el stock
+## STOCKER: del pedido a la venta
 
 Los pedidos de ISUWAYA van a STOCKER, que es donde vive el stock y donde se
-registran las ventas. El circuito es el mismo que STOCKER ya usa con Mercado
-Libre y Jumpseller:
+registran las ventas.
 
-1. **El cliente confirma el pedido** → STOCKER lo encola y **aparta** el stock.
-   La mercadería queda comprometida y ningún otro canal la vende.
-2. **Se coordina con el cliente y se confirma el stock** → en esa misma pantalla
-   se elige **cómo se pagó** (es el momento en que se sabe de verdad), y eso
-   viaja a STOCKER para que la venta quede con su forma de pago y su cliente.
-3. **Se marca enviado** → STOCKER **descuenta** el stock definitivamente.
+1. **El cliente confirma el pedido** → en STOCKER se abre una **solicitud
+   mayorista** en estado *por revisar*. No toca inventario ni numera nada: un
+   pedido mayorista se produce contra el pedido, así que no hay nada que apartar.
+2. **Se coordina con el cliente y se confirma el stock** → en esa pantalla se
+   elige **cómo se pagó**, que es el momento en que se sabe. Mientras la
+   solicitud siga pendiente, cada cambio de acá la reemplaza: vale el último.
+3. **Alguien la acepta en STOCKER** → ahí nace la venta, con su cliente y su
+   forma de pago, cobrada o dejada en cuenta corriente. Si falta stock, STOCKER
+   avisa cuántas unidades faltan y no vende hasta que quien aprueba lo confirme
+   mirando la percha.
 
-Cancelar libera lo apartado, y rearmar el pedido por faltantes ajusta lo que
-quedó comprometido.
+Cancelar antes de que la revisen deja la solicitud cancelada. Si el pedido
+cambia después de aceptado, la venta no se toca: el cambio se anota allá para
+que una persona lo resuelva.
 
 **El pedido del cliente no depende de STOCKER.** Si STOCKER está caído, el
 pedido se guarda y se atiende igual: cada cambio queda en una cola
@@ -464,13 +468,22 @@ mandarlo. Cada envío lleva el pedido entero, así que reintentar es volver a
 mandar el estado actual: no importa cuántas veces llegue ni en qué orden.
 
 La traducción que hace ISUWAYA: el pedido guarda el SKU del producto padre con
-el detalle por color y talle, y STOCKER descuenta por **SKU de variante**. Esa
+el detalle por color y talle, y STOCKER trabaja por **SKU de variante**. Esa
 resolución se hace contra el catálogo —que salió de la misma planilla de
 STOCKER— al momento de mandar.
 
-El contrato completo (campos, largos, eventos, idempotencia y las dos formas de
-conectar en Railway) está en **`INTEGRACION-STOCKER.md`**, escrito para el lado
-de STOCKER.
+**Lo que no se muestra en el panel**: ni la dirección de STOCKER ni el número de
+negocio. El panel se abre desde cualquier computadora y termina en capturas de
+pantalla, y el backend de STOCKER no tiene dominio público justamente para que
+no se sepa dónde golpear. Cualquier dirección que aparezca dentro de un mensaje
+de error se reemplaza por la palabra STOCKER antes de guardarla.
+
+**Ojo con el `/api`**: la ruta de STOCKER cuelga de ahí, así que `STOCKER_URL`
+tiene que terminar en `/api` (o hay que poner la ruta completa en
+`STOCKER_RUTA`). Si no, STOCKER contesta 404 y el panel lo dice con esa pista.
+
+El contrato completo —campos, largos, eventos, idempotencia y las dos formas de
+conectar en Railway— está en **`INTEGRACION-STOCKER.md`**.
 
 ---
 

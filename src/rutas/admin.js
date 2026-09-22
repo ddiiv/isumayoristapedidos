@@ -1203,8 +1203,9 @@ r.put('/pedidos/:numero/estado', conErrores(async (req, res) => {
 
   registrarEstado(fila.id, destino, { nota: limpiarNota(req.body?.nota) });
   /*
-   * A STOCKER: "enviado" es lo que le dice que despache —ahí egresa el stock de
-   * verdad— y "cancelado" lo que libera lo apartado.
+   * A STOCKER: mientras la solicitud siga por revisar, cada cambio la reemplaza.
+   * Cancelar antes de que la revisen la deja cancelada y ya no se puede aceptar;
+   * después de aceptada, el cambio se anota allá para que una persona resuelva.
    */
   avisarAStocker(fila.id, destino);
   const avisoCliente = await avisarClienteDelCambio(fila.numero, destino, limpiarNota(req.body?.nota));
