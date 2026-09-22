@@ -25,7 +25,7 @@ process.env.STOCKER_TOKEN = 'token-de-prueba';
 process.env.STOCKER_NEGOCIO = '7';
 process.env.STOCKER_CADA_MS = '3600000';   // el repartidor automático no corre durante la prueba
 
-const { db } = require('../src/db');
+const { db, registrarEstado } = require('../src/db');
 const stocker = require('../src/stocker');
 
 let ok = 0, ko = 0;
@@ -207,6 +207,128 @@ function armarDatos() {
   chk('el error guardado del 400 no tiene dirección', false,
     String(db.prepare(`SELECT ultimo_error FROM stocker_cola WHERE evento = 'entregado'`).get().ultimo_error)
       .includes(String(PUERTO)));
+
+  tit('7. LA VUELTA: QUÉ HIZO STOCKER CON CADA PEDIDO');
+  // Las secciones anteriores probaron caídas y se quedaron sin servidor.
+  const queContesta = spawn(process.execPath, [path.join(__dirname, 'stocker-de-prueba.cjs'), String(PUERTO), CARPETA], {
+    env: { ...process.env, TOKEN: 'token-de-prueba' }, stdio: 'ignore',
+  });
+  await esperar(600);
+  /*
+   * STOCKER no avisa: se le pregunta. Si este lado se cae no se pierde nada,
+   * porque el cursor queda guardado y al volver se pregunta desde ahí.
+   */
+  const nuevoPedido = (numero, estado = 'pendiente') => {
+    const cliente = JSON.parse(db.prepare(`SELECT cliente FROM pedidos WHERE numero = 'ISU-000777'`).get().cliente);
+    const items = db.prepare(`SELECT items FROM pedidos WHERE numero = 'ISU-000777'`).get().items;
+    db.prepare(`INSERT INTO pedidos (numero, cliente, items, total, unidades, estado, creado_en)
+                VALUES (?, ?, ?, 28500, 3, ?, ?)`)
+      .run(numero, JSON.stringify(cliente), items, estado, new Date().toISOString());
+    return db.prepare('SELECT * FROM pedidos WHERE numero = ?').get(numero);
+  };
+  const escribirResoluciones = (cuerpo) => fs.writeFileSync(
+    path.join(CARPETA, '_resoluciones.json'), JSON.stringify(cuerpo),
+  );
+  const estadoDe = (numero) => db.prepare('SELECT * FROM pedidos WHERE numero = ?').get(numero);
+
+  nuevoPedido('ISU-000800');
+  nuevoPedido('ISU-000801');
+  nuevoPedido('ISU-000802', 'enviado');
+  escribirResoluciones({
+    resoluciones: [
+      {
+        pedidoExterno: 'ISU-000800', estado: 'aceptada', motivo: null,
+        revisadoEn: '2026-09-22T12:00:00.000Z',
+        venta: { numero: 'V-2026-09-000123', total: 28500, condicionPago: 'cuenta_corriente', estado: 'pendiente' },
+      },
+      {
+        pedidoExterno: 'ISU-000801', estado: 'rechazada',
+        motivo: 'No hay tela para esa curva hasta el mes que viene.',
+        revisadoEn: '2026-09-22T12:05:00.000Z', venta: null,
+      },
+    ],
+    hasta: '2026-09-22T12:05:00.000Z',
+  });
+
+  const vuelta = await stocker.traerResoluciones();
+  chk('se aplican las dos resoluciones', 2, vuelta.aplicadas);
+  chk('el aceptado queda confirmado y con su número de venta',
+    ['confirmado', 'V-2026-09-000123'],
+    [estadoDe('ISU-000800').estado, estadoDe('ISU-000800').stocker_venta]);
+  chk('el rechazado queda cancelado', 'cancelado', estadoDe('ISU-000801').estado);
+  chk('y el motivo le queda al cliente en el seguimiento', true,
+    String(db.prepare(`SELECT nota FROM pedido_estados WHERE pedido_id = ? ORDER BY id DESC`)
+      .get(estadoDe('ISU-000801').id).nota).includes('tela'));
+  chk('la condición de pago se cuenta en la nota', true,
+    String(db.prepare(`SELECT nota FROM pedido_estados WHERE pedido_id = ? ORDER BY id DESC`)
+      .get(estadoDe('ISU-000800').id).nota).toLowerCase().includes('cuenta corriente'));
+
+  /*
+   * La misma resolución vuelve en cada vuelta hasta que el cursor avanza, y
+   * mientras tanto el pedido sigue su vida acá: el panel lo rearma porque
+   * faltó una talle y queda "modificado". Sin la marca de que ya se aplicó, la
+   * resolución vieja lo devolvería a "confirmado" y borraría el rearmado.
+   */
+  registrarEstado(estadoDe('ISU-000800').id, 'modificado', { nota: 'Rearmado: no había M' });
+  await stocker.traerResoluciones();
+  chk('una resolución ya aplicada no pisa lo que pasó después', 'modificado',
+    estadoDe('ISU-000800').estado);
+
+  chk('el cursor viaja en la segunda pregunta', true,
+    fs.readFileSync(path.join(CARPETA, '_gets.log'), 'utf8').split('\n')
+      .filter(Boolean).at(-1).includes('desde=2026-09-22T12%3A05'));
+
+  /*
+   * Un pedido que acá ya salió no vuelve atrás porque STOCKER lo rechace: la
+   * mercadería está en el camión. Queda anotado y alguien lo mira.
+   */
+  escribirResoluciones({
+    resoluciones: [{
+      pedidoExterno: 'ISU-000802', estado: 'rechazada', motivo: 'Tarde',
+      revisadoEn: '2026-09-22T13:00:00.000Z', venta: null,
+    }],
+    hasta: '2026-09-22T13:00:00.000Z',
+  });
+  await stocker.traerResoluciones();
+  chk('lo que ya salió no vuelve atrás', 'enviado', estadoDe('ISU-000802').estado);
+  chk('pero queda anotado que STOCKER lo resolvió', true,
+    Boolean(estadoDe('ISU-000802').stocker_resuelto_en));
+
+  tit('8. LOS PRECIOS LOS MANDA STOCKER');
+  /*
+   * El catálogo de acá salió de una exportación: sin esto, se cambia el precio
+   * allá y el cliente sigue armando el pedido con el viejo.
+   */
+  fs.writeFileSync(path.join(CARPETA, '_precios.json'), JSON.stringify({
+    precios: [
+      { sku: 'ISUPRU-NEG-M', skuAgrupador: 'ISUPRU', precio: 11800, precioMinorista: 15000, activo: true },
+      { sku: 'NO-ESTA-ACA', skuAgrupador: 'OTRO', precio: 5000, activo: true },
+    ],
+    generadoEn: '2026-09-22T14:00:00.000Z',
+  }));
+
+  const sync = await stocker.sincronizarPrecios();
+  chk('el precio de la variante se actualiza', 11800,
+    db.prepare(`SELECT precio FROM variantes WHERE sku = 'ISUPRU-NEG-M'`).get().precio);
+  chk('un SKU que no está en el catálogo de acá no rompe', [1, 1, 2],
+    [sync.actualizados, sync.sinCatalogo, sync.recibidos]);
+
+  const sinCambios = await stocker.sincronizarPrecios();
+  chk('correrlo de nuevo no reescribe lo que ya está igual', 0, sinCambios.actualizados);
+  chk('y el cursor de precios queda guardado', true,
+    fs.readFileSync(path.join(CARPETA, '_gets.log'), 'utf8').includes('precios?desde=2026-09-22T14%3A00'));
+
+  /*
+   * Que la vuelta falle en silencio es peor que la ida fallando: los pedidos
+   * salen igual y nadie se entera de que ya hay una respuesta esperando.
+   */
+  queContesta.kill();
+  await esperar(200);
+  await stocker.traerResoluciones().catch(() => {});
+  const conVueltaCaida = stocker.estadoPublico();
+  chk('si la vuelta falla, el panel lo dice', true, Boolean(conVueltaCaida.vuelta));
+  chk('y tampoco ahí sale la dirección', false,
+    JSON.stringify(conVueltaCaida).includes(String(PUERTO)));
 
   console.log(`\n\x1b[1m─────────────────────────────\x1b[0m\n  \x1b[32mPasaron: ${ok}\x1b[0m   \x1b[31mFallaron: ${ko}\x1b[0m`);
   fs.rmSync(CARPETA, { recursive: true, force: true });

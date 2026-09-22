@@ -437,6 +437,18 @@ asegurarColumna('pedidos', 'pago_condicion', 'TEXT');
 // Cómo va la sincronización con STOCKER: pendiente | enviado | error | apagado.
 asegurarColumna('pedidos', 'stocker_estado', 'TEXT');
 asegurarColumna('pedidos', 'stocker_error', 'TEXT');
+/*
+ * Lo que STOCKER resolvió con este pedido.
+ *
+ * `stocker_venta` es el número de la venta que quedó registrada allá: es el
+ * dato que se busca cuando el cliente llama por una factura o un remito, y sin
+ * él hay que cruzar dos sistemas a ojo.
+ *
+ * `stocker_resuelto_en` es la marca de que la resolución ya se aplicó acá, para
+ * no volver a mover el estado del pedido en cada vuelta del reloj.
+ */
+asegurarColumna('pedidos', 'stocker_venta', 'TEXT');
+asegurarColumna('pedidos', 'stocker_resuelto_en', 'TEXT');
 
 /*
  * Desde cuándo se registran las altas. Lo anterior a esta fecha es "sin dato",

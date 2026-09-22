@@ -1,4 +1,6 @@
-const { db } = require('./db');
+const {
+  db, leerConfig, guardarConfig, normalizarEstado, puedePasar, registrarEstado,
+} = require('./db');
 
 /*
  * Lo que ISUWAYA le cuenta a STOCKER.
@@ -36,6 +38,14 @@ const URL_BASE = (process.env.STOCKER_URL || '').replace(/\/+$/, '');
 const TOKEN = process.env.STOCKER_TOKEN || '';
 const NEGOCIO = Number(process.env.STOCKER_NEGOCIO) || null;
 const RUTA = process.env.STOCKER_RUTA || '/integraciones/isuwaya/pedidos';
+const RUTA_RESOLUCIONES = process.env.STOCKER_RUTA_RESOLUCIONES
+  || `${RUTA.replace(/\/pedidos$/, '')}/pedidos/resoluciones`;
+const RUTA_PRECIOS = process.env.STOCKER_RUTA_PRECIOS
+  || `${RUTA.replace(/\/pedidos$/, '')}/precios`;
+// Los precios cambian por día, no por minuto.
+const CADA_PRECIOS = Number(process.env.STOCKER_PRECIOS_CADA_MS) || 15 * 60_000;
+let ultimoErrorVuelta = null;
+let ultimoErrorPrecios = null;
 const ESPERA_ENVIO = Number(process.env.STOCKER_TIMEOUT_MS) || 15_000;
 const CADA = Number(process.env.STOCKER_CADA_MS) || 20_000;
 const TOPE_INTENTOS = 12;      // con la espera creciente, son casi dos días de reintentos
@@ -367,20 +377,235 @@ function estadoPublico() {
     pista: /^404/.test(String(ultimoError?.ultimo_error || ''))
       ? 'STOCKER contesta que esa ruta no existe. Con la ruta por omisión, la dirección configurada tiene que terminar en /api.'
       : null,
+    /*
+     * La vuelta también puede fallar, y su silencio es peor que el de la ida:
+     * los pedidos salen igual, pero nadie se entera de que STOCKER los aceptó
+     * o los rechazó, y el cliente queda esperando una respuesta que ya existe.
+     * Va con la dirección tapada, como todo lo demás de acá.
+     */
+    vuelta: ultimoErrorVuelta ? sinDireccion(ultimoErrorVuelta) : null,
+    precios: ultimoErrorPrecios ? sinDireccion(ultimoErrorPrecios) : null,
   };
 }
 
 /** El repartidor: manda lo pendiente cada tanto, mientras el servidor viva. */
+/*
+ * ══ La vuelta: qué hizo STOCKER con cada pedido ══════════════════
+ *
+ * Se pregunta en vez de esperar que STOCKER avise. Preguntando, una caída de
+ * este lado no pierde nada: cuando vuelve, pregunta desde donde quedó. Que nos
+ * avisen exigiría una URL pública acá, un secreto más, y una cola de reintentos
+ * del otro lado para lo que no se pudo entregar.
+ *
+ * El cursor es la fecha de revisión de la última resolución aplicada, y lo
+ * devuelve STOCKER: tomarlo del reloj de acá se saltearía las que se revisaron
+ * entre la consulta y la respuesta.
+ */
+const CLAVE_CURSOR = 'stocker_resoluciones_desde';
+
+/* Qué se hace acá con lo que decidió STOCKER. */
+const DESTINO = { aceptada: 'confirmado', rechazada: 'cancelado' };
+
+function notaDeLaResolucion(r) {
+  if (r.estado === 'rechazada') {
+    return r.motivo ? `No podemos hacer este pedido: ${r.motivo}` : 'No podemos hacer este pedido.';
+  }
+  const venta = r.venta?.numero ? ` (venta ${r.venta.numero})` : '';
+  return r.venta?.condicionPago === 'cuenta_corriente'
+    ? `Confirmado${venta}. Queda en tu cuenta corriente.`
+    : `Confirmado${venta}.`;
+}
+
+/**
+ * Aplica una resolución a su pedido. Devuelve qué se hizo, para el log.
+ *
+ * La misma resolución vuelve en cada vuelta hasta que el cursor avanza, así
+ * que hay tres cosas que la frenan y conviene saber qué hace cada una:
+ *
+ *   · `stocker_resuelto_en` — corta al principio y deja el dato cierto: "esto
+ *     ya se aplicó". Hoy no es lo único que evita reaplicarla, porque los
+ *     estados de acá son de ida; es lo que la va a seguir evitando el día que
+ *     alguien agregue una vuelta atrás.
+ *   · `AUTOMATICO_DESDE` — nada automático toca un pedido que ya salió.
+ *   · `puedePasar` — la tabla de estados del sistema, que manda siempre.
+ */
+function aplicarResolucion(r) {
+  const pedido = db.prepare('SELECT * FROM pedidos WHERE numero = ?').get(r.pedidoExterno);
+  if (!pedido) return 'no existe acá';
+  if (pedido.stocker_resuelto_en) return 'ya aplicada';
+
+  const destino = DESTINO[r.estado];
+  if (!destino) return 'no se entiende';
+
+  const actual = normalizarEstado(pedido.estado);
+  db.prepare('UPDATE pedidos SET stocker_venta = ?, stocker_resuelto_en = ? WHERE id = ?')
+    .run(r.venta?.numero || null, new Date().toISOString(), pedido.id);
+
+  if (actual === destino) return 'ya estaba';
+  /*
+   * Lo automático llega hasta acá y no más.
+   *
+   * Las transiciones del panel son más anchas a propósito: una persona SÍ puede
+   * cancelar un pedido ya enviado —pasa, y hay que poder registrarlo—. Pero que
+   * eso lo haga solo una resolución que llegó tarde significa cancelar
+   * mercadería que está en el camión, sin que nadie lo haya decidido.
+   *
+   * Mientras el pedido no salió, aplicar la decisión de STOCKER es exactamente
+   * lo que se espera. Una vez que salió, queda anotada y la mira una persona.
+   */
+  const AUTOMATICO_DESDE = ['pendiente', 'confirmado', 'modificado'];
+  if (!AUTOMATICO_DESDE.includes(actual)) return `el pedido ya está ${actual}`;
+  if (!puedePasar(actual, destino)) return `no se puede pasar de ${actual} a ${destino}`;
+
+  registrarEstado(pedido.id, destino, { nota: notaDeLaResolucion(r) });
+  return destino;
+}
+
+/** Trae lo resuelto desde el último cursor y lo aplica. */
+async function traerResoluciones() {
+  if (!configurado()) return { aplicadas: 0, apagado: true };
+  const desde = leerConfig(CLAVE_CURSOR);
+  const url = `${URL_BASE}${RUTA_RESOLUCIONES}${desde ? `?desde=${encodeURIComponent(desde)}` : ''}`;
+
+  let datos;
+  try {
+    const r = await fetch(url, {
+      headers: { Authorization: `Bearer ${TOKEN}` },
+      signal: AbortSignal.timeout(ESPERA_ENVIO),
+    });
+    if (!r.ok) throw new Error(`${r.status} ${(await r.text().catch(() => '')).slice(0, 200)}`);
+    datos = await r.json();
+    ultimoErrorVuelta = null;
+  } catch (e) {
+    /*
+     * El error se anota acá y no en quien llama: si dependiera del reloj, una
+     * llamada a mano dejaría el panel diciendo que todo anda.
+     */
+    ultimoErrorVuelta = String(e.message || e).slice(0, 200);
+    throw e;
+  }
+
+  const hechas = [];
+  for (const resolucion of datos.resoluciones || []) {
+    try {
+      const resultado = aplicarResolucion(resolucion);
+      hechas.push({ pedido: resolucion.pedidoExterno, resultado });
+      /*
+       * Al cliente se le avisa igual que cuando el cambio lo hace el panel: es
+       * la misma noticia —su pedido se confirmó o no va— y no tiene por qué
+       * llegarle distinto según quién la haya decidido.
+       *
+       * Un aviso que falla no puede voltear la vuelta: el estado ya cambió y
+       * volver a traer la resolución no lo arreglaría.
+       */
+      if (resultado === 'confirmado' || resultado === 'cancelado') {
+        const { leerPedido } = require('./pedidos');
+        const { avisarCliente } = require('./notificaciones');
+        await avisarCliente(leerPedido(resolucion.pedidoExterno), resultado, {
+          nota: notaDeLaResolucion(resolucion),
+        }).catch(() => {});
+      }
+    } catch (e) { hechas.push({ pedido: resolucion.pedidoExterno, resultado: `error: ${e.message}` }); }
+  }
+  /*
+   * El cursor avanza aunque alguna no se haya podido aplicar: quedó anotada en
+   * el pedido y volver a traerla en cada vuelta no la va a arreglar. Si no
+   * avanzara, una sola resolución rara dejaría la vuelta trabada para siempre.
+   */
+  if (datos.hasta) guardarConfig(CLAVE_CURSOR, datos.hasta);
+  return { aplicadas: hechas.length, hechas, truncado: Boolean(datos.truncado) };
+}
+
+/*
+ * ══ Los precios: una sola lista ══════════════════════════════════
+ *
+ * El catálogo de acá salió de una planilla exportada de STOCKER, y desde ese
+ * día los precios viven por separado: se cambia allá y acá se sigue mostrando
+ * el de la exportación. El cliente arma el pedido con ese número y la venta se
+ * registra con otro.
+ *
+ * Se traen por SKU de variante. Lo que no está en el catálogo de acá se
+ * ignora: STOCKER tiene más artículos de los que el portal publica.
+ */
+const CLAVE_PRECIOS = 'stocker_precios_desde';
+
+async function sincronizarPrecios({ completo = false } = {}) {
+  if (!configurado()) return { actualizados: 0, apagado: true };
+  const desde = completo ? null : leerConfig(CLAVE_PRECIOS);
+  const url = `${URL_BASE}${RUTA_PRECIOS}${desde ? `?desde=${encodeURIComponent(desde)}` : ''}`;
+
+  let datos;
+  try {
+    const r = await fetch(url, {
+      headers: { Authorization: `Bearer ${TOKEN}` },
+      signal: AbortSignal.timeout(ESPERA_ENVIO),
+    });
+    if (!r.ok) throw new Error(`${r.status} ${(await r.text().catch(() => '')).slice(0, 200)}`);
+    datos = await r.json();
+    ultimoErrorPrecios = null;
+  } catch (e) {
+    ultimoErrorPrecios = String(e.message || e).slice(0, 200);
+    throw e;
+  }
+
+  const buscar = db.prepare('SELECT id, producto_id, precio FROM variantes WHERE sku = ?');
+  const guardar = db.prepare('UPDATE variantes SET precio = ? WHERE id = ?');
+  let actualizados = 0;
+  let sinCatalogo = 0;
+
+  const aplicar = db.transaction((filas) => {
+    for (const fila of filas) {
+      const precio = Number(fila.precio);
+      if (!Number.isFinite(precio) || precio < 0) continue;
+      const variante = buscar.get(String(fila.sku));
+      if (!variante) { sinCatalogo += 1; continue; }
+      /*
+       * El precio se guarda en la VARIANTE, aunque en STOCKER lo herede del
+       * producto. Acá no se sabe qué heredó de qué, y escribirlo en el padre
+       * pisaría el precio de las variantes que sí tienen el suyo.
+       */
+      if (Number(variante.precio) === precio) continue;
+      guardar.run(precio, variante.id);
+      actualizados += 1;
+    }
+  });
+  aplicar(datos.precios || []);
+
+  if (datos.generadoEn && !datos.truncado) guardarConfig(CLAVE_PRECIOS, datos.generadoEn);
+  return {
+    actualizados,
+    sinCatalogo,
+    recibidos: (datos.precios || []).length,
+    truncado: Boolean(datos.truncado),
+  };
+}
+
 function arrancar() {
   if (!configurado()) return null;
-  const vuelta = () => { procesarCola().catch(() => { /* al próximo ciclo */ }); };
+  const vuelta = () => {
+    procesarCola().catch(() => { /* al próximo ciclo */ });
+    traerResoluciones().catch(() => { /* queda anotado adentro */ });
+  };
   vuelta();
   const reloj = setInterval(vuelta, CADA);
   reloj.unref?.();
+
+  /*
+   * Los precios van en su propio reloj y mucho más lento: cambian por día, no
+   * por minuto, y traerlos cada veinte segundos sería pedirle a STOCKER el
+   * catálogo entero cuatro mil veces por día para que casi siempre no haya
+   * nada nuevo.
+   */
+  const relojPrecios = setInterval(() => {
+    sincronizarPrecios().catch(() => { /* queda anotado adentro */ });
+  }, CADA_PRECIOS);
+  relojPrecios.unref?.();
   return reloj;
 }
 
 module.exports = {
   configurado, anotar, procesarCola, reintentar, estadoPublico, arrancar,
+  traerResoluciones, sincronizarPrecios, aplicarResolucion,
   cuerpoDelPedido, lineasDelPedido, sinDireccion, EVENTOS,
+  erroresDeLaVuelta: () => ({ resoluciones: ultimoErrorVuelta, precios: ultimoErrorPrecios }),
 };
