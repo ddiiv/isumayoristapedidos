@@ -108,7 +108,23 @@ const socketFalso = () => {
   chk('y sin código también', 'reconectar', corte(undefined));
   chk('sesión ilegible: primero reintenta', 'reconectar', corte(500, { rotas: 0 }));
   chk('y si sigue rota, pide QR nuevo', 'desvincular', corte(500, { rotas: 2 }));
-  chk('si el QR nunca se escaneó, queda apagado y no genera códigos para nadie', 'esperar', corte(428, { vinculado: false }));
+  /*
+   * Mientras se espera el escaneo, un corte NO es el final.
+   *
+   * Tratarlo como el final es lo que hacía fallar la vinculación siempre: el
+   * QR quedaba en la pantalla del panel sin ningún socket esperándolo del otro
+   * lado, y quien lo escaneaba recibía "error de conexión" en el teléfono.
+   */
+  const sinEscanear = (codigo, extra) => corte(codigo, { vinculado: false, ...extra });
+  chk('un corte de red con el QR en pantalla saca un QR nuevo',
+    ['renovar', 'renovar', 'renovar', 'renovar'],
+    [sinEscanear(428), sinEscanear(408), sinEscanear(503), sinEscanear(undefined)]);
+  chk('y el reinicio de WhatsApp sigue siendo inmediato', 'reiniciar', sinEscanear(515));
+  chk('pero si WhatsApp rechaza la vinculación, no se insiste',
+    ['desvincular', 'desvincular', 'desvincular'],
+    [sinEscanear(401), sinEscanear(403), sinEscanear(411)]);
+  chk('después de varios QR que nadie escaneó, se deja de insistir', 'esperar', sinEscanear(428, { renovaciones: 5 }));
+  chk('con un código pedido no se renueva: saldría otro distinto', 'esperar', sinEscanear(428, { modo: 'codigo' }));
 
   tit('6. UNA SOLA COPIA DEL SERVIDOR USA LA SESIÓN');
   /*
@@ -194,7 +210,8 @@ const socketFalso = () => {
   chk('ni vacío', null, n(''));
 
   tit('9. EL CÓDIGO QUE VENCE SE EXPLICA COMO CÓDIGO');
-  const sinUsar = (modo) => whatsapp.decidirCorte(428, { vinculado: false, modo }).mensaje;
+  // Por QR el mensaje recién aparece cuando se dejó de renovar; por código, en el primer corte.
+  const sinUsar = (modo) => whatsapp.decidirCorte(428, { vinculado: false, modo, renovaciones: 9 }).mensaje;
   chk('por QR habla del QR', true, /QR/.test(sinUsar('qr')));
   chk('por código habla del código', true, /c\u00f3digo/i.test(sinUsar('codigo')) && !/QR/.test(sinUsar('codigo')));
 

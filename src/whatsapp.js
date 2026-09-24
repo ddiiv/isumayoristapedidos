@@ -57,6 +57,7 @@ const VIGILANCIA = 60_000;        // cada cuánto se mira que el socket siga abi
 const ESPERA_MAXIMA = 60_000;     // tope de la espera entre reintentos
 const ESPERA_CEDIENDO = 30_000;   // cuánto esperar cuando otra copia tiene la sesión
 const TOPE_SESION_ROTA = 3;       // cortes seguidos por sesión ilegible antes de pedir otro QR
+const TOPE_RENOVACIONES = 5;      // QR nuevos seguidos sin que nadie escanee, antes de dejar de insistir
 
 const estado = { conexion: 'apagado', modo: 'qr', qr: null, codigo: null, numero: null, error: null };
 let sock = null;
@@ -68,6 +69,7 @@ let sesionesRotas = 0;
 let apagando = false;
 let cerrojoPropio = false;
 let codigoPara = null;   // el número al que hay que pedirle un código de vinculación
+let renovaciones = 0;    // QR nuevos que se sacaron sin que nadie escanee
 
 /*
  * Quién es esta copia del servidor.
@@ -179,15 +181,36 @@ function soltarCerrojo() {
  * WhatsApp tiene una respuesta distinta, y confundirlas es lo que desvinculaba
  * el número solo.
  */
-function decidirCorte(codigo, { vinculado = true, rotas = 0, modo = 'qr' } = {}) {
+function decidirCorte(codigo, { vinculado = true, rotas = 0, modo = 'qr', renovaciones = 0 } = {}) {
   if (codigo === 515) return { accion: 'reiniciar' };   // el reinicio que pide WhatsApp al terminar de vincular
+  /*
+   * Un corte mientras se espera el escaneo NO es el final.
+   *
+   * Acá estaba el error que hacía fallar la vinculación siempre: cualquier
+   * corte que no fuera el 515 dejaba esto apagado y sin reintentar. El QR
+   * seguía en la pantalla del panel hasta el próximo refresco, pero ya no
+   * había socket del otro lado esperándolo: quien lo escaneaba en ese rato
+   * recibía en el teléfono un "error de conexión" sin ninguna explicación, y
+   * del lado del servidor no se veía nada raro. Ahora se saca un QR nuevo, que
+   * es lo que hace WhatsApp Web. Con tope, para no quedar insistiéndole a
+   * WhatsApp con una pantalla que nadie está mirando.
+   */
   if (!vinculado) {
-    return {
-      accion: 'esperar',
-      mensaje: modo === 'codigo'
-        ? 'El código venció sin que nadie lo escribiera en el teléfono. Pedí otro.'
-        : 'El QR venció sin escanearse. Tocá "Vincular" para generar otro.',
-    };
+    if (codigo === 401 || codigo === 403 || codigo === 411) {
+      return {
+        accion: 'desvincular',
+        mensaje: 'WhatsApp rechazó la vinculación desde este servidor. Probá con el código de ocho letras;'
+          + ' si tampoco entra, el problema está entre WhatsApp y este número.',
+      };
+    }
+    // Con un código pedido no se renueva: saldría otro código distinto mientras lo estás escribiendo.
+    if (modo === 'codigo') {
+      return { accion: 'esperar', mensaje: 'El código venció sin que nadie lo escribiera en el teléfono. Pedí otro.' };
+    }
+    if (renovaciones + 1 > TOPE_RENOVACIONES) {
+      return { accion: 'esperar', mensaje: 'Se generaron varios QR y ninguno se escaneó. Tocá "Vincular" para volver a empezar.' };
+    }
+    return { accion: 'renovar' };
   }
   if (codigo === 401) {
     return {
@@ -447,6 +470,7 @@ async function alCambiarLaConexion(este, state, { connection, lastDisconnect, qr
   if (connection === 'open') {
     intentos = 0;
     sesionesRotas = 0;
+    renovaciones = 0;
     codigoPara = null;
     Object.assign(estado, { conexion: 'conectado', qr: null, codigo: null, error: null });
     estado.numero = String(este.user?.id || '').split(':')[0].split('@')[0] || null;
@@ -460,10 +484,20 @@ async function alCambiarLaConexion(este, state, { connection, lastDisconnect, qr
 
   const codigo = lastDisconnect?.error?.output?.statusCode;
   const vinculado = sesionUsable(state.creds);
-  const { accion, mensaje } = decidirCorte(codigo, { vinculado, rotas: sesionesRotas, modo: estado.modo });
+  const { accion, mensaje } = decidirCorte(codigo, {
+    vinculado, rotas: sesionesRotas, modo: estado.modo, renovaciones,
+  });
   anotarCorte(codigo, accion, lastDisconnect?.error?.message);
 
   if (accion === 'reiniciar') { arrancar(); return; }
+
+  if (accion === 'renovar') {
+    renovaciones += 1;
+    Object.assign(estado, { conexion: 'conectando', error: null });
+    // Enseguida: del otro lado hay alguien con el teléfono en la mano esperando el QR.
+    programarReintento(1500);
+    return;
+  }
 
   if (accion === 'esperar') {
     soltarCerrojo();
@@ -547,6 +581,7 @@ async function vincular(numero) {
     codigoPara = pedido;
     intentos = 0;
     sesionesRotas = 0;
+    renovaciones = 0;
     Object.assign(estado, { conexion: 'conectando', modo: 'codigo', qr: null, codigo: null, numero: null, error: null });
     await arrancar();
     return estadoPublico();
@@ -556,6 +591,7 @@ async function vincular(numero) {
   if (!(enCurso && sock)) {
     intentos = 0;
     sesionesRotas = 0;
+    renovaciones = 0;
     codigoPara = null;
     estado.modo = 'qr';
     await arrancar();
