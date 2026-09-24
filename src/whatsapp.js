@@ -58,7 +58,7 @@ const ESPERA_MAXIMA = 60_000;     // tope de la espera entre reintentos
 const ESPERA_CEDIENDO = 30_000;   // cuánto esperar cuando otra copia tiene la sesión
 const TOPE_SESION_ROTA = 3;       // cortes seguidos por sesión ilegible antes de pedir otro QR
 
-const estado = { conexion: 'apagado', qr: null, numero: null, error: null };
+const estado = { conexion: 'apagado', modo: 'qr', qr: null, codigo: null, numero: null, error: null };
 let sock = null;
 let reintento = null;
 let latido = null;
@@ -67,6 +67,7 @@ let intentos = 0;
 let sesionesRotas = 0;
 let apagando = false;
 let cerrojoPropio = false;
+let codigoPara = null;   // el número al que hay que pedirle un código de vinculación
 
 /*
  * Quién es esta copia del servidor.
@@ -102,8 +103,15 @@ function escribirAtomico(ruta, texto) {
   fs.renameSync(temporal, ruta);
 }
 
-/** Una sesión sirve si dice de qué número es: recién ahí está vinculada. */
-const sesionUsable = (creds) => Boolean(creds && (creds.me || creds.registered));
+/*
+ * Cuándo una sesión guardada está vinculada de verdad.
+ *
+ * No alcanza con que diga de qué número es: al pedir un código de ocho letras,
+ * la librería anota el número antes de que nadie lo haya escrito en el
+ * teléfono. Lo que sólo aparece cuando WhatsApp aceptó el dispositivo es la
+ * identidad firmada —account— o la marca registered del camino del código.
+ */
+const sesionUsable = (creds) => Boolean(creds && creds.me && (creds.account || creds.registered));
 const hayCredenciales = () => sesionUsable(leerJSON(CREDENCIALES)) || sesionUsable(leerJSON(RESPALDO));
 
 function respaldarCredenciales() {
@@ -171,10 +179,15 @@ function soltarCerrojo() {
  * WhatsApp tiene una respuesta distinta, y confundirlas es lo que desvinculaba
  * el número solo.
  */
-function decidirCorte(codigo, { vinculado = true, rotas = 0 } = {}) {
+function decidirCorte(codigo, { vinculado = true, rotas = 0, modo = 'qr' } = {}) {
   if (codigo === 515) return { accion: 'reiniciar' };   // el reinicio que pide WhatsApp al terminar de vincular
   if (!vinculado) {
-    return { accion: 'esperar', mensaje: 'El QR venció sin escanearse. Tocá "Vincular" para generar otro.' };
+    return {
+      accion: 'esperar',
+      mensaje: modo === 'codigo'
+        ? 'El código venció sin que nadie lo escribiera en el teléfono. Pedí otro.'
+        : 'El QR venció sin escanearse. Tocá "Vincular" para generar otro.',
+    };
   }
   if (codigo === 401) {
     return {
@@ -219,8 +232,77 @@ function anotarCorte(codigo, accion, motivo) {
   } catch { /* que no se caiga la reconexión por no poder anotar */ }
 }
 
+/*
+ * El teléfono llegó hasta acá.
+ *
+ * Es el dato que faltaba para entender una vinculación que falla: si esto
+ * quedó anotado, el escaneo llegó al servidor y lo que se rompió es de acá
+ * para adelante; si no, WhatsApp nunca entregó el emparejamiento y el
+ * problema está entre el teléfono y WhatsApp —el número, no el portal—.
+ */
+function anotarEscaneo(modo) {
+  try {
+    guardarConfig('whatsapp_ultimo_escaneo', JSON.stringify({ cuando: new Date().toISOString(), modo }));
+  } catch { /* no vale la pena romper la vinculación por no poder anotar */ }
+}
+
+function ultimoEscaneo() {
+  try { return JSON.parse(leerConfig('whatsapp_ultimo_escaneo') || 'null'); } catch { return null; }
+}
+
 function ultimoCorte() {
   try { return JSON.parse(leerConfig('whatsapp_ultimo_corte') || 'null'); } catch { return null; }
+}
+
+// ── Vincular escribiendo un código, sin cámara ────────────────────
+/*
+ * WhatsApp tiene dos caminos para agregar un dispositivo: escanear el QR o
+ * escribir un código de ocho letras. Son dos caminos distintos de punta a
+ * punta, y el del código tiene dos ventajas grandes para un servidor:
+ *
+ *  · No hay que mostrarle una imagen a una cámara. El QR obliga a que el
+ *    teléfono y el servidor se encuentren a través de WhatsApp en el momento
+ *    justo, y cuando eso no pasa el teléfono sólo dice "error de conexión".
+ *  · Cuando falla, falla acá, con motivo: si WhatsApp no quiere dar el código
+ *    lo dice en la respuesta, y ese texto se puede mostrar en el panel. Con el
+ *    QR el error se lo queda el teléfono y del lado del servidor no se ve nada.
+ */
+function normalizarNumero(texto) {
+  // Sin +, sin espacios, sin guiones y sin el 00 de las llamadas internacionales.
+  const digitos = String(texto || '').replace(/\D+/g, '').replace(/^0+/, '');
+  return digitos.length >= 10 && digitos.length <= 15 ? digitos : null;
+}
+
+/*
+ * El código se pide recién cuando WhatsApp manda el primer QR: antes de eso la
+ * conexión todavía se está armando y el pedido se pierde.
+ */
+async function pedirCodigo(socket) {
+  const numero = codigoPara;
+  codigoPara = null;
+  try {
+    const codigo = await socket.requestPairingCode(numero);
+    Object.assign(estado, {
+      conexion: 'esperando-codigo',
+      modo: 'codigo',
+      qr: null,
+      codigo: String(codigo).toUpperCase(),
+      error: null,
+    });
+  } catch (e) {
+    const motivo = String(e?.message || e).slice(0, 200);
+    anotarCorte(e?.output?.statusCode ?? null, 'codigo-rechazado', motivo);
+    Object.assign(estado, {
+      conexion: 'error',
+      modo: 'codigo',
+      qr: null,
+      codigo: null,
+      error: `WhatsApp no dio el código para ese número: ${motivo}`,
+    });
+    // Sin cortar, los QR que la librería sigue rotando taparían este error.
+    cerrarSocket();
+    soltarCerrojo();
+  }
 }
 
 // ── La conexión ───────────────────────────────────────────────────
@@ -270,7 +352,6 @@ async function conectar() {
   const {
     makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion, Browsers,
   } = require('baileys');
-  const QRCode = require('qrcode');
 
   clearTimeout(reintento);
   apagando = false;
@@ -321,59 +402,90 @@ async function conectar() {
   sock = este;
   vigilar();
 
-  este.ev.on('creds.update', async () => {
-    await saveCreds();
+  /*
+   * Sin el catch, un volumen lleno o de sólo lectura tumbaba el servidor
+   * entero: la librería avisa por un oyente asíncrono, y una promesa rota en
+   * un oyente termina el proceso. Justo en el momento de vincular, además,
+   * que es cuando la librería más escribe.
+   */
+  este.ev.on('creds.update', () => {
+    saveCreds()
+      .then(respaldarCredenciales)
+      .catch((e) => console.error('  whatsapp: no se pudo guardar la sesión:', e.message));
+  });
+
+  este.ev.on('connection.update', async (novedad) => {
+    try { await alCambiarLaConexion(este, state, novedad); }
+    catch (e) { console.error('  whatsapp: error manejando la conexión:', e.message); }
+  });
+}
+
+async function alCambiarLaConexion(este, state, { connection, lastDisconnect, qr, isNewLogin }) {
+  const QRCode = require('qrcode');
+  if (este !== sock) return;   // un socket viejo que todavía avisa algo
+
+  // Que el teléfono haya emparejado se anota apenas pasa, aunque después falle.
+  if (isNewLogin) anotarEscaneo(estado.modo);
+
+  if (qr) {
+    // El primer QR avisa que la conexión ya está abierta: recién acá sirve pedir el código.
+    if (codigoPara) await pedirCodigo(este);
+    else if (estado.conexion !== 'esperando-codigo') {
+      // Con el código pedido, los QR que WhatsApp sigue rotando no se muestran.
+      Object.assign(estado, { conexion: 'esperando-qr', modo: 'qr', codigo: null });
+      /*
+       * El QR se dibuja al doble del tamaño con el que se muestra, y con la
+       * zona tranquila que pide la norma —cuatro módulos de blanco alrededor—.
+       * Antes salía de 280 px para una caja de 240 y con un módulo de margen:
+       * achicar por un número no entero le come los bordes a los cuadraditos y
+       * el margen justo deja al lector sin dónde apoyarse. Un QR así se lee a
+       * veces sí y a veces no, y desde el teléfono eso parece un error de red.
+       */
+      estado.qr = await QRCode.toDataURL(qr, { margin: 4, width: 480 });
+    }
+  }
+  if (connection === 'open') {
+    intentos = 0;
+    sesionesRotas = 0;
+    codigoPara = null;
+    Object.assign(estado, { conexion: 'conectado', qr: null, codigo: null, error: null });
+    estado.numero = String(este.user?.id || '').split(':')[0].split('@')[0] || null;
     respaldarCredenciales();
-  });
+  }
+  if (connection !== 'close') return;
 
-  este.ev.on('connection.update', async ({ connection, lastDisconnect, qr }) => {
-    if (este !== sock) return;   // un socket viejo que todavía avisa algo
+  estado.qr = null;
+  estado.codigo = null;
+  if (apagando) { estado.conexion = 'apagado'; return; }
 
-    if (qr) {
-      estado.conexion = 'esperando-qr';
-      estado.qr = await QRCode.toDataURL(qr, { margin: 1, width: 280 });
-    }
-    if (connection === 'open') {
-      intentos = 0;
-      sesionesRotas = 0;
-      Object.assign(estado, { conexion: 'conectado', qr: null, error: null });
-      estado.numero = String(este.user?.id || '').split(':')[0].split('@')[0] || null;
-      respaldarCredenciales();
-    }
-    if (connection !== 'close') return;
+  const codigo = lastDisconnect?.error?.output?.statusCode;
+  const vinculado = sesionUsable(state.creds);
+  const { accion, mensaje } = decidirCorte(codigo, { vinculado, rotas: sesionesRotas, modo: estado.modo });
+  anotarCorte(codigo, accion, lastDisconnect?.error?.message);
 
-    estado.qr = null;
-    if (apagando) { estado.conexion = 'apagado'; return; }
+  if (accion === 'reiniciar') { arrancar(); return; }
 
-    const codigo = lastDisconnect?.error?.output?.statusCode;
-    const vinculado = sesionUsable(state.creds);
-    const { accion, mensaje } = decidirCorte(codigo, { vinculado, rotas: sesionesRotas });
-    anotarCorte(codigo, accion, lastDisconnect?.error?.message);
+  if (accion === 'esperar') {
+    soltarCerrojo();
+    Object.assign(estado, { conexion: 'apagado', error: mensaje });
+    return;
+  }
+  if (accion === 'desvincular') {
+    borrarSesion();
+    Object.assign(estado, { conexion: 'desvinculado', numero: null, error: mensaje });
+    return;
+  }
+  if (accion === 'ceder') {
+    soltarCerrojo();
+    Object.assign(estado, { conexion: 'esperando-lugar', error: mensaje });
+    programarReintento(ESPERA_CEDIENDO);
+    return;
+  }
 
-    if (accion === 'reiniciar') { arrancar(); return; }
-
-    if (accion === 'esperar') {
-      soltarCerrojo();
-      Object.assign(estado, { conexion: 'apagado', error: mensaje });
-      return;
-    }
-    if (accion === 'desvincular') {
-      borrarSesion();
-      Object.assign(estado, { conexion: 'desvinculado', numero: null, error: mensaje });
-      return;
-    }
-    if (accion === 'ceder') {
-      soltarCerrojo();
-      Object.assign(estado, { conexion: 'esperando-lugar', error: mensaje });
-      programarReintento(ESPERA_CEDIENDO);
-      return;
-    }
-
-    sesionesRotas = codigo === 500 ? sesionesRotas + 1 : 0;
-    intentos += 1;
-    Object.assign(estado, { conexion: 'reconectando', error: lastDisconnect?.error?.message || null });
-    programarReintento(esperaDelReintento());
-  });
+  sesionesRotas = codigo === 500 ? sesionesRotas + 1 : 0;
+  intentos += 1;
+  Object.assign(estado, { conexion: 'reconectando', error: lastDisconnect?.error?.message || null });
+  programarReintento(esperaDelReintento());
 }
 
 /*
@@ -399,19 +511,53 @@ async function arrancar() {
 function estadoPublico() {
   return {
     conexion: estado.conexion,
+    modo: estado.modo,
     qr: estado.conexion === 'esperando-qr' ? estado.qr : null,
+    codigo: estado.conexion === 'esperando-codigo' ? estado.codigo : null,
     numero: estado.numero,
     error: estado.error,
     grupo: grupoElegido(),
     ultimoCorte: ultimoCorte(),
+    ultimoEscaneo: ultimoEscaneo(),
   };
 }
 
-async function vincular() {
-  const enCurso = ['conectado', 'conectando', 'esperando-qr', 'reconectando'].includes(estado.conexion);
+async function vincular(numero) {
+  /*
+   * Con número se pide un código de ocho letras; sin número, el QR de siempre.
+   *
+   * El código sólo se puede pedir sobre una sesión nueva, así que lo primero
+   * es descartar la que haya quedado a medio hacer. Una sesión que anda no se
+   * toca: para cambiar de número hay que desvincular primero, a propósito.
+   */
+  const pedido = numero ? normalizarNumero(numero) : null;
+  if (numero && !pedido) {
+    throw conEstado('Escribí el número con el código de país y sin espacios, por ejemplo 5493511234567.', 400);
+  }
+  if (pedido) {
+    if (estado.conexion === 'conectado') {
+      throw conEstado('Ya hay un WhatsApp vinculado. Desvinculalo primero si querés usar otro número.', 409);
+    }
+    apagando = true;
+    clearTimeout(reintento);
+    cerrarSocket();
+    soltarCerrojo();
+    borrarSesion();
+    apagando = false;
+    codigoPara = pedido;
+    intentos = 0;
+    sesionesRotas = 0;
+    Object.assign(estado, { conexion: 'conectando', modo: 'codigo', qr: null, codigo: null, numero: null, error: null });
+    await arrancar();
+    return estadoPublico();
+  }
+
+  const enCurso = ['conectado', 'conectando', 'esperando-qr', 'esperando-codigo', 'reconectando'].includes(estado.conexion);
   if (!(enCurso && sock)) {
     intentos = 0;
     sesionesRotas = 0;
+    codigoPara = null;
+    estado.modo = 'qr';
     await arrancar();
   }
   return estadoPublico();
@@ -419,6 +565,7 @@ async function vincular() {
 
 async function desvincular() {
   apagando = true;
+  codigoPara = null;
   clearTimeout(reintento);
   clearInterval(vigilante); vigilante = null;
   try { await sock?.logout(); } catch { /* ya estaba cortado */ }
@@ -426,13 +573,14 @@ async function desvincular() {
   soltarCerrojo();
   borrarSesion();
   guardarConfig('whatsapp_grupo', '');
-  Object.assign(estado, { conexion: 'apagado', qr: null, numero: null, error: null });
+  Object.assign(estado, { conexion: 'apagado', modo: 'qr', qr: null, codigo: null, numero: null, error: null });
   return estadoPublico();
 }
 
 /** Al apagar el servidor: corta la conexión sin desvincular, para retomarla al volver. */
 function apagar() {
   apagando = true;
+  codigoPara = null;
   clearTimeout(reintento);
   clearInterval(vigilante); vigilante = null;
   cerrarSocket();
@@ -518,5 +666,6 @@ module.exports = {
   vincular, desvincular, apagar, arrancarSiHaySesion, grupos, elegirGrupo, configurado,
   avisarGrupo, mandarPrueba, estadoPublico, resumenDelPedido,
   // Para las pruebas: decisiones y archivos, sin levantar ninguna conexión.
-  decidirCorte, cerrojoDeOtraCopia, respaldarCredenciales, restaurarCredenciales, CARPETA, INSTANCIA,
+  decidirCorte, cerrojoDeOtraCopia, respaldarCredenciales, restaurarCredenciales, normalizarNumero,
+  CARPETA, INSTANCIA,
 };

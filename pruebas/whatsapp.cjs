@@ -169,6 +169,35 @@ const socketFalso = () => {
   fs.rmSync(creds, { force: true });
   fs.rmSync(respaldo, { force: true });
 
+  /*
+   * Una sesión a la que sólo se le pidió un código todavía no está vinculada:
+   * la librería le anota el número antes de que nadie lo haya escrito en el
+   * teléfono. Si contara como buena, el servidor la respaldaría y al arrancar
+   * intentaría reconectar con una sesión que no existe del otro lado.
+   */
+  fs.writeFileSync(creds, JSON.stringify({ me: { id: '5493511234567@s.whatsapp.net' }, pairingCode: 'ABCD1234' }));
+  fs.rmSync(respaldo, { force: true });
+  whatsapp.respaldarCredenciales();
+  chk('un código pedido y sin escribir no se respalda', false, fs.existsSync(respaldo));
+  fs.writeFileSync(respaldo, JSON.stringify({ me: { id: '5493511234567@s.whatsapp.net' }, pairingCode: 'ABCD1234' }));
+  fs.writeFileSync(creds, 'roto');
+  chk('ni se restaura como si fuera una sesión buena', false, whatsapp.restaurarCredenciales());
+  fs.rmSync(creds, { force: true });
+  fs.rmSync(respaldo, { force: true });
+
+  tit('8. EL NÚMERO PARA PEDIR EL CÓDIGO');
+  const n = whatsapp.normalizarNumero;
+  chk('se le sacan el +, los espacios y los guiones', '5493511234567', n('+54 9 351 123-4567'));
+  chk('y el 00 de las llamadas internacionales', '5493511234567', n('005493511234567'));
+  chk('un número corto no sirve', null, n('351 4567'));
+  chk('un texto cualquiera tampoco', null, n('el de siempre'));
+  chk('ni vacío', null, n(''));
+
+  tit('9. EL CÓDIGO QUE VENCE SE EXPLICA COMO CÓDIGO');
+  const sinUsar = (modo) => whatsapp.decidirCorte(428, { vinculado: false, modo }).mensaje;
+  chk('por QR habla del QR', true, /QR/.test(sinUsar('qr')));
+  chk('por código habla del código', true, /c\u00f3digo/i.test(sinUsar('codigo')) && !/QR/.test(sinUsar('codigo')));
+
   console.log(`\n\x1b[1m─────────────────────────────\x1b[0m\n  \x1b[32mPasaron: ${ok}\x1b[0m   \x1b[31mFallaron: ${ko}\x1b[0m`);
   fs.rmSync(process.env.DATA_DIR, { recursive: true, force: true });
   process.exit(ko ? 1 : 0);

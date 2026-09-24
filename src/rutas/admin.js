@@ -1888,7 +1888,8 @@ r.post('/stocker/reintentar', conErrores(async (req, res) => {
   const resultado = await stocker.procesarCola();
   res.json({ reencolados, ...resultado, stocker: stocker.estadoPublico() });
 }));
-r.post('/whatsapp/vincular', conAviso(async (req, res) => res.json(await whatsapp.vincular())));
+// Sin número, el QR de siempre; con número, el código de ocho letras para escribir en el teléfono.
+r.post('/whatsapp/vincular', conAviso(async (req, res) => res.json(await whatsapp.vincular(req.body?.numero))));
 r.post('/whatsapp/desvincular', conAviso(async (req, res) => res.json(await whatsapp.desvincular())));
 r.get('/whatsapp/grupos', conAviso(async (req, res) => res.json({ grupos: await whatsapp.grupos() })));
 r.put('/whatsapp/grupo', conAviso(async (req, res) => res.json({ grupo: await whatsapp.elegirGrupo(String(req.body?.id || '')) })));

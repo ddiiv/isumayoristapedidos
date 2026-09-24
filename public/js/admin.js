@@ -1400,6 +1400,7 @@ const ESTADO_WHATSAPP = {
   apagado: ['no', 'Sin vincular'],
   conectando: ['aviso', 'Conectando…'],
   'esperando-qr': ['aviso', 'Esperando que escanees el QR'],
+  'esperando-codigo': ['aviso', 'Esperando que escribas el código en el teléfono'],
   conectado: ['si', 'Conectado'],
   reconectando: ['aviso', 'Reconectando…'],
   'esperando-lugar': ['aviso', 'Esperando a que se libere la sesión'],
@@ -1418,7 +1419,8 @@ async function cargarAvisos() {
 function seguirAvisos() {
   clearTimeout(timerAvisos);
   const conexion = datos.avisos?.whatsapp?.conexion;
-  if (vista.tab !== 'avisos' || !['conectando', 'esperando-qr', 'reconectando', 'esperando-lugar'].includes(conexion)) return;
+  const esperando = ['conectando', 'esperando-qr', 'esperando-codigo', 'reconectando', 'esperando-lugar'];
+  if (vista.tab !== 'avisos' || !esperando.includes(conexion)) return;
   timerAvisos = setTimeout(() => conError(async () => {
     if (vista.tab !== 'avisos') return;
     await cargarAvisos();
@@ -1443,13 +1445,25 @@ function vistaAvisos() {
     ceder: 'otra copia del servidor tomó la sesión',
     reconectar: 'se cortó la conexión y volvió sola',
     reiniciar: 'el reinicio normal de la vinculación',
-    esperar: 'el QR venció sin escanearse',
+    esperar: 'el QR o el código vencieron sin usarse',
+    'codigo-rechazado': 'WhatsApp no quiso dar el código',
   };
   const corte = w.ultimoCorte?.cuando
     ? `<p class="chico">Último corte: ${esc(momento(w.ultimoCorte.cuando))}${
       MOTIVO_CORTE[w.ultimoCorte.accion] ? ` — ${esc(MOTIVO_CORTE[w.ultimoCorte.accion])}` : ''}${
       w.ultimoCorte.codigo ? ` (código ${esc(String(w.ultimoCorte.codigo))})` : ''}.</p>`
     : '';
+
+  /*
+   * Si alguna vez llegó un emparejamiento, el escaneo llega al servidor y lo
+   * que falla es de acá para adelante. Si nunca llegó, el teléfono ni siquiera
+   * pudo entregarlo: eso es entre el número y WhatsApp, no el portal.
+   */
+  const escaneo = w.ultimoEscaneo?.cuando
+    ? `<p class="chico">Último emparejamiento que llegó al servidor: ${esc(momento(w.ultimoEscaneo.cuando))}${
+      w.ultimoEscaneo.modo === 'codigo' ? ' (por código)' : ' (por QR)'}.</p>`
+    : '';
+  const pie = corte + escaneo;
 
   let cuerpo;
   if (w.conexion === 'esperando-qr' && w.qr) {
@@ -1462,6 +1476,19 @@ function vistaAvisos() {
           <li>Escaneá este código. Si cambia, no pasa nada: la pantalla se actualiza sola.</li>
         </ol>
       </div>`;
+  } else if (w.conexion === 'esperando-codigo' && w.codigo) {
+    cuerpo = `
+      <div class="qr-caja">
+        <p class="codigo-vinculacion">${esc(String(w.codigo).replace(/^(.{4})(.{4})$/, "$1-$2"))}</p>
+        <ol class="pasos-qr">
+          <li>Abrí WhatsApp en el teléfono del número que va a mandar los pedidos.</li>
+          <li>Tocá <b>Dispositivos vinculados</b> y después <b>Vincular un dispositivo</b>.</li>
+          <li>Abajo de todo, <b>Vincular con el número de teléfono</b>.</li>
+          <li>Escribí las ocho letras, sin el guión. El código dura unos minutos: si vence, pedí otro.</li>
+        </ol>
+      </div>
+      <div class="acciones"><button class="btn texto quitar" data-wa-cancelar>Cancelar</button></div>
+      ${pie}`;
   } else if (w.conexion === 'conectado') {
     const grupos = datos.gruposWhatsapp;
     cuerpo = `
@@ -1484,14 +1511,28 @@ function vistaAvisos() {
         ${w.grupo ? '<button class="btn borde" data-wa-prueba>Mandar mensaje de prueba</button>' : ''}
         <button class="btn texto quitar" data-wa-desvincular>Desvincular</button>
       </div>
-      ${corte}`;
+      ${pie}`;
   } else if (['conectando', 'reconectando'].includes(w.conexion)) {
     cuerpo = '<p class="cargando">Conectando con WhatsApp…</p>';
   } else {
+    /*
+     * Dos caminos, porque son dos mecanismos distintos de punta a punta: si el
+     * teléfono dice "error de conexión" al escanear, el del código suele andar,
+     * y si tampoco anda, el motivo aparece acá en vez de quedarse en el teléfono.
+     */
     cuerpo = `
       ${w.error ? `<p class="mensaje error">${esc(w.error)}</p>` : ''}
-      <div class="acciones"><button class="btn" data-wa-vincular>Vincular WhatsApp</button></div>
-      ${corte}`;
+      <div class="acciones"><button class="btn" data-wa-vincular>Vincular con QR</button></div>
+      <div class="campos">
+        <div class="campo ancho">
+          <label for="wa-numero">O vincular escribiendo un código, sin cámara</label>
+          <input id="wa-numero" type="tel" inputmode="numeric" autocomplete="off" placeholder="5493511234567">
+          <p class="sub">El número del WhatsApp que va a mandar los pedidos, con código de país y sin
+            espacios. WhatsApp devuelve un código de ocho letras para escribir en el teléfono.</p>
+        </div>
+      </div>
+      <div class="acciones"><button class="btn borde" data-wa-codigo>Pedir código</button></div>
+      ${pie}`;
   }
 
   const s = datos.avisos.stocker || { configurado: false, falta: [] };
@@ -1923,6 +1964,19 @@ raiz.addEventListener('click', (e) => conError(async () => {
   if (t.closest('[data-wa-vincular]')) {
     datos.avisos.whatsapp = await api('/whatsapp/vincular', { method: 'POST' });
     datos.gruposWhatsapp = null;
+    pintar();
+    return;
+  }
+  if (t.closest('[data-wa-codigo]')) {
+    const numero = el('#wa-numero')?.value?.trim();
+    if (!numero) { mensaje('Escribí el número, con código de país.', 'error'); pintar(); return; }
+    datos.avisos.whatsapp = await api('/whatsapp/vincular', { method: 'POST', body: JSON.stringify({ numero }) });
+    datos.gruposWhatsapp = null;
+    pintar();
+    return;
+  }
+  if (t.closest('[data-wa-cancelar]')) {
+    datos.avisos.whatsapp = await api('/whatsapp/desvincular', { method: 'POST' });
     pintar();
     return;
   }

@@ -172,6 +172,19 @@ const server = app.listen(PORT, () => {
   stocker.arrancar();
 });
 
+/*
+ * Una promesa rota no puede llevarse puesto el portal.
+ *
+ * Node termina el proceso cuando una promesa queda sin atender, y las hay
+ * fuera de las rutas: los oyentes de WhatsApp, la cola de STOCKER, las
+ * miniaturas. Un volumen lleno mientras alguien vincula el WhatsApp tiraba
+ * abajo el sitio entero, con los pedidos adentro. Queda anotado en el log y
+ * el portal sigue atendiendo.
+ */
+process.on('unhandledRejection', (e) => {
+  console.error('  promesa sin atender:', e?.stack || e);
+});
+
 for (const senal of ['SIGTERM', 'SIGINT']) {
   process.on(senal, () => { whatsapp.apagar(); server.close(() => process.exit(0)); });
 }
