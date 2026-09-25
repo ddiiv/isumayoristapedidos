@@ -18,7 +18,7 @@ const { importarPlanilla } = require('../excel');
 const { ordenarCatalogo } = require('../normalizar');
 const paleta = require('../colores');
 const {
-  leerPedido, armarPedido, minimoDeCompra, guardarMinimoDeCompra,
+  leerPedido, armarPedido, minimoDeCompra, guardarMinimoDeCompra, faltaParaElMinimo,
 } = require('../pedidos');
 const auth = require('../auth');
 
@@ -1352,7 +1352,8 @@ r.put('/pedidos/:numero/items', conErrores(async (req, res) => {
    */
   const aviso = actual === 'pendiente' ? 'confirmado-con-cambios' : 'modificado';
   const avisoCliente = await avisarClienteDelCambio(fila.numero, aviso, limpiarNota(req.body?.nota), rearmado.cambios);
-  res.json({ pedido: conSeguimiento(leerPedido(fila.numero)), errores: rearmado.errores, avisoCliente });
+  const pedido = conSeguimiento(leerPedido(fila.numero));
+  res.json({ pedido, errores: rearmado.errores, avisoCliente, minimo: quedoCorto(pedido) });
 }));
 
 /*
@@ -1412,7 +1413,8 @@ r.put('/pedidos/:numero/confirmar-stock', conErrores(async (req, res) => {
     registrarEstado(fila.id, 'confirmado', { nota: nota || 'Confirmamos el stock de todo lo que pediste.' });
     avisarAStocker(fila.id, 'confirmado');
     const avisoCliente = await avisarClienteDelCambio(fila.numero, 'confirmado', nota);
-    return res.json({ pedido: conSeguimiento(leerPedido(fila.numero)), conCambios: false, avisoCliente });
+    const igual = conSeguimiento(leerPedido(fila.numero));
+    return res.json({ pedido: igual, conCambios: false, avisoCliente, minimo: quedoCorto(igual) });
   }
 
   const carrito = new Map();
@@ -1435,7 +1437,11 @@ r.put('/pedidos/:numero/confirmar-stock', conErrores(async (req, res) => {
   // Lo apartado en STOCKER ya no coincide con lo que va a salir: se le manda el pedido rearmado.
   avisarAStocker(fila.id, 'modificado');
   const avisoCliente = await avisarClienteDelCambio(fila.numero, 'confirmado-con-cambios', nota, rearmado.cambios);
-  res.json({ pedido: conSeguimiento(leerPedido(fila.numero)), conCambios: true, cambios: rearmado.cambios, avisoCliente });
+  const rearmadoFinal = conSeguimiento(leerPedido(fila.numero));
+  res.json({
+    pedido: rearmadoFinal, conCambios: true, cambios: rearmado.cambios, avisoCliente,
+    minimo: quedoCorto(rearmadoFinal),
+  });
 }));
 
 /*
@@ -1857,6 +1863,17 @@ function compararItems(antes, despues) {
  * Los errores esperables —no está conectado, ese grupo no existe— vuelven con
  * su código y su mensaje, para que el panel diga qué hacer en vez de "falló".
  */
+/*
+ * Si un pedido quedó por debajo del mínimo de compra después de modificarlo.
+ *
+ * Acá NO se frena. El mínimo existe para que no entren pedidos chicos, no para
+ * dejar trabado uno grande que se achicó porque faltó stock: si el portal se
+ * negara a confirmarlo, ISUWAYA no podría ni mandar lo que tiene ni cerrar el
+ * pedido. Se avisa —en la pantalla antes de confirmar y acá al volver— y la
+ * decisión es de quien está mirando el pedido.
+ */
+const quedoCorto = (pedido) => faltaParaElMinimo(pedido?.total);
+
 const conAviso = (fn) => conErrores(async (req, res) => {
   try {
     await fn(req, res);

@@ -591,6 +591,8 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 20px 128px; }
 .mensaje.error { background: var(--rojo-claro); color: var(--rojo); border-color: var(--rojo-borde); }
 .mensaje.ok { background: var(--verde-claro); color: var(--verde-tinta); border-color: var(--verde-borde); }
 .mensaje.info { background: var(--azul-claro); color: var(--azul-hover); border-color: var(--azul-borde); }
+/* Salió bien, pero hay algo para mirar: un pedido que quedó por debajo del mínimo. */
+.mensaje.aviso { background: var(--ambar-claro); color: var(--ambar); border-color: var(--ambar-borde); }
 
 .vacio { text-align: center; padding: 56px 20px; color: var(--tinta-suave); }
 .vacio h3 { font-family: var(--letra-titulo); font-size: 20px; color: var(--tinta); margin: 0 0 6px; }

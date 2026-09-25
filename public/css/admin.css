@@ -115,6 +115,14 @@ input.medida {
   font-variant-numeric: tabular-nums;
 }
 
+/* Un pedido que al modificarlo queda por debajo del mínimo de compra. */
+.totales-fila b.corto { color: var(--ambar); }
+.minimo-corto {
+  margin: 8px 0 0; padding: 11px 14px; border-radius: 12px;
+  background: var(--ambar-claro); border: 1px solid var(--ambar-borde);
+  color: var(--ambar); font-size: 13.5px; font-weight: 600; line-height: 1.5;
+}
+
 .subida input[type="color"] { width: 46px; height: 34px; padding: 2px; border: 1px solid var(--borde-campo); border-radius: 8px; }
 .subida input[name="nombre"] {
   font: inherit; font-size: 14px; padding: 9px 11px; color: var(--tinta);

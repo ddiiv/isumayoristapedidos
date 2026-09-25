@@ -30,6 +30,24 @@ let filtroEstadisticas = { desde: '', hasta: '' };
 let filtroTrafico = { dias: 30 };
 let aviso = null;
 
+/*
+ * Cuánto le falta a un total para el mínimo de compra. Null si llega, o si no
+ * hay mínimo puesto.
+ *
+ * Modificar un pedido puede dejarlo por debajo: falta stock y el pedido se
+ * rearma con lo que hay, o se le sacan artículos desde el editor. Eso NO se
+ * frena —un pedido grande que se achicó por falta de stock quedaría trabado,
+ * sin poder confirmarse ni mandarse—, pero se avisa antes de confirmar y se
+ * recuerda después. La decisión es de quien mira el pedido.
+ */
+const faltaParaElMinimo = (total) => {
+  const minimo = Number(datos.ajustes?.minimoCompra) || 0;
+  const n = Number(total);
+  if (!minimo || !Number.isFinite(n)) return null;
+  return n < minimo ? { minimo, falta: minimo - n } : null;
+};
+const textoDelMinimo = (c) => `Queda ${pesos(c.falta)} por debajo del mínimo de compra, que es ${pesos(c.minimo)}.`;
+
 const api = async (ruta, opciones = {}) => {
   const r = await fetch(`/api/admin${ruta}`, {
     headers: opciones.body instanceof FormData ? {} : { 'Content-Type': 'application/json' },
@@ -787,6 +805,7 @@ function vistaStockPedido() {
         <div><span class="chico">TOTAL ESTIMADO</span><b id="st-total">$ 0</b></div>
       </div>
       <p class="sub" id="st-explica"></p>
+      <p class="minimo-corto" id="st-minimo" hidden></p>
       <div class="campo ancho">
         <label for="st-nota">Nota para el cliente <span class="apagado">(opcional, le llega en el mail)</span></label>
         <input id="st-nota" value="${esc(e.nota || '')}" placeholder="Lo que faltaba entra la semana que viene; si lo querés, avisanos.">
@@ -854,6 +873,27 @@ function refrescarResumenStock() {
     boton.textContent = 'Confirmar: hay stock de todo';
     el('#st-explica').textContent = 'Al cliente le llega la confirmación con el pedido.';
   }
+
+  // El total queda a mano para la pregunta de antes de confirmar.
+  vista.stock.total = total;
+  avisarDelMinimo(hay ? total : null, '#st-minimo', '#st-total');
+}
+
+/*
+ * Pinta —o esconde— el aviso de que el pedido queda por debajo del mínimo.
+ *
+ * Con total null no hay nada que avisar: es el caso de un pedido que quedó sin
+ * nada, donde el problema es otro y ya se dice arriba.
+ */
+function avisarDelMinimo(total, dondeElAviso, dondeElTotal) {
+  const aviso = el(dondeElAviso);
+  const corto = total === null ? null : faltaParaElMinimo(total);
+  if (aviso) {
+    aviso.hidden = !corto;
+    aviso.textContent = corto ? textoDelMinimo(corto) : '';
+  }
+  el(dondeElTotal)?.classList.toggle('corto', Boolean(corto));
+  return corto;
 }
 
 /** Lee los casilleros al modelo, para que repintar no los pierda. */
@@ -969,6 +1009,7 @@ function vistaEditorPedido() {
         <div><span class="chico">SUMA DE ARTÍCULOS</span><b id="ed-base">$ 0</b></div>
         <div><span class="chico">TOTAL ESTIMADO</span><b id="ed-total">$ 0</b></div>
       </div>
+      <p class="minimo-corto" id="ed-minimo" hidden></p>
       <p class="chico">El total definitivo lo calcula el servidor al guardar, con sus precios.</p>
 
       <div class="acciones">
@@ -1021,6 +1062,8 @@ function refrescarTotalEditor() {
   if (el('#ed-unidades')) el('#ed-unidades').textContent = unidades;
   if (el('#ed-base')) el('#ed-base').textContent = pesos(base);
   if (el('#ed-total')) el('#ed-total').textContent = pesos(Math.max(0, total));
+  e.total = Math.max(0, total);
+  avisarDelMinimo(unidades ? e.total : null, '#ed-minimo', '#ed-total');
 }
 
 /*
@@ -2248,6 +2291,17 @@ raiz.addEventListener('click', (e) => conError(async () => {
     const faltan = [...raiz.querySelectorAll('[data-stock-sku]')].some((i) => vista.stock.hay[i.dataset.stockSku] < Number(i.dataset.pedido));
     // Con cambios le llega al cliente un pedido distinto del que hizo: se pregunta antes.
     if (faltan && !window.confirm(`¿Confirmar ${numero} con los cambios y avisarle al cliente cómo queda?`)) return;
+    /*
+     * Por debajo del mínimo se pregunta aparte, con los dos montos.
+     *
+     * Es una pregunta, no una traba: el pedido pudo achicarse porque faltó
+     * stock, y no poder confirmarlo dejaría a ISUWAYA sin mandar lo que sí
+     * tiene. Se decide acá, sabiendo cuánto es.
+     */
+    const cortoStock = faltaParaElMinimo(vista.stock.total);
+    if (cortoStock && !window.confirm(
+      `${numero} queda en ${pesos(vista.stock.total)}: ${pesos(cortoStock.falta)} por debajo `
+      + `del mínimo de compra, que es ${pesos(cortoStock.minimo)}.\n\n¿Confirmarlo igual?`)) return;
     const r = await api(`/pedidos/${encodeURIComponent(numero)}/confirmar-stock`, {
       method: 'PUT',
       body: JSON.stringify({
@@ -2259,7 +2313,10 @@ raiz.addEventListener('click', (e) => conError(async () => {
     vista.stock = null;
     await cargar();
     sacarDelDetalleSiSeFue(numero);
-    mensaje(`${numero}: ${r.conCambios ? 'confirmado con cambios' : 'confirmado'}.${r.avisoCliente ? ` Aviso al cliente: ${r.avisoCliente}.` : ''}`);
+    mensaje(`${numero}: ${r.conCambios ? 'confirmado con cambios' : 'confirmado'}.`
+      + `${r.avisoCliente ? ` Aviso al cliente: ${r.avisoCliente}.` : ''}`
+      + `${r.minimo ? ` Quedó ${pesos(r.minimo.falta)} por debajo del mínimo.` : ''}`,
+    r.minimo ? 'aviso' : 'ok');
     pintar();
     return;
   }
@@ -2300,6 +2357,10 @@ raiz.addEventListener('click', (e) => conError(async () => {
       mensaje('El pedido quedaría vacío. Si no va a salir, marcalo cancelado.', 'error');
       return pintar();
     }
+    const cortoEditor = faltaParaElMinimo(e.total);
+    if (cortoEditor && !window.confirm(
+      `${e.numero} quedaría en ${pesos(e.total)}: ${pesos(cortoEditor.falta)} por debajo `
+      + `del mínimo de compra, que es ${pesos(cortoEditor.minimo)}.\n\n¿Guardarlo igual?`)) return;
     /*
      * Van SKU y cantidades. El importe no se manda ni de casualidad: el
      * servidor valoriza con sus precios y devuelve el total que vale.
@@ -2312,7 +2373,9 @@ raiz.addEventListener('click', (e) => conError(async () => {
     vista.pedido = e.numero;
     await cargar();
     sacarDelDetalleSiSeFue(e.numero);
-    mensaje(`${e.numero} quedó modificado: ${pesos(r.pedido.total)}, ${r.pedido.unidades} u. El cliente ya lo ve.`);
+    mensaje(`${e.numero} quedó modificado: ${pesos(r.pedido.total)}, ${r.pedido.unidades} u. El cliente ya lo ve.`
+      + `${r.minimo ? ` Quedó ${pesos(r.minimo.falta)} por debajo del mínimo.` : ''}`,
+    r.minimo ? 'aviso' : 'ok');
     pintar();
     return;
   }

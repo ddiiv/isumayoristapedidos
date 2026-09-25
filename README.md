@@ -195,6 +195,14 @@ puede armar cualquiera desde la consola del navegador, y entre que se arma un
 pedido y se confirma puede haber cambiado un precio. Un pedido por debajo del
 mínimo vuelve con un 400 y el monto que falta.
 
+Modificar un pedido desde el panel puede dejarlo por debajo del mínimo: falta
+stock y se rearma con lo que hay, o se le sacan artículos desde el editor. Ahí
+**no se frena**, a propósito — un pedido grande que se achicó por falta de stock
+quedaría trabado, sin poder confirmarse ni mandarse. Lo que hace el panel es
+avisar: el total estimado se pone en ámbar con cuánto falta, antes de confirmar
+pregunta con los dos montos, y el mensaje del final lo recuerda. La decisión es
+de quien está mirando el pedido.
+
 ## Los clientes
 
 Todo el que confirma un pedido queda en **Clientes**, reconocido por su **CUIT**

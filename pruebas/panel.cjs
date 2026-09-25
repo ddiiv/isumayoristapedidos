@@ -703,6 +703,62 @@ const mover = (numero, estado, nota) => pedir(
   const sinNada = await pedir('/api/faltantes', { metodo: 'POST', cuerpo: {} });
   chk('y un cuerpo vacío no rompe nada', 200, sinNada.status);
 
+  tit('12. MODIFICAR UN PEDIDO PUEDE DEJARLO POR DEBAJO DEL MÍNIMO');
+  /*
+   * Y ahí NO se frena, a propósito.
+   *
+   * El mínimo existe para que no entren pedidos chicos, no para dejar trabado
+   * uno grande que se achicó porque faltó stock: si el portal se negara a
+   * confirmarlo, ISUWAYA no podría ni mandar lo que tiene ni cerrar el pedido.
+   * Lo que sí tiene que pasar es que el panel se entere, para poder avisar
+   * antes de confirmar y recordarlo después.
+   */
+  {
+    const ajustes = (minimoCompra) => pedir('/api/admin/ajustes', {
+      metodo: 'PUT', como: 'admin', cuerpo: { minimoCompra },
+    });
+
+    // Los dos pedidos se hacen ANTES de poner el mínimo: después no entrarían.
+    const paraRecortar = await pedidoNuevo(producto, { [a.sku]: 4, [b.sku]: 2 });
+    const paraEditar = await pedidoNuevo(producto, { [a.sku]: 4, [b.sku]: 2 });
+    const entero = Math.round(a.precio * 4 + b.precio * 2);
+    // El mínimo es exactamente lo que valen: cualquier recorte los deja cortos.
+    chk('el mínimo se guarda', entero, (await ajustes(entero)).json?.minimoCompra);
+
+    const recortado = await pedir(`/api/admin/pedidos/${paraRecortar}/confirmar-stock`, {
+      metodo: 'PUT', como: 'admin', cuerpo: { disponibles: { [a.sku]: 2, [b.sku]: 0 } },
+    });
+    chk('revisar el stock no se traba por el mínimo', 200, recortado.status);
+    chk('el pedido queda confirmado con cambios', ['modificado', true],
+      [recortado.json?.pedido?.estado, recortado.json?.conCambios]);
+    chk('y el panel se entera de cuánto quedó corto',
+      [entero, entero - Math.round(a.precio * 2)],
+      [recortado.json?.minimo?.minimo, recortado.json?.minimo?.falta]);
+
+    const editado = await pedir(`/api/admin/pedidos/${paraEditar}/items`, {
+      metodo: 'PUT', como: 'admin',
+      cuerpo: { carrito: [{ skuAgrupador: producto.sku, cantidades: { [a.sku]: 1 } }] },
+    });
+    chk('el editor tampoco se traba', 200, editado.status);
+    chk('y también avisa cuánto falta', entero - Math.round(a.precio * 1), editado.json?.minimo?.falta);
+
+    const devuelta = await pedir(`/api/admin/pedidos/${paraEditar}/items`, {
+      metodo: 'PUT', como: 'admin',
+      cuerpo: { carrito: [{ skuAgrupador: producto.sku, cantidades: { [a.sku]: 4, [b.sku]: 2 } }] },
+    });
+    chk('y si vuelve a llegar al mínimo, deja de avisar', [200, null],
+      [devuelta.status, devuelta.json?.minimo ?? null]);
+
+    chk('sin mínimo puesto no se avisa nada', null, (await (async () => {
+      await ajustes(0);
+      const otro = await pedidoNuevo(producto, { [a.sku]: 1 });
+      const r = await pedir(`/api/admin/pedidos/${otro}/confirmar-stock`, {
+        metodo: 'PUT', como: 'admin', cuerpo: { disponibles: { [a.sku]: 1 } },
+      });
+      return r.json?.minimo ?? null;
+    })()));
+  }
+
   console.log(`\n\x1b[1m─────────────────────────────\x1b[0m\n  \x1b[32mPasaron: ${ok}\x1b[0m   \x1b[31mFallaron: ${ko}\x1b[0m`);
   process.exit(ko ? 1 : 0);
 })().catch((e) => { console.error('ERROR', e); process.exit(1); });
