@@ -1,4 +1,4 @@
-const { db, ordenDeTalle, proximoNumeroDePedido } = require('./db');
+const { db, ordenDeTalle, proximoNumeroDePedido, leerConfig, guardarConfig } = require('./db');
 
 /*
  * Armado y valorización del pedido.
@@ -252,10 +252,76 @@ function guardarPedido({
   };
 }
 
+// ── El mínimo de compra ───────────────────────────────────────────
+/*
+ * Cuánto tiene que sumar un pedido para que el portal lo acepte.
+ *
+ * Es mayorista: por debajo de cierto monto el envío y el papeleo se comen la
+ * venta. El número lo pone ISUWAYA desde el panel y puede cambiar cuando
+ * quiera, así que no vive en el código ni en una variable del servidor: vive
+ * en la configuración, como el grupo de WhatsApp.
+ *
+ * Cero significa sin mínimo, que es como arranca: un portal recién instalado
+ * no puede estar rechazando pedidos por una regla que nadie configuró.
+ */
+const TOPE_MINIMO = 1_000_000_000;   // mil millones: un dedazo, no un mínimo
+
+function minimoDeCompra() {
+  const n = Number(leerConfig('minimo_compra') || 0);
+  return Number.isFinite(n) && n > 0 ? Math.round(n) : 0;
+}
+
+/*
+ * El monto, escrito como lo escribe una persona acá.
+ *
+ * "150.000" son ciento cincuenta mil, no ciento cincuenta: el punto es el
+ * separador de miles y la coma el decimal. Leerlo con Number() a secas
+ * convertía un mínimo de $ 150.000 en uno de $ 150 sin que nadie lo notara
+ * hasta que entrara el primer pedido de doscientos pesos.
+ */
+function aNumero(valor) {
+  const texto = String(valor ?? '').trim().replace(/[^\d.,-]/g, '');
+  if (!texto) return NaN;
+  if (texto.includes(',')) return Number(texto.replace(/\./g, '').replace(',', '.'));
+  // Sólo son miles si van de a tres: "150.000" sí, "150.5" no.
+  if (/^-?\d{1,3}(\.\d{3})+$/.test(texto)) return Number(texto.replace(/\./g, ''));
+  return Number(texto);
+}
+
+function guardarMinimoDeCompra(valor) {
+  const n = aNumero(valor);
+  if (!Number.isFinite(n) || n < 0) {
+    throw Object.assign(new Error('El mínimo tiene que ser un número de cero para arriba.'), { status: 400 });
+  }
+  if (n > TOPE_MINIMO) {
+    throw Object.assign(new Error('Ese mínimo es imposible. Revisá el número.'), { status: 400 });
+  }
+  const redondeado = Math.round(n);
+  guardarConfig('minimo_compra', String(redondeado));
+  return redondeado;
+}
+
+/*
+ * Qué le falta a un pedido para llegar al mínimo.
+ *
+ * Devuelve null cuando ya llega —o cuando no hay mínimo—, así quien llama
+ * pregunta una sola cosa. El faltante se calcula acá y no en el navegador
+ * porque es el mismo número que se muestra y el que se exige.
+ */
+function faltaParaElMinimo(total) {
+  const minimo = minimoDeCompra();
+  const suma = Number(total) || 0;
+  if (!minimo || suma >= minimo) return null;
+  return { minimo, falta: minimo - suma };
+}
+
 function leerPedido(numero) {
   const fila = db.prepare('SELECT * FROM pedidos WHERE numero = ?').get(numero);
   if (!fila) return null;
   return { ...fila, cliente: JSON.parse(fila.cliente), items: JSON.parse(fila.items) };
 }
 
-module.exports = { validarCliente, cuitValido, armarPedido, guardarPedido, leerPedido, CAMPOS_CLIENTE };
+module.exports = {
+  validarCliente, cuitValido, armarPedido, guardarPedido, leerPedido, CAMPOS_CLIENTE,
+  minimoDeCompra, guardarMinimoDeCompra, faltaParaElMinimo,
+};

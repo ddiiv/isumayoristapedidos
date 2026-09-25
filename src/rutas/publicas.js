@@ -1,12 +1,27 @@
 const express = require('express');
 const { db } = require('../db');
-const { validarCliente, cuitValido, armarPedido, guardarPedido, leerPedido } = require('../pedidos');
+const {
+  validarCliente, cuitValido, armarPedido, guardarPedido, leerPedido,
+  minimoDeCompra, faltaParaElMinimo,
+} = require('../pedidos');
 const clientes = require('../clientes');
 const { pdfPedido, pdfRotulo } = require('../pdf');
 const { avisarPedido, avisarCliente } = require('../notificaciones');
 const auth = require('../auth');
 const eventos = require('../eventos');
 const stocker = require('../stocker');
+
+const pesos = (n) => '$ ' + Number(n || 0).toLocaleString('es-AR', { maximumFractionDigits: 0 });
+
+/*
+ * El aviso del mínimo, con las mismas palabras en todos lados.
+ *
+ * Lo arma el servidor y no la pantalla: es el texto que se muestra mientras se
+ * arma el carrito y también el que vuelve si alguien igual intenta confirmar.
+ * Dos redacciones distintas para la misma regla se leen como dos reglas.
+ */
+const avisoDelMinimo = ({ minimo, falta }) =>
+  `El pedido mínimo es de ${pesos(minimo)}. Te faltan ${pesos(falta)} para llegar.`;
 
 const r = express.Router();
 
@@ -200,7 +215,13 @@ r.get('/catalogo', (req, res) => {
   salida.sort((a, b) => ((puntajeDe(b)?.puntajeFinal || 0) - (puntajeDe(a)?.puntajeFinal || 0))
     || ((puntajeDe(b)?.unidades || 0) - (puntajeDe(a)?.unidades || 0)));
 
-  res.json({ categorias, productos: salida, nuevos: salida.filter((p) => p.nuevo).length });
+  res.json({
+    categorias,
+    productos: salida,
+    nuevos: salida.filter((p) => p.nuevo).length,
+    // Cero es sin mínimo. Va en el catálogo para que la tienda lo sepa desde el primer clic.
+    minimoCompra: minimoDeCompra(),
+  });
 });
 
 // POST /api/pedidos/previsualizar — valoriza sin guardar nada.
@@ -224,8 +245,18 @@ r.post('/pedidos/previsualizar', frenar(demasiadosPapeles), (req, res) => {
   if (!items.length) {
     return res.status(400).json({ message: 'El pedido está vacío.', errores, erroresCliente });
   }
+  const falta = faltaParaElMinimo(total);
   // Lo que salió de lo guardado vuelve tapado: el resumen lo ve quien escribió el CUIT, que puede no ser el dueño.
-  res.json({ cliente: clientes.enmascarar(cliente, ocultos), items, total, unidades, errores, erroresCliente });
+  res.json({
+    cliente: clientes.enmascarar(cliente, ocultos),
+    items,
+    total,
+    unidades,
+    errores,
+    erroresCliente,
+    // El resumen avisa, pero no rechaza: rechazar es cosa de confirmar.
+    minimo: falta ? { ...falta, aviso: avisoDelMinimo(falta) } : null,
+  });
 });
 
 /*
@@ -263,6 +294,18 @@ r.post('/pedidos', frenar(demasiadosPedidos), async (req, res, next) => {
 
     const { items, total, unidades, errores } = armarPedido(req.body?.carrito);
     if (!items.length) return res.status(400).json({ message: 'El pedido está vacío.', errores });
+
+    /*
+     * El mínimo se exige acá, con los precios del servidor.
+     *
+     * La tienda ya avisa y no deja seguir, pero el total que decide es este: el
+     * del navegador lo puede armar cualquiera desde la consola, y los precios
+     * pueden haber cambiado entre que se armó el carrito y se confirmó.
+     */
+    const falta = faltaParaElMinimo(total);
+    if (falta) {
+      return res.status(400).json({ message: avisoDelMinimo(falta), minimo: falta });
+    }
 
     /*
      * El pedido queda atado a su cliente: a la cuenta si hay sesión, y si no al

@@ -181,6 +181,20 @@ configurado.
 La forma de envío la escribe el cliente —cada uno trabaja con su transporte—,
 con un máximo de 60 caracteres para que entre en el rótulo.
 
+### El mínimo de compra
+
+En **Ajustes** se pone el monto que un pedido tiene que alcanzar para poder
+confirmarse. En cero no hay mínimo, que es como arranca.
+
+Con un mínimo puesto, el cliente lo ve venir: el botón flotante dice cuánto le
+falta mientras recorre el catálogo, y en el carrito aparece un cartel con el
+faltante y el mínimo, con **Continuar** apagado hasta que llegue.
+
+El servidor lo exige aparte, con sus propios precios: el carrito que llega lo
+puede armar cualquiera desde la consola del navegador, y entre que se arma un
+pedido y se confirma puede haber cambiado un precio. Un pedido por debajo del
+mínimo vuelve con un 400 y el monto que falta.
+
 ## Los clientes
 
 Todo el que confirma un pedido queda en **Clientes**, reconocido por su **CUIT**

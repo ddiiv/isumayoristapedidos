@@ -498,6 +498,9 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 20px 128px; }
 .flotante.visible { transform: translateX(-50%); }
 .flotante.visible:active { transform: translateX(-50%) translateY(1px); }
 .flotante .cuenta-items { font-weight: 400; opacity: .92; font-size: 13px; }
+/* Con el carrito por debajo del mínimo, el botón lo dice desde el catálogo. */
+.flotante .falta { font-weight: 600; }
+.flotante.corto .ir { background: var(--ambar-claro); color: var(--ambar); }
 .flotante .ir {
   background: var(--papel); color: var(--azul); border-radius: 999px; padding: 9px 16px;
   font-family: var(--letra-titulo); font-size: 15px; font-variant-numeric: tabular-nums;
@@ -574,6 +577,15 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 20px 128px; }
 .total-caja .n {
   font-family: var(--letra-titulo); font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums;
 }
+
+/* Lo que falta para llegar al mínimo de compra: debajo del total, donde se mira. */
+.aviso-minimo {
+  display: grid; gap: 3px; margin-top: 12px; padding: 13px 16px;
+  background: var(--ambar-claro); border: 1px solid var(--ambar-borde);
+  border-radius: 12px; color: var(--ambar); font-size: 13.5px; line-height: 1.5;
+}
+.aviso-minimo b { font-size: 15px; }
+.aviso-minimo span { color: var(--tinta-2); }
 
 .mensaje { padding: 12px 14px; border-radius: 12px; font-size: 13.5px; margin-bottom: 14px; line-height: 1.5; border: 1px solid transparent; }
 .mensaje.error { background: var(--rojo-claro); color: var(--rojo); border-color: var(--rojo-borde); }

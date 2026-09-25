@@ -903,6 +903,55 @@ const planilla = path.join(__dirname, 'catalogo-isuwaya.xlsx');
     /hasta 60/.test((await conEnvio('x'.repeat(61))).json?.erroresCliente?.formaEnvio || ''));
   chk('y sigue siendo obligatoria', true, Boolean((await conEnvio('  ')).json?.erroresCliente?.formaEnvio));
 
+  tit('24. EL MÍNIMO DE COMPRA LO PONE EL PANEL Y LO EXIGE EL SERVIDOR');
+  /*
+   * La pantalla avisa y apaga el botón, pero la regla se prueba donde nadie la
+   * puede saltear: el carrito que llega al servidor lo arma cualquiera desde la
+   * consola del navegador.
+   */
+  const ponerMinimo = (minimoCompra) => pedir('/api/admin/ajustes', {
+    metodo: 'PUT', admin: true, cuerpo: { minimoCompra },
+  });
+  const carritoChico = [{ skuAgrupador: p.sku, cantidades: { [unSku.sku]: 1 } }];
+  const totalChico = unSku.precio;
+
+  chk('de fábrica no hay mínimo', 0, (await pedir('/api/admin/ajustes', { admin: true })).json?.minimoCompra);
+
+  const puesto = await ponerMinimo(totalChico + 5000);
+  chk('el panel lo guarda', [200, totalChico + 5000], [puesto.status, puesto.json?.minimoCompra]);
+  chk('y el catálogo lo publica', totalChico + 5000, (await pedir('/api/catalogo')).json?.minimoCompra);
+
+  const previaCorta = await pedir('/api/pedidos/previsualizar', {
+    metodo: 'POST', cuerpo: { cliente: CLIENTE_OK, carrito: carritoChico },
+  });
+  chk('el resumen se arma igual', 200, previaCorta.status);
+  chk('pero dice cuánto falta', [totalChico + 5000, 5000],
+    [previaCorta.json?.minimo?.minimo, previaCorta.json?.minimo?.falta]);
+
+  const corto = await pedir('/api/pedidos', {
+    metodo: 'POST', cuerpo: { cliente: CLIENTE_OK, carrito: carritoChico },
+  });
+  chk('y un pedido por debajo no entra', 400, corto.status);
+  chk('con el monto que falta escrito', true, /faltan/i.test(corto.json?.message || ''));
+  chk('y sin guardarse', undefined, corto.json?.numero);
+
+  await ponerMinimo(totalChico);
+  const justo = await pedir('/api/pedidos', {
+    metodo: 'POST', cuerpo: { cliente: CLIENTE_OK, carrito: carritoChico },
+  });
+  chk('justo en el mínimo sí entra', 201, justo.status);
+
+  chk('un mínimo negativo se rechaza', 400, (await ponerMinimo(-1)).status);
+  chk('uno imposible también', 400, (await ponerMinimo(1e12)).status);
+  chk('y un texto no lo rompe', 400, (await ponerMinimo('mucha plata')).status);
+  chk('los pesos escritos a mano se entienden', 150000, (await ponerMinimo('$ 150.000')).json?.minimoCompra);
+
+  await ponerMinimo(0);
+  chk('en cero vuelve a entrar cualquier pedido', 201, (await pedir('/api/pedidos', {
+    metodo: 'POST', cuerpo: { cliente: CLIENTE_OK, carrito: carritoChico },
+  })).status);
+  chk('y el catálogo deja de anunciarlo', 0, (await pedir('/api/catalogo')).json?.minimoCompra);
+
   tit('21. CONFIRMAR PEDIDOS TIENE UN TECHO POR IP');
   /*
    * Va última a propósito: deja la IP frenada un minuto, así que cualquier

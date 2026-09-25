@@ -17,7 +17,9 @@ const { seVeEnCuenta } = require('../clientes');
 const { importarPlanilla } = require('../excel');
 const { ordenarCatalogo } = require('../normalizar');
 const paleta = require('../colores');
-const { leerPedido, armarPedido } = require('../pedidos');
+const {
+  leerPedido, armarPedido, minimoDeCompra, guardarMinimoDeCompra,
+} = require('../pedidos');
 const auth = require('../auth');
 
 const r = express.Router();
@@ -1869,6 +1871,21 @@ const estadoDelMail = () => ({
   configurado: Boolean(process.env.MAIL_USER && process.env.MAIL_PASS),
   destino: process.env.PEDIDOS_EMAIL || null,
 });
+
+// ── Ajustes de la tienda ──────────────────────────────────────────
+/*
+ * Las reglas que ISUWAYA cambia sin tocar el servidor.
+ *
+ * Por ahora una sola: el mínimo de compra. Va en su propia ruta y no colgada
+ * de los avisos porque no es un aviso: es una regla que decide si un pedido
+ * entra o no.
+ */
+r.get('/ajustes', (req, res) => res.json({ minimoCompra: minimoDeCompra() }));
+
+r.put('/ajustes', conAviso(async (req, res) => {
+  const minimoCompra = guardarMinimoDeCompra(req.body?.minimoCompra);
+  res.json({ minimoCompra });
+}));
 
 r.get('/avisos', (req, res) => res.json({
   whatsapp: whatsapp.estadoPublico(),

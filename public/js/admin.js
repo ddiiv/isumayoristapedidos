@@ -23,7 +23,7 @@ const vista = { tab: 'catalogo', sku: null, pedido: null, editor: null };
  * los productos que no tienen curva y se cotizan aparte.
  */
 const TALLES_GRANDES = ['3XL', '4XL', '5XL', 'ÚNICO', 'UNICO', 'Único'];
-let datos = { productos: [], categorias: [], colores: [], talles: [], pedidos: [], totales: null, clientes: [], estadisticas: null };
+let datos = { productos: [], categorias: [], colores: [], talles: [], pedidos: [], totales: null, clientes: [], estadisticas: null, ajustes: null };
 let detalle = null;      // producto abierto
 let filtroPedidos = { desde: '', hasta: '', estado: '', buscar: '' };
 let filtroEstadisticas = { desde: '', hasta: '' };
@@ -1349,14 +1349,14 @@ const TABS = [
   ['catalogo', 'Catálogo'], ['colores', 'Colores'], ['talles', 'Talles'],
   ['masivo', 'Precios en masa'], ['pedidos', 'Pedidos'],
   ['estadisticas', 'Estadísticas'], ['trafico', 'Tráfico'],
-  ['clientes', 'Clientes'], ['avisos', 'Avisos'],
+  ['clientes', 'Clientes'], ['ajustes', 'Ajustes'], ['avisos', 'Avisos'],
 ];
 
 function pintar() {
   const vistas = {
     catalogo: vistaCatalogo, colores: vistaColores, talles: vistaTalles,
     masivo: vistaMasivo, pedidos: vistaPedidos, estadisticas: vistaEstadisticas,
-    trafico: vistaTrafico, clientes: vistaClientes, avisos: vistaAvisos,
+    trafico: vistaTrafico, clientes: vistaClientes, ajustes: vistaAjustes, avisos: vistaAvisos,
   };
   raiz.innerHTML = `
     <div class="tabs">
@@ -1382,6 +1382,37 @@ function pintar() {
   refrescarResumenStock();
   el('#salir').hidden = false;
   seguirAvisos();
+}
+
+// ══ AJUSTES ═══════════════════════════════════════════════════════
+/*
+ * Las reglas de la tienda que ISUWAYA cambia sola.
+ *
+ * Por ahora una: el mínimo de compra. Está acá y no en Avisos porque no avisa
+ * nada — decide si un pedido entra. Y no es una variable del servidor porque
+ * el monto cambia con la temporada y nadie va a entrar a Railway por eso.
+ */
+function vistaAjustes() {
+  const minimo = Number(datos.ajustes?.minimoCompra) || 0;
+  return `
+    <div class="tarjeta">
+      <h3>Mínimo de compra <span class="pastilla ${minimo ? 'si' : 'no'}">${
+        minimo ? esc(pesos(minimo)) : 'sin mínimo'}</span></h3>
+      <p class="sub">Un pedido que no llegue a este monto no se puede confirmar. El cliente ve
+        cuánto le falta desde el carrito y el botón de continuar le queda apagado hasta que
+        llegue. En cero, no hay mínimo y entra cualquier pedido.</p>
+      <div class="campos">
+        <div class="campo">
+          <label for="aj-minimo">Monto mínimo, en pesos</label>
+          <input id="aj-minimo" type="number" min="0" step="1000" inputmode="numeric"
+                 value="${minimo}" placeholder="0">
+        </div>
+      </div>
+      <div class="acciones">
+        <button class="btn" data-guardar-minimo>Guardar</button>
+        ${minimo ? '<button class="btn texto quitar" data-sacar-minimo>Sacar el mínimo</button>' : ''}
+      </div>
+    </div>`;
 }
 
 // ══ AVISOS ════════════════════════════════════════════════════════
@@ -1744,14 +1775,14 @@ async function cargar() {
   const q = new URLSearchParams(
     Object.entries(filtroPedidos).filter(([, v]) => v),
   ).toString();
-  const [p, cat, col, tal, ped, cli] = await Promise.all([
+  const [p, cat, col, tal, ped, cli, aj] = await Promise.all([
     api('/productos'), api('/categorias'), api('/colores'),
-    api('/talles'), api(`/pedidos${q ? `?${q}` : ''}`), api('/clientes'),
+    api('/talles'), api(`/pedidos${q ? `?${q}` : ''}`), api('/clientes'), api('/ajustes'),
   ]);
   datos = {
     productos: p.productos, categorias: cat.categorias, colores: col.colores,
     talles: tal.talles, pedidos: ped.pedidos, totales: ped.totales, clientes: cli.clientes,
-    pendientes: ped.pendientes || 0,
+    pendientes: ped.pendientes || 0, ajustes: aj,
   };
 }
 
@@ -1958,6 +1989,21 @@ raiz.addEventListener('click', (e) => conError(async () => {
     mensaje(`Listo: ${nombre} agregado en ${r.creadas} ${r.creadas === 1 ? 'talle' : 'talles'}.`);
     pintar();
     return;
+  }
+
+  // ── Ajustes: el mínimo de compra
+  const guardarMinimo = async (valor) => {
+    const r = await api('/ajustes', { method: 'PUT', body: JSON.stringify({ minimoCompra: valor }) });
+    datos.ajustes = r;
+    mensaje(r.minimoCompra
+      ? `Listo: el pedido mínimo es de ${pesos(r.minimoCompra)}.`
+      : 'Listo: ya no hay mínimo de compra.');
+    pintar();
+  };
+  if (t.closest('[data-guardar-minimo]')) return guardarMinimo(el('#aj-minimo')?.value ?? '0');
+  if (t.closest('[data-sacar-minimo]')) {
+    if (!window.confirm('¿Sacar el mínimo? Desde ahora entra cualquier pedido, por chico que sea.')) return;
+    return guardarMinimo(0);
   }
 
   // ── Avisos: el WhatsApp del grupo

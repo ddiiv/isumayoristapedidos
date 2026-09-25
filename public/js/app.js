@@ -15,6 +15,8 @@ import { medir, alIrse } from './medir.js';
 export const estado = {
   categorias: [],
   productos: [],
+  // Cuánto tiene que sumar un pedido para poder mandarse. Cero es sin mínimo.
+  minimoCompra: 0,
   categoriaActiva: null,
   busqueda: '',
   /*
@@ -121,6 +123,20 @@ export function totalesDelCarrito() {
 // ── Botón flotante ────────────────────────────────────────────────
 const flotante = el('#flotante');
 
+/*
+ * Qué le falta al carrito para llegar al mínimo de compra.
+ *
+ * Null cuando ya llega o cuando no hay mínimo, igual que en el servidor, así
+ * la pantalla pregunta una sola cosa. El servidor vuelve a calcularlo al
+ * confirmar: esto es para avisar a tiempo, no para hacer cumplir la regla.
+ */
+export function faltaParaElMinimo() {
+  const minimo = Number(estado.minimoCompra) || 0;
+  const { total, unidades } = totalesDelCarrito();
+  if (!minimo || !unidades || total >= minimo) return null;
+  return { minimo, falta: minimo - total };
+}
+
 export function refrescarFlotante() {
   const { productos, unidades, total } = totalesDelCarrito();
   const hay = unidades > 0;
@@ -130,10 +146,17 @@ export function refrescarFlotante() {
   requestAnimationFrame(() => flotante.classList.toggle('visible', hay));
   // En dos trozos para que el CSS pueda esconder el de productos en pantalla
   // angosta sin que el JavaScript tenga que escuchar el cambio de tamaño.
-  el('#flotante-detalle').innerHTML = hay
-    ? `<span class="prod">· ${productos} producto${productos === 1 ? '' : 's'}</span>`
-      + `<span class="unid"> · ${unidades} u.</span>`
-    : '';
+  /*
+   * Con el carrito corto, el botón dice cuánto falta en vez de cuántos
+   * productos hay: es el dato que le sirve a quien todavía está eligiendo.
+   */
+  const corto = faltaParaElMinimo();
+  el('#flotante-detalle').innerHTML = !hay ? ''
+    : corto
+      ? `<span class="falta">· faltan ${pesos(corto.falta)}</span>`
+      : `<span class="prod">· ${productos} producto${productos === 1 ? '' : 's'}</span>`
+        + `<span class="unid"> · ${unidades} u.</span>`;
+  flotante.classList.toggle('corto', Boolean(corto));
   el('#flotante-total').textContent = pesos(total);
 }
 
@@ -429,6 +452,7 @@ async function iniciar() {
     estado.categorias = datos.categorias;
     estado.productos = datos.productos;
     estado.nuevos = datos.nuevos || 0;
+    estado.minimoCompra = Number(datos.minimoCompra) || 0;
     medir('catalogo');
   } catch {
     el('#catalogo').innerHTML = `<div class="vacio"><h3>No pudimos cargar el catálogo</h3>

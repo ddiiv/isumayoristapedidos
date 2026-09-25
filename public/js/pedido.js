@@ -8,7 +8,7 @@
 
 import { el, esc, pesos } from './util.js';
 import {
-  estado, productoPorSku, cuentaDeEntrada, totalesDelCarrito,
+  estado, productoPorSku, cuentaDeEntrada, totalesDelCarrito, faltaParaElMinimo,
   guardarCarrito, refrescarFlotante, pintarCatalogo,
 } from './app.js';
 import { sesion, abrirCuenta } from './sesion.js';
@@ -123,6 +123,23 @@ function curvasDeColor(producto, entrada) {
   return filas.length ? `<div class="curva">${filas.join('<br>')}</div>` : '';
 }
 
+/*
+ * El cartel del mínimo de compra.
+ *
+ * Aparece en el carrito y en el resumen, con el mismo texto, y dice las dos
+ * cosas que el cliente necesita: cuánto es el mínimo y cuánto le falta. Sin el
+ * faltante, quien tiene un carrito de $ 80.000 y un mínimo de $ 100.000 tiene
+ * que hacer la cuenta él.
+ */
+function avisoDelMinimo(corto) {
+  if (!corto) return '';
+  return `
+    <div class="aviso-minimo" role="status">
+      <b>Te faltan ${pesos(corto.falta)} para poder hacer el pedido.</b>
+      <span>El pedido mínimo es de ${pesos(corto.minimo)}. Agregá más productos y volvé acá.</span>
+    </div>`;
+}
+
 function vistaCarrito() {
   const entradas = Object.entries(estado.carrito)
     .map(([sku, entrada]) => ({ sku, entrada, producto: productoPorSku(sku) }))
@@ -156,7 +173,8 @@ function vistaCarrito() {
     <div class="total-caja">
       <div><div class="u">${unidades} unidades</div><div>Total del pedido</div></div>
       <div class="n">${pesos(total)}</div>
-    </div>`;
+    </div>
+    ${avisoDelMinimo(faltaParaElMinimo())}`;
 }
 
 // ── Paso 2: los datos ─────────────────────────────────────────────
@@ -254,7 +272,8 @@ function vistaResumen() {
     <div class="total-caja">
       <div><div class="u">${previsualizacion.unidades} unidades</div><div>Total del pedido</div></div>
       <div class="n">${pesos(previsualizacion.total)}</div>
-    </div>`;
+    </div>
+    ${avisoDelMinimo(previsualizacion.minimo)}`;
 }
 
 // ── Paso 4: confirmado ────────────────────────────────────────────
@@ -304,12 +323,21 @@ function vistaConfirmado() {
 function pintar() {
   const hay = totalesDelCarrito().unidades > 0;
 
+  /*
+   * Por debajo del mínimo no se puede avanzar.
+   *
+   * El botón queda apagado en vez de desaparecer: si desaparece, el cliente no
+   * entiende qué pasó. Apagado y con el cartel arriba explicando cuánto falta,
+   * la respuesta está a la vista. El servidor lo rechaza igual, por las dudas.
+   */
+  const corto = faltaParaElMinimo();
+
   if (paso === 'carrito') {
     el('#dialogo-titulo').textContent = 'Tu pedido';
     cuerpo.innerHTML = vistaCarrito();
     pie.innerHTML = hay
-      ? `<button class="btn texto" data-ir="cerrar">Seguir agregando</button>
-         <button class="btn" data-ir="datos">Continuar</button>`
+      ? `<button class="btn texto" data-ir="cerrar">${corto ? 'Agregar más productos' : 'Seguir agregando'}</button>
+         <button class="btn" data-ir="datos"${corto ? ' disabled' : ''}>Continuar</button>`
       : '<button class="btn azul" data-ir="cerrar">Ver el catálogo</button>';
   } else if (paso === 'datos') {
     el('#dialogo-titulo').textContent = 'Datos para el envío';
@@ -319,9 +347,11 @@ function pintar() {
   } else if (paso === 'resumen') {
     el('#dialogo-titulo').textContent = 'Revisá antes de confirmar';
     cuerpo.innerHTML = vistaResumen();
+    // Si el carrito quedó corto —cambió un precio, se quitó algo—, tampoco se confirma.
+    const frena = enviando || corto || previsualizacion?.minimo;
     pie.innerHTML = `<button class="btn texto" data-ir="datos">Corregir datos</button>
                      <button class="btn borde" id="bajar-pdf">Descargar PDF</button>
-                     <button class="btn" id="confirmar"${enviando ? ' disabled' : ''}>
+                     <button class="btn" id="confirmar"${frena ? ' disabled' : ''}>
                        ${enviando ? 'Enviando…' : 'Confirmar pedido'}</button>`;
   } else {
     el('#dialogo-titulo').textContent = 'Pedido confirmado';
