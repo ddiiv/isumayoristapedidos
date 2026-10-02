@@ -136,6 +136,60 @@ h1, h2, h3, h4 { text-wrap: balance; }
  * Blanco apenas translúcido: al bajar, las fotos pasan por detrás difuminadas
  * y se nota que el encabezado queda arriba sin necesitar una línea que lo corte.
  */
+/* ── La cinta del mínimo de compra ──────────────────────────────── */
+/*
+ * Una tira fina arriba de todo con el monto corriendo, para que el mínimo se
+ * sepa ANTES de armar el carrito y no al final, cuando el botón de continuar
+ * ya no deja seguir. Enterarse recién ahí es la peor forma de enterarse.
+ *
+ * Se mueve con una sola transformación de la pista entera: el navegador la
+ * resuelve en el compositor, sin recalcular posiciones ni repintar, que es lo
+ * que importa en un teléfono. La pista lleva el texto dos veces; correr medio
+ * recorrido la deja exactamente donde empezaba, así el ciclo no tiene costura.
+ *
+ * Si el sistema pide menos movimiento, se queda quieta y centrada: la regla de
+ * más arriba apaga las animaciones, pero una animación de posición cortada a
+ * la mitad dejaría el texto fuera de la pantalla, así que acá se desarma.
+ */
+.cinta {
+  background: var(--azul);
+  color: #fff;
+  overflow: hidden;
+}
+.cinta-pista {
+  display: flex;
+  width: max-content;
+  animation: correr-cinta 30s linear infinite;
+}
+.cinta-grupo { display: flex; flex: none; }
+.cinta-item {
+  flex: none;
+  padding: 6px 0;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.cinta-item::after { content: "•"; margin: 0 20px; opacity: .5; }
+
+@keyframes correr-cinta {
+  from { transform: translate3d(0, 0, 0); }
+  to   { transform: translate3d(-50%, 0, 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cinta-pista {
+    animation: none !important;
+    transform: none !important;
+    width: 100%;
+    justify-content: center;
+  }
+  .cinta-grupo + .cinta-grupo,
+  .cinta-item + .cinta-item { display: none; }
+  .cinta-item::after { content: none; }
+}
+
 header.principal {
   position: sticky; top: 0; z-index: 30;
   background: rgba(255, 255, 255, .9);

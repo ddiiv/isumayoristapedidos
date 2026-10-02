@@ -130,6 +130,71 @@ const flotante = el('#flotante');
  * la pantalla pregunta una sola cosa. El servidor vuelve a calcularlo al
  * confirmar: esto es para avisar a tiempo, no para hacer cumplir la regla.
  */
+/*
+ * La cinta del mínimo, arriba de todo.
+ *
+ * El texto se repite hasta pasar el ancho de la pantalla, y de todo eso se
+ * hace una copia: la animación corre medio recorrido, que es exactamente un
+ * grupo, y vuelve a empezar donde estaba. Sin la copia se vería el salto.
+ *
+ * La duración sale del ancho y no es un número fijo: con un fijo, la misma
+ * cinta parece lenta en un teléfono y disparada en un monitor ancho.
+ */
+const VELOCIDAD_CINTA = 55;   // píxeles por segundo
+const TOPE_COPIAS = 40;       // por si una fuente rarísima midiera cero: no se cuelga
+
+function pintarCintaMinimo() {
+  const cinta = el('#cinta-minimo');
+  const pista = el('#cinta-pista');
+  if (!cinta || !pista) return;
+
+  const minimo = Number(estado.minimoCompra) || 0;
+  if (!minimo) { cinta.hidden = true; pista.replaceChildren(); return; }
+
+  const grupo = document.createElement('span');
+  grupo.className = 'cinta-grupo';
+  const item = document.createElement('span');
+  item.className = 'cinta-item';
+  item.textContent = `Mínimo de compra ${pesos(minimo)}`;
+  grupo.append(item);
+  pista.replaceChildren(grupo);
+  // Se mide con la cinta ya visible: escondida, todo mide cero.
+  cinta.hidden = false;
+
+  /*
+   * Se repite hasta pasar el ancho de la pantalla, midiendo el grupo de verdad
+   * en vez de estimarlo con el ancho de un renglón: el texto cambia de largo
+   * con el monto y con la fuente que llegue a estar cargada, y una cuenta con
+   * un ancho supuesto deja la cinta corta. Corta se ve el hueco al correr.
+   */
+  const objetivo = window.innerWidth * 1.5;
+  while (grupo.offsetWidth < objetivo && grupo.children.length < TOPE_COPIAS) {
+    const otro = item.cloneNode(true);
+    // Una sola vez para quien escucha la página: el resto es decoración.
+    otro.setAttribute('aria-hidden', 'true');
+    grupo.append(otro);
+  }
+  const copia = grupo.cloneNode(true);
+  copia.setAttribute('aria-hidden', 'true');
+  pista.append(copia);
+
+  pista.style.animationDuration = `${Math.max(12, Math.round(grupo.offsetWidth / VELOCIDAD_CINTA))}s`;
+}
+
+/*
+ * Al cambiar el ancho —girar el teléfono, agrandar la ventana— la cinta puede
+ * quedar más corta que la pantalla y aparecer el hueco. Se rehace sólo en ese
+ * caso: rehacerla siempre reiniciaría la animación de un salto por nada.
+ */
+let esperaCinta = null;
+window.addEventListener('resize', () => {
+  clearTimeout(esperaCinta);
+  esperaCinta = setTimeout(() => {
+    const grupo = el('#cinta-pista')?.firstElementChild;
+    if (grupo && grupo.offsetWidth < window.innerWidth * 1.1) pintarCintaMinimo();
+  }, 250);
+});
+
 export function faltaParaElMinimo() {
   const minimo = Number(estado.minimoCompra) || 0;
   const { total, unidades } = totalesDelCarrito();
@@ -453,6 +518,7 @@ async function iniciar() {
     estado.productos = datos.productos;
     estado.nuevos = datos.nuevos || 0;
     estado.minimoCompra = Number(datos.minimoCompra) || 0;
+    pintarCintaMinimo();
     medir('catalogo');
   } catch {
     el('#catalogo').innerHTML = `<div class="vacio"><h3>No pudimos cargar el catálogo</h3>

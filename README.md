@@ -186,9 +186,11 @@ con un máximo de 60 caracteres para que entre en el rótulo.
 En **Ajustes** se pone el monto que un pedido tiene que alcanzar para poder
 confirmarse. En cero no hay mínimo, que es como arranca.
 
-Con un mínimo puesto, el cliente lo ve venir: el botón flotante dice cuánto le
-falta mientras recorre el catálogo, y en el carrito aparece un cartel con el
-faltante y el mínimo, con **Continuar** apagado hasta que llegue.
+Con un mínimo puesto, el cliente lo ve venir desde el primer segundo: arriba de
+todo corre una cinta azul con el monto —aparece sólo si hay mínimo—, el botón
+flotante dice cuánto le falta mientras recorre el catálogo, y en el carrito hay
+un cartel con el faltante y el mínimo, con **Continuar** apagado hasta que
+llegue.
 
 El servidor lo exige aparte, con sus propios precios: el carrito que llega lo
 puede armar cualquiera desde la consola del navegador, y entre que se arma un
