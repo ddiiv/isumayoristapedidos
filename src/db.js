@@ -594,7 +594,21 @@ const TRANSICIONES = {
   // falta algo se rearma y pasa a 'modificado'; si no se puede, se cancela.
   pendiente:  ['confirmado', 'cancelado'],
   confirmado: ['enviado', 'cancelado'],
-  modificado: ['enviado', 'cancelado'],
+  /*
+   * De 'modificado' se vuelve a 'confirmado' a propósito.
+   *
+   * Un pedido mayorista se acuerda de a tirones: falta un talle, el cliente
+   * cambia un color, aparece stock que no estaba. Cada vuelta lo deja en
+   * 'modificado', y sin esta salida se quedaba ahí para siempre, aunque ya
+   * estuviera todo hablado y listo para preparar. 'Confirmado' es el estado
+   * en el que un pedido descansa antes de salir, y a eso tiene que poder
+   * llegar.
+   *
+   * Lo que cambió respecto de lo que pidió el cliente no se pierde: vive en
+   * la copia original y en el historial, que guarda cada vuelta con su
+   * detalle.
+   */
+  modificado: ['confirmado', 'enviado', 'cancelado'],
   enviado:    ['entregado', 'cancelado'],
   entregado:  [],
   cancelado:  [],

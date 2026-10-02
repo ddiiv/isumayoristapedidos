@@ -1370,10 +1370,20 @@ r.put('/pedidos/:numero/items', conErrores(async (req, res) => {
 r.put('/pedidos/:numero/confirmar-stock', conErrores(async (req, res) => {
   const fila = db.prepare('SELECT * FROM pedidos WHERE numero = ?').get(req.params.numero);
   if (!fila) return res.status(404).json({ message: 'No existe ese pedido.' });
+  /*
+   * Se puede revisar las veces que haga falta, mientras el pedido no haya
+   * salido del depósito.
+   *
+   * Antes era una sola vez, mientras esperaba confirmación. Pero el stock de
+   * un pedido mayorista se mira más de una vez: se confirma, al armarlo
+   * aparece que de un talle había menos, entra mercadería que faltaba, el
+   * cliente cambia algo. Cerrar la revisión en el primer paso obligaba a
+   * hacer todo lo demás por el editor, que es la herramienta para otra cosa.
+   */
   const actual = normalizarEstado(fila.estado);
-  if (actual !== 'pendiente') {
+  if (!EDITABLES.includes(actual)) {
     return res.status(409).json({
-      message: `El pedido ya está ${ESTADOS[actual].etiqueta.toLowerCase()}: el stock se revisa mientras espera confirmación.`,
+      message: `Un pedido ${ESTADOS[actual].etiqueta.toLowerCase()} ya no se revisa. Lo que salió del depósito no cambia.`,
     });
   }
 
@@ -1410,7 +1420,11 @@ r.put('/pedidos/:numero/confirmar-stock', conErrores(async (req, res) => {
 
   // Hay de todo y todo se puede volver a valorizar: se confirma tal cual, sin rearmar nada.
   if (!faltaAlgo && !huerfanos) {
-    registrarEstado(fila.id, 'confirmado', { nota: nota || 'Confirmamos el stock de todo lo que pediste.' });
+    // Si el pedido ya venía modificado, lo que se confirma es lo acordado, no lo que pidió.
+    const porDefecto = actual === 'pendiente'
+      ? 'Confirmamos el stock de todo lo que pediste.'
+      : 'Confirmamos el pedido como quedó acordado.';
+    registrarEstado(fila.id, 'confirmado', { nota: nota || porDefecto });
     avisarAStocker(fila.id, 'confirmado');
     const avisoCliente = await avisarClienteDelCambio(fila.numero, 'confirmado', nota);
     const igual = conSeguimiento(leerPedido(fila.numero));

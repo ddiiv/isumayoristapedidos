@@ -509,7 +509,9 @@ const ESTADOS = {
 const SIGUIENTES = {
   pendiente: ['confirmado', 'cancelado'],
   confirmado: ['enviado', 'cancelado'],
-  modificado: ['enviado', 'cancelado'],
+  // De 'modificado' se vuelve a 'confirmado': el pedido se acuerda de a
+  // tirones y tiene que poder descansar en confirmado. El porqué, en src/db.js.
+  modificado: ['confirmado', 'enviado', 'cancelado'],
   enviado: ['entregado', 'cancelado'],
   entregado: [], cancelado: [],
 };
@@ -552,7 +554,7 @@ function vistaPedidos() {
         </td>
         <td class="centrado">${falla ? '<span class="pastilla aviso">Revisar</span>' : '<span class="pastilla si">Avisado</span>'}</td>
         <td class="sin-corte">
-          ${p.estado === 'pendiente' ? `<button class="btn btn-mini" data-revisar-stock="${esc(p.numero)}">Revisar stock</button>` : ''}
+          ${EDITABLES.includes(p.estado) ? `<button class="btn btn-mini" data-revisar-stock="${esc(p.numero)}">Revisar stock</button>` : ''}
           <a class="btn borde btn-mini" href="/api/pedidos/${encodeURIComponent(p.numero)}/pedido.pdf">Remito</a>
           <a class="btn borde btn-mini mas-chico" href="/api/pedidos/${encodeURIComponent(p.numero)}/rotulo.pdf">Rótulo</a>
         </td>
@@ -704,10 +706,12 @@ function vistaPedidoDetalle() {
           <input id="nota-estado" placeholder="Salió por Andreani, número 40012345">
         </div>
         <div class="acciones">
-          ${p.estado === 'pendiente' ? `<button class="btn" data-revisar-stock="${esc(p.numero)}">Revisar stock y confirmar</button>` : ''}
+          ${EDITABLES.includes(p.estado) ? `<button class="btn" data-revisar-stock="${esc(p.numero)}">${
+            p.estado === 'pendiente' ? 'Revisar stock y confirmar' : 'Revisar el stock de nuevo'}</button>` : ''}
           ${siguientes.map((e) => `
             <button class="btn ${e === 'cancelado' ? 'borde peligro' : ''}" data-mover-a="${e}">
-              ${esc(e === 'confirmado' ? 'Confirmar: hay stock de todo' : 'Marcar ' + ESTADOS[e].toLowerCase())}
+              ${esc(e !== 'confirmado' ? 'Marcar ' + ESTADOS[e].toLowerCase()
+                : p.estado === 'modificado' ? 'Dar el pedido por confirmado' : 'Confirmar: hay stock de todo')}
             </button>`).join('')}
           ${EDITABLES.includes(p.estado) ? '<button class="btn borde" data-editar-pedido>Modificar artículos y precio</button>' : ''}
         </div>`

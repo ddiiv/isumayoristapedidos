@@ -174,6 +174,20 @@ recibió, sin afirmar que ya se avisó.
    **Mis pedidos**.
 4. Después, *enviado* y *entregado*, desde el mismo panel.
 
+**Las veces que haga falta.** Un pedido mayorista se acuerda de a tirones: se
+confirma, al armarlo aparece que de un talle había menos, entra mercadería que
+faltaba, el cliente cambia algo. Por eso **Revisar stock** sigue disponible
+mientras el pedido no haya salido del depósito, no sólo la primera vez, y un
+pedido *modificado* puede volver a *confirmado* —con **Dar el pedido por
+confirmado**, o solo, cuando una revisión encuentra todo lo que quedó—.
+*Confirmado* es el estado en el que un pedido descansa antes de salir, y a eso
+tiene que poder llegar por más vueltas que haya dado.
+
+Lo que cambió respecto de lo que pidió el cliente no se pierde en ninguna de
+esas vueltas: la copia original se guarda una sola vez —la primera— y el
+historial queda con cada vuelta y su detalle. Lo que salió del depósito no se
+toca: *enviado* y *entregado* no se revisan ni se editan.
+
 El mail del cliente es opcional: si no lo deja, sólo se entera en «Mis pedidos»,
 y sólo si tiene cuenta. La solapa **Avisos** del panel muestra si el correo está
 configurado.

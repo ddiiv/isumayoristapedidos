@@ -383,7 +383,11 @@ const mover = (numero, estado, nota) => pedir(
     chk('con todo, queda confirmado tal cual', [200, 'confirmado', false], [todo.status, todo.json?.pedido?.estado, todo.json?.conCambios]);
     chk('sin tocar el total', Math.round(a.precio * 3 + b.precio * 2), todo.json?.pedido?.total);
     chk('y sin guardar un "original": no cambió nada', null, todo.json?.pedido?.original);
-    chk('un pedido ya confirmado no se vuelve a revisar', 409, (await stock(completo, { disponibles: {} })).status);
+    // Revisarlo de nuevo está permitido a propósito: el stock de un pedido se
+    // mira más de una vez. Con todo presente, sigue confirmado.
+    const otraVuelta = await stock(completo, { disponibles: {} });
+    chk('y revisarlo de nuevo está permitido: sigue confirmado', [200, 'confirmado', false],
+      [otraVuelta.status, otraVuelta.json?.pedido?.estado, otraVuelta.json?.conCambios]);
 
     const parcial = await pedidoNuevo(producto, { [a.sku]: 4, [b.sku]: 2 });
     const r = await stock(parcial, { disponibles: { [a.sku]: 2, [b.sku]: 0 }, nota: 'El resto entra el lunes.' });
@@ -757,6 +761,49 @@ const mover = (numero, estado, nota) => pedir(
       });
       return r.json?.minimo ?? null;
     })()));
+  }
+
+  tit('13. UN PEDIDO SE REVISA LAS VECES QUE HAGA FALTA, HASTA QUEDAR CONFIRMADO');
+  /*
+   * Un pedido mayorista se acuerda de a tirones: se confirma, al armarlo
+   * aparece que de un talle había menos, entra mercadería, el cliente cambia
+   * algo. Antes la revisión de stock se abría una sola vez —mientras el pedido
+   * esperaba— y un pedido modificado no podía volver a confirmado: quedaba
+   * ahí para siempre aunque ya estuviera todo hablado.
+   */
+  {
+    const revisar = (numero, disponibles) => pedir(`/api/admin/pedidos/${numero}/confirmar-stock`, {
+      metodo: 'PUT', como: 'admin', cuerpo: { disponibles },
+    });
+    const numero = await pedidoNuevo(producto, { [a.sku]: 4, [b.sku]: 2 });
+    const loPedido = Math.round(a.precio * 4 + b.precio * 2);
+
+    const primera = await revisar(numero, { [a.sku]: 2, [b.sku]: 2 });
+    chk('la primera revisión, con faltante, lo deja modificado', ['modificado', true],
+      [primera.json?.pedido?.estado, primera.json?.conCambios]);
+
+    const segunda = await revisar(numero, { [a.sku]: 1, [b.sku]: 2 });
+    chk('y se puede volver a revisar: antes rebotaba', 200, segunda.status);
+    chk('con el total recalculado sobre lo que queda', Math.round(a.precio * 1 + b.precio * 2),
+      segunda.json?.pedido?.total);
+
+    const tercera = await revisar(numero, { [a.sku]: 1, [b.sku]: 2 });
+    chk('y cuando está todo lo que quedó, el pedido queda confirmado', ['confirmado', false],
+      [tercera.json?.pedido?.estado, tercera.json?.conCambios]);
+    chk('el original sigue siendo lo que pidió el cliente, no la vuelta anterior', loPedido,
+      tercera.json?.pedido?.original?.total);
+
+    const otro = await pedidoNuevo(producto, { [a.sku]: 4 });
+    await revisar(otro, { [a.sku]: 2 });
+    const aMano = await mover(otro, 'confirmado', 'Hablado con el cliente: sale así.');
+    chk('un pedido modificado se puede dar por confirmado a mano', [200, 'confirmado'],
+      [aMano.status, aMano.json?.pedido?.estado]);
+
+    await mover(otro, 'enviado');
+    chk('pero lo que salió del depósito ya no se revisa', 409, (await revisar(otro, { [a.sku]: 1 })).status);
+    chk('ni se edita', 409, (await pedir(`/api/admin/pedidos/${otro}/items`, {
+      metodo: 'PUT', como: 'admin', cuerpo: { carrito: [{ skuAgrupador: producto.sku, cantidades: { [a.sku]: 1 } }] },
+    })).status);
   }
 
   console.log(`\n\x1b[1m─────────────────────────────\x1b[0m\n  \x1b[32mPasaron: ${ok}\x1b[0m   \x1b[31mFallaron: ${ko}\x1b[0m`);
