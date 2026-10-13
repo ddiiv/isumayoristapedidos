@@ -42,10 +42,15 @@ const RUTA_RESOLUCIONES = process.env.STOCKER_RUTA_RESOLUCIONES
   || `${RUTA.replace(/\/pedidos$/, '')}/pedidos/resoluciones`;
 const RUTA_PRECIOS = process.env.STOCKER_RUTA_PRECIOS
   || `${RUTA.replace(/\/pedidos$/, '')}/precios`;
+const RUTA_STOCK = process.env.STOCKER_RUTA_STOCK
+  || `${RUTA.replace(/\/pedidos$/, '')}/stock`;
+const RUTA_LOCALES = process.env.STOCKER_RUTA_LOCALES
+  || `${RUTA.replace(/\/pedidos$/, '')}/locales`;
 // Los precios cambian por día, no por minuto.
 const CADA_PRECIOS = Number(process.env.STOCKER_PRECIOS_CADA_MS) || 15 * 60_000;
 let ultimoErrorVuelta = null;
 let ultimoErrorPrecios = null;
+let ultimoErrorStock = null;
 const ESPERA_ENVIO = Number(process.env.STOCKER_TIMEOUT_MS) || 15_000;
 const CADA = Number(process.env.STOCKER_CADA_MS) || 20_000;
 const TOPE_INTENTOS = 12;      // con la espera creciente, son casi dos días de reintentos
@@ -580,6 +585,114 @@ async function sincronizarPrecios({ completo = false } = {}) {
   };
 }
 
+// ── El stock del local que despacha ───────────────────────────────
+/*
+ * Una copia del stock de UN local de STOCKER, para mirar mientras se revisa
+ * un pedido.
+ *
+ * No es la verdad y no decide nada: la verdad vive en STOCKER y acá llega
+ * cada tanto. Está para que quien revisa no tenga que abrir el otro sistema
+ * al lado y adivinar cuántas hay de cada talle.
+ *
+ * Al cliente no se le muestra, a propósito: un pedido mayorista se produce
+ * contra el pedido, así que poner existencias en el catálogo diría algo que
+ * no es.
+ */
+const CLAVE_STOCK = 'stocker_stock_desde';
+const CLAVE_LOCAL = 'stocker_local';
+
+function localElegido() {
+  try { return JSON.parse(leerConfig(CLAVE_LOCAL) || 'null'); } catch { return null; }
+}
+
+/** Un GET a STOCKER con el token. El error lleva el código y el principio del cuerpo. */
+async function traer(url) {
+  const r = await fetch(url, {
+    headers: { Authorization: `Bearer ${TOKEN}` },
+    signal: AbortSignal.timeout(ESPERA_ENVIO),
+  });
+  if (!r.ok) throw new Error(`${r.status} ${(await r.text().catch(() => '')).slice(0, 200)}`);
+  return r.json();
+}
+
+/** Los locales del negocio, para elegir cuál despacha. */
+async function localesDeStocker() {
+  if (!configurado()) return { locales: [], apagado: true };
+  const datos = await traer(`${URL_BASE}${RUTA_LOCALES}`);
+  return {
+    locales: (datos.locales || [])
+      .map((l) => ({ id: Number(l.id), nombre: String(l.nombre || '').slice(0, 80) }))
+      .filter((l) => Number.isFinite(l.id)),
+  };
+}
+
+/*
+ * Elegir el local borra el stock que había.
+ *
+ * Lo guardado era de otro local: dejarlo mientras llega lo nuevo mostraría
+ * números de un depósito en la pantalla de otro, que es peor que no mostrar
+ * nada. Y se pide todo de nuevo, sin marca de 'desde'.
+ */
+function elegirLocal(local) {
+  const id = Number(local?.id);
+  if (local && !Number.isFinite(id)) {
+    throw Object.assign(new Error('Ese local no es válido.'), { status: 400 });
+  }
+  db.transaction(() => {
+    db.prepare('UPDATE variantes SET stock = NULL WHERE stock IS NOT NULL').run();
+    guardarConfig(CLAVE_STOCK, '');
+    guardarConfig(CLAVE_LOCAL, local
+      ? JSON.stringify({ id, nombre: String(local.nombre || '').slice(0, 80) || `Local ${id}` })
+      : '');
+  })();
+  return localElegido();
+}
+
+async function sincronizarStock({ completo = false } = {}) {
+  const local = localElegido();
+  if (!configurado() || !local) return { actualizados: 0, apagado: true };
+
+  const parametros = new URLSearchParams({ local: String(local.id) });
+  const desde = completo ? null : leerConfig(CLAVE_STOCK);
+  if (desde) parametros.set('desde', desde);
+
+  let datos;
+  try {
+    datos = await traer(`${URL_BASE}${RUTA_STOCK}?${parametros}`);
+    ultimoErrorStock = null;
+  } catch (e) {
+    ultimoErrorStock = String(e.message || e).slice(0, 200);
+    throw e;
+  }
+
+  const guardar = db.prepare('UPDATE variantes SET stock = ? WHERE sku = ?');
+  let aplicados = 0;
+  let sinCatalogo = 0;
+  const aplicar = db.transaction((filas) => {
+    for (const fila of filas) {
+      const cantidad = Number(fila.cantidad);
+      // Un cero es un dato: la variante se quedó sin nada. Lo que no es un
+      // entero de cero para arriba no se guarda ni se inventa.
+      if (!Number.isInteger(cantidad) || cantidad < 0) continue;
+      // Un SKU que acá no existe no es un error: los dos catálogos no siempre
+      // están parejos y eso no puede frenar la sincronización.
+      if (guardar.run(cantidad, String(fila.sku)).changes) aplicados += 1;
+      else sinCatalogo += 1;
+    }
+  });
+  aplicar(datos.stock || []);
+
+  // Con la respuesta cortada no se mueve la marca: la próxima vuelta pide lo mismo.
+  if (datos.generadoEn && !datos.truncado) guardarConfig(CLAVE_STOCK, datos.generadoEn);
+  return {
+    aplicados,
+    sinCatalogo,
+    recibidos: (datos.stock || []).length,
+    truncado: Boolean(datos.truncado),
+    local,
+  };
+}
+
 function arrancar() {
   if (!configurado()) return null;
   const vuelta = () => {
@@ -598,7 +711,14 @@ function arrancar() {
    */
   const relojPrecios = setInterval(() => {
     sincronizarPrecios().catch(() => { /* queda anotado adentro */ });
+    sincronizarStock().catch(() => { /* queda anotado adentro */ });
   }, CADA_PRECIOS);
+  /*
+   * El stock, además, una vez al arrancar: se muestra renglón por renglón en
+   * la revisión de pedidos, y una columna vacía durante el primer cuarto de
+   * hora después de un deploy se lee como "no hay nada".
+   */
+  sincronizarStock().catch(() => { /* queda anotado adentro */ });
   relojPrecios.unref?.();
   return reloj;
 }
@@ -606,6 +726,9 @@ function arrancar() {
 module.exports = {
   configurado, anotar, procesarCola, reintentar, estadoPublico, arrancar,
   traerResoluciones, sincronizarPrecios, aplicarResolucion,
+  localesDeStocker, localElegido, elegirLocal, sincronizarStock,
   cuerpoDelPedido, lineasDelPedido, sinDireccion, EVENTOS,
-  erroresDeLaVuelta: () => ({ resoluciones: ultimoErrorVuelta, precios: ultimoErrorPrecios }),
+  erroresDeLaVuelta: () => ({
+    resoluciones: ultimoErrorVuelta, precios: ultimoErrorPrecios, stock: ultimoErrorStock,
+  }),
 };

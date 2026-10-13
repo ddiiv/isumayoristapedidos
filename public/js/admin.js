@@ -766,12 +766,21 @@ function vistaStockPedido() {
         ${talles.map((talle) => {
           const c = porCruce.get(`${color}|${talle}`);
           if (!c) return '<td class="sin-cruce">—</td>';
+          /*
+           * Debajo del casillero, lo que STOCKER dice que hay en el local que
+           * despacha. Es un dato para mirar, no se carga solo: quien revisa
+           * tiene la percha adelante y el inventario puede estar corrido.
+           */
+          const enLocal = Number.isInteger(c.stock) ? c.stock : null;
           return `<td class="celda-stock">
             <span class="chico">de ${c.cantidad}</span>
             <input type="number" min="0" max="${c.cantidad}" inputmode="numeric"
                    data-stock-sku="${esc(c.sku)}" data-stock-linea="${esc(linea.skuAgrupador)}"
-                   data-pedido="${c.cantidad}" data-precio="${c.precio}" value="${e.hay[c.sku] ?? c.cantidad}"
+                   data-pedido="${c.cantidad}" data-precio="${c.precio}"
+                   ${enLocal === null ? '' : `data-en-local="${enLocal}"`} value="${e.hay[c.sku] ?? c.cantidad}"
                    aria-label="Cuántos hay de ${esc(talle)} en ${esc(color)}, de ${c.cantidad} pedidos">
+            ${enLocal === null ? ''
+              : `<span class="chico en-local ${enLocal < c.cantidad ? 'corto' : ''}">local ${enLocal}</span>`}
           </td>`;
         }).join('')}
       </tr>`).join('');
@@ -839,6 +848,8 @@ function vistaStockPedido() {
       </div>
       <div class="acciones">
         <button class="btn" id="st-confirmar" data-confirmar-stock>Confirmar</button>
+        ${(e.lineas || []).some((l) => (l.combinaciones || []).some((c) => Number.isInteger(c.stock)))
+          ? '<button class="btn borde" data-usar-local>Cargar lo que hay en el local</button>' : ''}
         <button class="btn borde" data-stock-editor>Cambiar artículos o precio</button>
       </div>
       <p class="chico">El total definitivo lo calcula el servidor al confirmar, con sus precios.</p>
@@ -1459,6 +1470,53 @@ function vistaAjustes() {
         <button class="btn" data-guardar-minimo>Guardar</button>
         ${minimo ? '<button class="btn texto quitar" data-sacar-minimo>Sacar el mínimo</button>' : ''}
       </div>
+    </div>
+    ${tarjetaDelLocal()}`;
+}
+
+/*
+ * De qué local se mira el stock mientras se revisa un pedido.
+ *
+ * Es una copia para mirar, no la verdad: la verdad vive en STOCKER. Se elige
+ * de la lista que da STOCKER y no se escribe un número a mano, por lo mismo
+ * que el grupo de WhatsApp: nadie se acuerda del id de un depósito.
+ */
+function tarjetaDelLocal() {
+  const st = datos.ajustes?.stocker || { configurado: false, local: null };
+  const locales = datos.localesStocker;
+  if (!st.configurado) {
+    return `
+      <div class="tarjeta">
+        <h3>Stock del local que despacha <span class="pastilla no">sin STOCKER</span></h3>
+        <p class="mensaje info">Primero hay que conectar STOCKER, en las variables del servidor.
+          Mientras tanto, el stock se escribe a mano al revisar cada pedido.</p>
+      </div>`;
+  }
+  return `
+    <div class="tarjeta">
+      <h3>Stock del local que despacha <span class="pastilla ${st.local ? 'si' : 'no'}">${
+        st.local ? esc(st.local.nombre) : 'sin elegir'}</span></h3>
+      <p class="sub">Al revisar un pedido, debajo de cada casillero aparece cuántas unidades
+        hay en este local según STOCKER, y un botón para cargarlas de una. Es un dato para
+        mirar: lo que sale sigue siendo lo que vos cargues. Al cliente no se le muestra.</p>
+      ${locales ? `
+        <div class="campos">
+          <div class="campo ancho">
+            <label for="aj-local">Local</label>
+            <select id="aj-local">
+              <option value="">Elegí un local…</option>
+              ${locales.map((l) => `<option value="${l.id}"${
+                st.local?.id === l.id ? ' selected' : ''}>${esc(l.nombre)}</option>`).join('')}
+            </select>
+          </div>
+        </div>` : ''}
+      <div class="acciones">
+        ${locales
+          ? '<button class="btn" data-guardar-local>Guardar el local</button>'
+          : '<button class="btn borde" data-buscar-locales>Buscar los locales</button>'}
+        ${st.local ? '<button class="btn borde" data-traer-stock>Traer el stock ahora</button>' : ''}
+        ${st.local ? '<button class="btn texto quitar" data-sacar-local>Dejar de mirar el stock</button>' : ''}
+      </div>
     </div>`;
 }
 
@@ -2034,6 +2092,53 @@ raiz.addEventListener('click', (e) => conError(async () => {
     detalle = await api(`/productos/${encodeURIComponent(vista.sku)}`);
     await cargar();
     mensaje(`Listo: ${nombre} agregado en ${r.creadas} ${r.creadas === 1 ? 'talle' : 'talles'}.`);
+    pintar();
+    return;
+  }
+
+  if (t.closest('[data-usar-local]')) {
+    /*
+     * Copia a los casilleros lo que dice STOCKER, sin pasarse de lo pedido.
+     * Es un atajo, no una decisión: después se corrige a mano lo que haga
+     * falta, que para eso quien revisa tiene la percha adelante.
+     */
+    for (const i of raiz.querySelectorAll('[data-stock-sku]')) {
+      const enLocal = Number(i.dataset.enLocal);
+      if (!Number.isInteger(enLocal)) continue;
+      i.value = Math.min(Number(i.dataset.pedido), Math.max(0, enLocal));
+    }
+    leerStock();
+    refrescarResumenStock();
+    return;
+  }
+
+  // ── Ajustes: el local que despacha
+  if (t.closest('[data-buscar-locales]')) {
+    datos.localesStocker = (await api('/stocker/locales')).locales;
+    pintar();
+    return;
+  }
+  if (t.closest('[data-guardar-local]')) {
+    const id = Number(el('#aj-local')?.value);
+    if (!id) { mensaje('Elegí un local de la lista.', 'error'); return pintar(); }
+    const elegido = (datos.localesStocker || []).find((l) => l.id === id);
+    const r = await api('/stocker/local', { method: 'PUT', body: JSON.stringify({ local: elegido }) });
+    await cargar();
+    mensaje(`Listo: se mira el stock de ${r.local.nombre}.`
+      + (r.traido?.aplicados ? ` Llegaron ${r.traido.aplicados} artículos.` : ''));
+    pintar();
+    return;
+  }
+  if (t.closest('[data-sacar-local]')) {
+    await api('/stocker/local', { method: 'PUT', body: JSON.stringify({ local: null }) });
+    await cargar();
+    mensaje('Listo: ya no se mira el stock de ningún local.');
+    pintar();
+    return;
+  }
+  if (t.closest('[data-traer-stock]')) {
+    const r = await api('/stocker/stock', { method: 'POST', body: JSON.stringify({ completo: true }) });
+    mensaje(`Stock al día: ${r.aplicados} artículos${r.sinCatalogo ? `, ${r.sinCatalogo} que acá no están` : ''}.`);
     pintar();
     return;
   }

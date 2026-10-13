@@ -322,6 +322,10 @@ table.datos.editor-grilla input[type="number"] { width: 58px; text-align: center
 .stock-grilla td.celda-stock { text-align: center; }
 .stock-grilla td.celda-stock .chico { display: block; margin-bottom: 3px; white-space: nowrap; }
 .stock-grilla td.falta input { border-color: var(--ambar); background: var(--ambar-claro); }
+/* Lo que STOCKER dice que hay en el local, debajo del casillero. En ámbar
+   cuando no alcanza para lo pedido: es el renglón que hay que mirar. */
+.celda-stock .en-local { display: block; margin-top: 3px; color: var(--tinta-suave); white-space: nowrap; }
+.celda-stock .en-local.corto { color: var(--ambar); font-weight: 600; }
 
 /* ── La ficha del cliente ───────────────────────────────────────── */
 .lista-simple { margin: 0; padding-left: 18px; line-height: 1.75; font-size: 13.5px; }

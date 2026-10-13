@@ -520,6 +520,26 @@ de error se reemplaza por la palabra STOCKER antes de guardarla.
 tiene que terminar en `/api` (o hay que poner la ruta completa en
 `STOCKER_RUTA`). Si no, STOCKER contesta 404 y el panel lo dice con esa pista.
 
+### El stock del local que despacha
+
+En **Ajustes** se elige de qué local de STOCKER mirar el stock. Con uno elegido,
+al revisar un pedido aparece debajo de cada casillero cuántas unidades hay ahí
+—en ámbar cuando no alcanzan para lo pedido— y un botón que las carga de una.
+
+Es una copia para mirar, no la verdad: la verdad vive en STOCKER y acá llega al
+arrancar y cada quince minutos. Lo que sale del depósito sigue siendo lo que
+carga quien revisa, que tiene la percha adelante. **Al cliente no se le muestra**:
+un pedido mayorista se produce contra el pedido, así que poner existencias en el
+catálogo diría algo que no es.
+
+Cambiar de local borra lo que había y lo pide todo de nuevo: dejarlo mientras
+llega lo nuevo mostraría números de un depósito en la pantalla de otro.
+
+Las dos rutas que esto necesita —los locales y el stock de uno— **todavía no
+existen del lado de STOCKER**: están pedidas, con su formato exacto, en
+. Hasta que estén, la columna no aparece y el stock se
+escribe a mano como siempre.
+
 El contrato completo —campos, largos, eventos, idempotencia y las dos formas de
 conectar en Railway— está en **`INTEGRACION-STOCKER.md`**.
 

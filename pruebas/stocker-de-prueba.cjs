@@ -5,10 +5,11 @@
  * lo que hace falta para probar los reintentos: un servicio que siempre
  * contesta bien no prueba nada de lo que de verdad pasa en producción.
  *
- * También contesta las dos preguntas de vuelta —qué pasó con cada pedido y
- * cuánto sale cada SKU—. Lo que devuelve sale de dos archivos de la carpeta,
- * `_resoluciones.json` y `_precios.json`, que la prueba escribe: así se puede
- * simular que STOCKER aceptó, rechazó o cambió un precio sin tener STOCKER.
+ * También contesta las preguntas de vuelta —qué pasó con cada pedido, cuánto
+ * sale cada SKU, qué locales hay y cuánto stock tiene uno—. Lo que devuelve
+ * sale de archivos de la carpeta (`_resoluciones.json`, `_precios.json`,
+ * `_locales.json`, `_stock.json`) que la prueba escribe: así se puede simular
+ * que STOCKER aceptó, rechazó, cambió un precio o movió el stock, sin STOCKER.
  *
  * Uso: node pruebas/stocker-de-prueba.cjs [PUERTO] [CARPETA]
  *      FALLAR=500 node pruebas/stocker-de-prueba.cjs   → contesta 500 a todo
@@ -42,7 +43,9 @@ const servidor = http.createServer((req, res) => {
    */
   if (req.method === 'GET') {
     const archivo = req.url.includes('/precios') ? '_precios.json'
-      : req.url.includes('/resoluciones') ? '_resoluciones.json' : null;
+      : req.url.includes('/resoluciones') ? '_resoluciones.json'
+      : req.url.includes('/locales') ? '_locales.json'
+      : req.url.includes('/stock') ? '_stock.json' : null;
     if (!archivo) return contestar(404, { message: 'No existe esa ruta.' });
     // Queda registrado qué se preguntó: la prueba mira si viajó el cursor.
     fs.appendFileSync(path.join(CARPETA, '_gets.log'), `${req.url}\n`);
@@ -51,9 +54,13 @@ const servidor = http.createServer((req, res) => {
     try {
       return contestar(200, JSON.parse(fs.readFileSync(path.join(CARPETA, archivo), 'utf8')));
     } catch {
-      return contestar(200, archivo === '_precios.json'
-        ? { precios: [], generadoEn: new Date().toISOString() }
-        : { resoluciones: [], hasta: null });
+      const vacios = {
+        '_precios.json': { precios: [], generadoEn: new Date().toISOString() },
+        '_resoluciones.json': { resoluciones: [], hasta: null },
+        '_locales.json': { locales: [] },
+        '_stock.json': { stock: [], generadoEn: new Date().toISOString() },
+      };
+      return contestar(200, vacios[archivo]);
     }
   }
 

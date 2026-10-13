@@ -177,12 +177,100 @@ volver a mandar el estado actual.
 | `STOCKER_TOKEN` | El token del header `Authorization` |
 | `STOCKER_NEGOCIO` | Referencia nada más: STOCKER saca el negocio del token |
 | `STOCKER_RUTA` | Opcional. Por omisión `/integraciones/isuwaya/pedidos` |
+| `STOCKER_RUTA_RESOLUCIONES` | Opcional. Por omisión `/integraciones/isuwaya/pedidos/resoluciones` |
+| `STOCKER_RUTA_PRECIOS` | Opcional. Por omisión `/integraciones/isuwaya/precios` |
+| `STOCKER_RUTA_STOCK` | Opcional. Por omisión `/integraciones/isuwaya/stock` |
+| `STOCKER_RUTA_LOCALES` | Opcional. Por omisión `/integraciones/isuwaya/locales` |
 | `STOCKER_CADA_MS` | Opcional. Cada cuánto sale la cola (20 s) |
+| `STOCKER_PRECIOS_CADA_MS` | Opcional. Cada cuánto se traen precios y stock (15 min) |
 | `STOCKER_TIMEOUT_MS` | Opcional. Cuánto espera cada llamada (15 s) |
 
 Sin las tres primeras, la integración queda apagada: los pedidos se guardan y se
 atienden igual en ISUWAYA, y el panel avisa que el stock hay que descontarlo a
 mano.
+
+---
+
+## Pedido a STOCKER: el stock del local que despacha
+
+**Esto todavía no existe: es lo único que falta del lado de STOCKER.** Las dos
+rutas son de sólo lectura y no mueven nada — ni stock ni dinero—, así que no
+dependen del contrato de la cola común de movimientos.
+
+Para qué: quien revisa un pedido en ISUWAYA ve, renglón por renglón, cuántas
+unidades hay en el local que despacha, sin abrir STOCKER al lado. Hoy esa
+pantalla pide escribir a mano cuánto hay de cada cruce de color y talle, y el
+dato ya existe del otro lado.
+
+Lo que llegue **no se le muestra al cliente**: un pedido mayorista se produce
+contra el pedido, así que mostrar existencias en el catálogo diría algo que no
+es. Es un dato del panel.
+
+Misma puerta, mismo token y misma forma que `precios` y `resoluciones`, a
+propósito: así del lado de ISUWAYA es el mismo código con otro nombre.
+
+### 1. Los locales del negocio
+
+```
+GET  {STOCKER_URL}/integraciones/isuwaya/locales
+Authorization: Bearer {STOCKER_TOKEN}
+```
+
+```json
+{ "locales": [ { "id": 3, "nombre": "Depósito Centro" } ] }
+```
+
+Los del negocio que sale del token, y nada más. Es para que el local se elija
+de una lista en el panel de ISUWAYA; sin esto habría que escribir un número a
+mano y nadie sabe cuál es.
+
+### 2. El stock de un local
+
+```
+GET  {STOCKER_URL}/integraciones/isuwaya/stock?local=3&desde=2026-10-11T18:00:00.000Z
+Authorization: Bearer {STOCKER_TOKEN}
+```
+
+```json
+{
+  "generadoEn": "2026-10-12T02:14:55.120Z",
+  "local": { "id": 3, "nombre": "Depósito Centro" },
+  "stock": [
+    { "sku": "ISUABEPAN-NEG-M", "cantidad": 12 },
+    { "sku": "ISUABEPAN-NEG-L", "cantidad": 0 }
+  ],
+  "truncado": false
+}
+```
+
+| Campo | Qué es |
+|---|---|
+| `local` | Obligatorio en la consulta. Si no es del negocio del token: **404**, no 403 — un 403 confirma que ese local existe |
+| `desde` | Opcional, ISO. Sólo lo que cambió después de ese momento. Sin `desde`, todo |
+| `sku` | El SKU de **variante**, el mismo que viaja en las líneas del pedido |
+| `cantidad` | Entero, desde cero. Las unidades que hay en ese local |
+| `generadoEn` | ISO del momento en que se armó la respuesta. ISUWAYA lo guarda y lo manda como `desde` la próxima vez |
+| `truncado` | `true` si hubo que cortar. ISUWAYA entonces no mueve su marca y vuelve a pedir |
+
+### Detalles que importan
+
+- **Las variantes en cero tienen que venir igual.** Si una que tenía doce queda
+  en cero y simplemente no aparece, del lado de ISUWAYA sigue figurando doce
+  para siempre. Con `desde`, una variante que llegó a cero es justamente la que
+  hay que mandar.
+- **Cantidad disponible, no comprometida.** Lo que ISUWAYA necesita saber es
+  cuánto hay en la percha de ese local. Si STOCKER distingue reservado de
+  disponible, mandá disponible y decilo acá.
+- **Un SKU que ISUWAYA no tiene en su catálogo se ignora**, sin error: los dos
+  catálogos no siempre están parejos y eso no puede frenar la sincronización.
+
+### Lo que NO se pide todavía
+
+Que al modificar un pedido con más unidades de las que hay, STOCKER las dé de
+alta solo —el stock sin declarar del mostrador—. Eso **es** un movimiento de
+stock, y las reglas del Redis compartido dicen que ninguna plataforma cambia
+cómo mueve stock hasta que STOCKER publique el contrato de la cola común. Queda
+anotado para entonces.
 
 ---
 

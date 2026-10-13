@@ -1798,7 +1798,7 @@ function grillaDeProducto(sku) {
   if (!p) return null;
 
   const combinaciones = db.prepare(`
-    SELECT v.sku, v.precio,
+    SELECT v.sku, v.precio, v.stock,
            COALESCE(co.nombre, v.color) AS color,
            COALESCE(t.nombre, v.talle)  AS talle,
            COALESCE(t.orden, v.orden_talle) AS orden_talle,
@@ -1826,6 +1826,9 @@ function grillaDeProducto(sku) {
       .sort((a, b) => a[1] - b[1]).map(([t]) => t),
     combinaciones: combinaciones.map((v) => ({
       sku: v.sku, color: v.color, talle: v.talle, precio: v.precio ?? p.precio,
+      // Lo que STOCKER dice que hay en el local que despacha. Nulo = nunca llegó
+      // dato de esa variante, que no es lo mismo que cero.
+      stock: v.stock ?? null,
     })),
   };
 }
@@ -1911,7 +1914,10 @@ const estadoDelMail = () => ({
  * de los avisos porque no es un aviso: es una regla que decide si un pedido
  * entra o no.
  */
-r.get('/ajustes', (req, res) => res.json({ minimoCompra: minimoDeCompra() }));
+r.get('/ajustes', (req, res) => res.json({
+  minimoCompra: minimoDeCompra(),
+  stocker: { configurado: stocker.configurado(), local: stocker.localElegido() },
+}));
 
 r.put('/ajustes', conAviso(async (req, res) => {
   const minimoCompra = guardarMinimoDeCompra(req.body?.minimoCompra);
@@ -1930,6 +1936,25 @@ r.get('/avisos', (req, res) => res.json({
  * Vuelve a poner en la fila lo que quedó en error. Sin esto, un pedido que
  * falló doce veces se queda afuera para siempre y hay que tocarle la base.
  */
+/*
+ * El local que despacha: de cuál se mira el stock mientras se revisa un pedido.
+ *
+ * Se elige de la lista que da STOCKER y no se escribe un número a mano, por lo
+ * mismo que el grupo de WhatsApp: nadie se acuerda del id de un depósito.
+ */
+r.get('/stocker/locales', conAviso(async (req, res) => res.json(await stocker.localesDeStocker())));
+
+r.put('/stocker/local', conAviso(async (req, res) => {
+  const local = stocker.elegirLocal(req.body?.local || null);
+  // Elegirlo borra lo que había: se trae de nuevo en el acto para no dejar la pantalla en blanco.
+  const traido = local ? await stocker.sincronizarStock({ completo: true }).catch((e) => ({ error: e.message })) : null;
+  res.json({ local, traido });
+}));
+
+r.post('/stocker/stock', conAviso(async (req, res) => {
+  res.json(await stocker.sincronizarStock({ completo: Boolean(req.body?.completo) }));
+}));
+
 r.post('/stocker/reintentar', conErrores(async (req, res) => {
   const numero = req.body?.numero ? String(req.body.numero).trim() : null;
   const reencolados = stocker.reintentar(numero);

@@ -424,6 +424,16 @@ asegurarColumna('fotos', 'media', 'TEXT');
  * Los productos que ya estaban cuando se agregó esta columna quedan en nulo:
  * nadie registró cuándo se cargaron y no se va a inventar una fecha.
  */
+/*
+ * El stock del local que despacha, traído de STOCKER.
+ *
+ * Es una copia para mirar, no la verdad: la verdad vive en STOCKER y se
+ * refresca cada tanto. Sirve para que quien revisa un pedido vea cuántas
+ * unidades hay sin abrir el otro sistema al lado. Nulo = nunca llegó dato de
+ * esa variante, que no es lo mismo que cero.
+ */
+asegurarColumna('variantes', 'stock', 'INTEGER');
+
 asegurarColumna('productos', 'creado_en', 'TEXT');
 asegurarColumna('productos', 'novedad', 'INTEGER');
 

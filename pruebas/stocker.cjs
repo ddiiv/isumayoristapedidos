@@ -318,6 +318,68 @@ function armarDatos() {
   chk('y el cursor de precios queda guardado', true,
     fs.readFileSync(path.join(CARPETA, '_gets.log'), 'utf8').includes('precios?desde=2026-09-22T14%3A00'));
 
+  tit('9. EL STOCK DEL LOCAL QUE DESPACHA');
+  /*
+   * Una copia para mirar mientras se revisa un pedido, no la verdad: la verdad
+   * vive en STOCKER. Lo que importa acá es que un cero llegue como cero, que un
+   * SKU de otro catálogo no rompa nada, y que cambiar de local no deje números
+   * de un depósito en la pantalla de otro.
+   */
+  chk('sin local elegido no se pide nada', true, (await stocker.sincronizarStock()).apagado);
+
+  fs.writeFileSync(path.join(CARPETA, '_locales.json'), JSON.stringify({
+    locales: [{ id: 3, nombre: 'Depósito Centro' }, { id: 4, nombre: 'Local Nueva Córdoba' }],
+  }));
+  chk('los locales salen de STOCKER', ['Depósito Centro', 'Local Nueva Córdoba'],
+    (await stocker.localesDeStocker()).locales.map((l) => l.nombre));
+
+  fs.writeFileSync(path.join(CARPETA, '_stock.json'), JSON.stringify({
+    local: { id: 3, nombre: 'Depósito Centro' },
+    stock: [
+      { sku: 'ISUPRU-NEG-M', cantidad: 12 },
+      { sku: 'NO-ESTA-ACA', cantidad: 7 },
+    ],
+    generadoEn: '2026-10-11T18:00:00.000Z',
+  }));
+
+  stocker.elegirLocal({ id: 3, nombre: 'Depósito Centro' });
+  chk('el local elegido queda guardado', { id: 3, nombre: 'Depósito Centro' }, stocker.localElegido());
+
+  const traido = await stocker.sincronizarStock();
+  chk('el stock de la variante queda guardado', 12,
+    db.prepare("SELECT stock FROM variantes WHERE sku = 'ISUPRU-NEG-M'").get().stock);
+  chk('y un SKU que no está en el catálogo de acá no rompe', [1, 1, 2],
+    [traido.aplicados, traido.sinCatalogo, traido.recibidos]);
+
+  // Un cero es un dato: la variante se quedó sin nada, y hay que verlo.
+  fs.writeFileSync(path.join(CARPETA, '_stock.json'), JSON.stringify({
+    stock: [{ sku: 'ISUPRU-NEG-M', cantidad: 0 }],
+    generadoEn: '2026-10-11T19:00:00.000Z',
+  }));
+  await stocker.sincronizarStock();
+  chk('un cero llega como cero, no como sin dato', 0,
+    db.prepare("SELECT stock FROM variantes WHERE sku = 'ISUPRU-NEG-M'").get().stock);
+  chk('y el cursor del stock viaja con el local', true,
+    fs.readFileSync(path.join(CARPETA, '_gets.log'), 'utf8')
+      .includes('stock?local=3&desde=2026-10-11T18%3A00'));
+
+  // Cambiar de local borra lo que había: eran números de otro depósito.
+  stocker.elegirLocal({ id: 4, nombre: 'Local Nueva Córdoba' });
+  chk('cambiar de local borra el stock que había', null,
+    db.prepare("SELECT stock FROM variantes WHERE sku = 'ISUPRU-NEG-M'").get().stock);
+  await stocker.sincronizarStock();
+  chk('y se pide todo de nuevo, sin cursor', true,
+    fs.readFileSync(path.join(CARPETA, '_gets.log'), 'utf8').includes('stock?local=4\n'));
+
+  // Lo que no es un entero de cero para arriba no se guarda ni se inventa.
+  fs.writeFileSync(path.join(CARPETA, '_stock.json'), JSON.stringify({
+    stock: [{ sku: 'ISUPRU-NEG-M', cantidad: -3 }, { sku: 'ISUPRU-NEG-M', cantidad: 'muchas' }],
+    generadoEn: '2026-10-11T20:00:00.000Z',
+  }));
+  const basura = await stocker.sincronizarStock();
+  chk('una cantidad imposible se descarta sin romper', [0, 0, 2],
+    [basura.aplicados, basura.sinCatalogo, basura.recibidos]);
+
   /*
    * Que la vuelta falle en silencio es peor que la ida fallando: los pedidos
    * salen igual y nadie se entera de que ya hay una respuesta esperando.
