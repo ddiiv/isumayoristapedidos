@@ -537,7 +537,7 @@ llega lo nuevo mostraría números de un depósito en la pantalla de otro.
 
 Las dos rutas que esto necesita —los locales y el stock de uno— **todavía no
 existen del lado de STOCKER**: están pedidas, con su formato exacto, en
-. Hasta que estén, la columna no aparece y el stock se
+`INTEGRACION-STOCKER.md`. Hasta que estén, la columna no aparece y el stock se
 escribe a mano como siempre.
 
 El contrato completo —campos, largos, eventos, idempotencia y las dos formas de
