@@ -1,0 +1,32 @@
+# Cada push levanta el portal sobre una base vacía y corre la suite entera
+# (pruebas/correr.cjs carga sola la planilla de prueba). Sin mail ni WhatsApp.
+name: ci
+on:
+  push:
+  pull_request:
+
+jobs:
+  pruebas:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DATA_DIR: ${{ github.workspace }}/datos-ci
+      PORT: "8090"
+      API: http://127.0.0.1:8090
+      ADMIN_EMAIL: admin@ci.test
+      ADMIN_PASSWORD: clave-solo-para-ci-${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 24, cache: npm }
+      - run: npm ci
+      - run: npm audit --omit=dev --audit-level=high
+      - name: Levantar el portal
+        run: |
+          mkdir -p "$DATA_DIR"
+          node server.js > servidor.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf "$API/healthz" && exit 0; sleep 1; done
+          cat servidor.log; exit 1
+      - run: npm test
+      - if: failure()
+        run: cat servidor.log

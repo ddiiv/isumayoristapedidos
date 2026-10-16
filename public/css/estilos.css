@@ -1,15 +1,10 @@
 /*
  * ISUWAYA MAYORISTA
  *
- * Tema claro con la paleta del logo. El trazo va de un azul acero a un verde
- * bosque pasando por un petróleo, y de ahí salen los tres tonos. Los papeles no
- * cambian: azul para lo que ubica (lo elegido, los precios, la solapa activa) y
- * verde sólo para lo que hay que apretar. Si el verde también decorara, dejaría
- * de señalar la acción.
- *
- * El degradé entero del logo aparece en tres lugares y en ninguno más: la
- * franja de arriba, el botón flotante del pedido y la caja del total. Repetido
- * en más sitios deja de ser la marca y pasa a ser decoración.
+ * El mismo sistema que la tienda (isu, packages/ui/src/tokens.css): mucho
+ * blanco, grises cálidos, botones negros en píldora y el azul acero del logo
+ * para la marca, los precios y lo elegido. El verde queda para lo que salió
+ * bien. Sin degradés ni sombras en las tarjetas: la foto manda.
  *
  * Todo texto de esta hoja pasa 4,5:1 contra su fondo (WCAG AA) y los bordes de
  * los campos pasan 3:1, que es lo que pide un control para que se vea que está.
@@ -42,30 +37,30 @@
 
 :root {
   /* Marca */
-  --azul: #2a5d96;
-  --azul-hover: #224d7d;
-  --azul-claro: #ebf2f9;
+  --azul: #2c5f91;
+  --azul-hover: #1d4675;
+  --azul-vivo: #3a67b8;
+  --azul-claro: #eaf1f8;
   --azul-borde: #c9daeb;
-  --teal: #2f6e7e;
+  --teal: #2f6e7e;          /* sólo el estado "enviado": distinto de "confirmado" */
   --teal-claro: #e6f0f2;
-  --verde: #2e6a48;
-  --verde-hover: #25583b;
-  --verde-claro: #e8f3ec;
-  --verde-borde: #bdd9c7;
-  --verde-tinta: #1f4a32;
-  --degrade: linear-gradient(100deg, #305eb3 0%, #326a99 30%, #376e87 52%, #316055 76%, #2e5a3e 100%);
+  --verde: #2e6b3f;
+  --verde-hover: #245632;
+  --verde-claro: #e9f3ec;
+  --verde-borde: #bfdcc7;
+  --verde-tinta: #1f4a2b;
 
-  /* Neutros: un solo gris, frío, teñido con el azul del logo */
-  --tinta: #15232c;
-  --tinta-2: #33434d;
-  --tinta-suave: #5c6c76;
-  --linea: #e3e9ec;
-  --linea-fuerte: #d0d9de;
-  --borde-campo: #88969e;
+  /* Neutros cálidos, los de la tienda */
+  --tinta: #171717;
+  --tinta-2: #3f3f3f;
+  --tinta-suave: #525252;
+  --linea: #e7e5e4;
+  --linea-fuerte: #d6d3d1;
+  --borde-campo: #8a8582;
   --papel: #ffffff;
-  --fondo: #f3f6f7;
-  --fondo-suave: #f8fafb;
-  --gris-claro: #edf1f3;
+  --fondo: #f6f6f5;
+  --fondo-suave: #fafaf9;
+  --gris-claro: #f0efed;
 
   /* Estados */
   --rojo: #b42318;
@@ -76,13 +71,13 @@
   --ambar-borde: #efd8b0;
 
   /* Forma */
-  --radio: 16px;
+  --radio: 14px;
   --radio-chico: 10px;
-  --sombra-1: 0 1px 2px rgba(21, 45, 60, .05);
-  --sombra: 0 1px 2px rgba(21, 45, 60, .05), 0 12px 30px -10px rgba(21, 45, 60, .16);
-  --sombra-alta: 0 2px 6px rgba(15, 35, 50, .06), 0 32px 70px -20px rgba(15, 35, 50, .36);
-  --anillo: 0 0 0 4px rgba(42, 93, 150, .16);
-  --curva: cubic-bezier(.22, .8, .24, 1);
+  --sombra-1: none;
+  --sombra: 0 1px 2px rgba(0, 0, 0, .04), 0 12px 30px -12px rgba(0, 0, 0, .14);
+  --sombra-alta: 0 2px 6px rgba(0, 0, 0, .06), 0 32px 70px -20px rgba(0, 0, 0, .32);
+  --anillo: 0 0 0 4px rgba(58, 103, 184, .18);
+  --curva: cubic-bezier(.22, 1, .36, 1);
   --alto-encabezado: 64px;
 
   --letra: "Instrument Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
@@ -101,27 +96,18 @@ body {
   margin: 0;
   font-family: var(--letra);
   color: var(--tinta);
-  background: var(--fondo);
+  background: var(--papel);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-}
-/*
- * Una luz tenue de los colores del logo arriba de todo. Fija y sin eventos:
- * no se repinta al bajar y no se interpone entre el dedo y un botón.
- */
-body::before {
-  content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
-  background:
-    radial-gradient(900px 420px at 92% -8%, rgba(55, 110, 135, .09), transparent 65%),
-    radial-gradient(700px 360px at -6% 4%, rgba(48, 94, 179, .06), transparent 60%);
 }
 
 img { max-width: 100%; display: block; }
 button { font: inherit; cursor: pointer; }
 [hidden] { display: none !important; }
 h1, h2, h3, h4 { text-wrap: balance; }
-::selection { background: rgba(47, 110, 126, .2); }
-:where(a, button, summary, [tabindex]):focus-visible { outline: 2px solid var(--azul); outline-offset: 2px; }
+h1, h2, h3, h4 { letter-spacing: -.01em; }
+::selection { background: var(--azul-claro); }
+:where(a, button, summary, [tabindex]):focus-visible { outline: 2px solid var(--azul-vivo); outline-offset: 2px; }
 
 /* Para quien navega con teclado: salta el encabezado y va directo a la lista. */
 .saltar {
@@ -164,11 +150,10 @@ h1, h2, h3, h4 { text-wrap: balance; }
 .cinta-grupo { display: flex; flex: none; }
 .cinta-item {
   flex: none;
-  padding: 6px 0;
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: .08em;
-  text-transform: uppercase;
+  padding: 8px 0;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: .02em;
   white-space: nowrap;
 }
 .cinta-item::after { content: "•"; margin: 0 20px; opacity: .5; }
@@ -192,17 +177,11 @@ h1, h2, h3, h4 { text-wrap: balance; }
 
 header.principal {
   position: sticky; top: 0; z-index: 30;
-  background: rgba(255, 255, 255, .9);
-  -webkit-backdrop-filter: saturate(1.5) blur(14px);
-  backdrop-filter: saturate(1.5) blur(14px);
+  background: var(--papel);
   color: var(--tinta);
 }
-header.principal::before {
-  content: ""; position: absolute; inset: 0 0 auto; height: 3px;
-  background: var(--degrade);
-}
 .barra {
-  max-width: 1200px; margin: 0 auto; padding: 3px 20px 0;
+  max-width: 1200px; margin: 0 auto; padding: 0 20px;
   height: var(--alto-encabezado);
   display: flex; align-items: center; justify-content: space-between; gap: 16px;
 }
@@ -215,7 +194,8 @@ header.principal::before {
   font-family: var(--letra-titulo); font-size: 20px; font-weight: 700;
   letter-spacing: .01em; line-height: 1; white-space: nowrap; min-width: 0;
 }
-.marca-texto > span { color: var(--teal); }
+.marca-texto { letter-spacing: -.01em; }
+.marca-texto > span { color: var(--azul); }
 .marca-texto small {
   display: block; margin-top: 5px;
   font-family: var(--letra); font-size: 10px; font-weight: 600;
@@ -227,11 +207,12 @@ header.principal::before {
 .btn-barra {
   display: inline-block; white-space: nowrap; text-decoration: none; line-height: 1.2;
   border: 1px solid var(--linea-fuerte); background: var(--papel); color: var(--tinta);
-  border-radius: var(--radio-chico); padding: 8px 14px;
-  font-size: 13.5px; font-weight: 600; text-align: left;
+  border-color: var(--tinta); border-radius: 999px; padding: 8px 18px;
+  font-size: 14px; font-weight: 700; text-align: left;
   transition: background-color .18s var(--curva), border-color .18s var(--curva), color .18s var(--curva);
 }
-.btn-barra:hover { background: var(--azul-claro); border-color: var(--azul-borde); color: var(--azul-hover); }
+.btn-barra:hover { background: var(--tinta); color: #fff; }
+.btn-barra:hover small { color: rgba(255, 255, 255, .75); }
 /* El nombre de la cuenta se corta con puntos: uno largo empujaba la marca
    fuera del encabezado. */
 .btn-barra small {
@@ -298,9 +279,7 @@ table.datos td { padding: 10px; border-bottom: 1px solid var(--linea); vertical-
    apiladas empujan el catálogo fuera de la pantalla en el primer scroll. */
 nav.categorias {
   position: sticky; top: var(--alto-encabezado); z-index: 25;
-  background: rgba(255, 255, 255, .92);
-  -webkit-backdrop-filter: saturate(1.5) blur(14px);
-  backdrop-filter: saturate(1.5) blur(14px);
+  background: var(--papel);
   border-bottom: 1px solid var(--linea);
 }
 .categorias-lista {
@@ -311,11 +290,11 @@ nav.categorias {
 .categorias-lista button {
   flex: 0 0 auto; border: 0; background: transparent;
   padding: 8px 15px; border-radius: 999px;
-  color: var(--tinta-suave); font-size: 14px; font-weight: 600; white-space: nowrap;
+  color: var(--tinta-2); font-size: 15px; font-weight: 700; white-space: nowrap;
   transition: background-color .18s var(--curva), color .18s var(--curva);
 }
 .categorias-lista button:hover { background: var(--gris-claro); color: var(--tinta); }
-.categorias-lista button[aria-current="true"] { background: var(--azul); color: #fff; }
+.categorias-lista button[aria-current="true"] { background: var(--tinta); color: #fff; }
 
 /* ── Catálogo ───────────────────────────────────────────────────── */
 main { max-width: 1200px; margin: 0 auto; padding: 26px 20px 128px; }
@@ -324,11 +303,11 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 20px 128px; }
    sin la raya gruesa de color, que en una lista larga se volvía ruido. */
 .titulo-categoria {
   display: flex; align-items: center; gap: 10px;
-  font-family: var(--letra-titulo); font-size: 22px; font-weight: 700;
-  letter-spacing: -.01em; line-height: 1.2; color: var(--tinta);
+  font-family: var(--letra-titulo); font-size: 26px; font-weight: 700;
+  letter-spacing: -.02em; line-height: 1.2; color: var(--tinta);
   margin: 38px 0 14px;
 }
-.titulo-categoria::after { content: ""; flex: 1; height: 1px; background: var(--linea-fuerte); }
+.titulo-categoria::after { content: ""; flex: 1; height: 1px; background: var(--linea); }
 .titulo-categoria:first-child { margin-top: 0; }
 .titulo-categoria small {
   font-family: var(--letra); font-size: 12px; font-weight: 600; letter-spacing: 0;
@@ -365,12 +344,12 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 20px 128px; }
   font-size: 10.5px; padding: 2px 7px; border-radius: 999px;
   background: var(--azul-claro); color: var(--azul); font-weight: 600;
 }
-.producto .en-pedido { margin-top: 8px; font-size: 11.5px; font-weight: 700; color: var(--verde); }
+.producto .en-pedido { margin-top: 8px; font-size: 11.5px; font-weight: 700; color: var(--azul); }
 
 /* ── Panel deslizante del producto ──────────────────────────────── */
 .telon {
   position: fixed; inset: 0; z-index: 40;
-  background: rgba(14, 30, 40, .38);
+  background: rgba(0, 0, 0, .38);
   opacity: 0; pointer-events: none; transition: opacity .24s var(--curva);
 }
 .telon.abierto { opacity: 1; pointer-events: auto; }
@@ -446,7 +425,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 20px 128px; }
 }
 .colores-selector button .cuenta {
   display: inline-block; margin-left: 6px; font-size: 11px;
-  color: #fff; background: var(--verde); border-radius: 999px; padding: 1px 7px;
+  color: #fff; background: var(--tinta); border-radius: 999px; padding: 1px 7px;
 }
 
 /* Modo de carga: por talle o por curva. Un control segmentado, como un
@@ -463,7 +442,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 20px 128px; }
 .modos button:hover { color: var(--tinta); }
 .modos button[aria-pressed="true"] {
   background: var(--papel); color: var(--azul);
-  box-shadow: 0 1px 2px rgba(21, 45, 60, .12), 0 0 0 1px rgba(21, 45, 60, .04);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .12), 0 0 0 1px rgba(0, 0, 0, .04);
 }
 
 .matriz { display: grid; gap: 8px; }
@@ -500,27 +479,27 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 20px 128px; }
 .rotulo.separado-arriba { margin-top: 22px; }
 
 .aviso-curva {
-  background: var(--verde-claro); border: 1px solid var(--verde-borde); border-radius: 12px;
-  padding: 11px 14px; font-size: 13px; color: var(--verde-tinta); line-height: 1.5; margin-bottom: 14px;
+  background: var(--azul-claro); border: 1px solid var(--azul-borde); border-radius: 12px;
+  padding: 11px 14px; font-size: 13px; color: var(--azul-hover); line-height: 1.5; margin-bottom: 14px;
 }
-.aviso-curva b { color: var(--verde-tinta); }
+.aviso-curva b { color: var(--azul-hover); }
 
 /* ── Botones ────────────────────────────────────────────────────── */
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
-  border: 1px solid transparent; border-radius: var(--radio-chico); padding: 11px 18px;
-  font-size: 14px; font-weight: 700; line-height: 1.2; text-decoration: none;
-  color: #fff; background: var(--verde);
+  border: 1px solid transparent; border-radius: 999px; padding: 12px 22px;
+  font-size: 15px; font-weight: 700; line-height: 1.2; text-decoration: none;
+  color: #fff; background: var(--tinta);
   transition: background-color .18s var(--curva), border-color .18s var(--curva),
     color .18s var(--curva), box-shadow .18s var(--curva), transform .12s var(--curva);
 }
-.btn:hover:not(:disabled) { background: var(--verde-hover); }
-.btn:active:not(:disabled) { transform: translateY(1px); }
+.btn:hover:not(:disabled) { background: var(--azul-hover); }
+.btn:active:not(:disabled) { transform: scale(.97); }
 .btn:disabled { opacity: .45; cursor: not-allowed; }
 .btn.azul { background: var(--azul); }
 .btn.azul:hover:not(:disabled) { background: var(--azul-hover); }
-.btn.borde { background: var(--papel); color: var(--azul); border-color: var(--linea-fuerte); }
-.btn.borde:hover:not(:disabled) { background: var(--azul-claro); border-color: var(--azul-borde); color: var(--azul-hover); }
+.btn.borde { background: var(--papel); color: var(--tinta); border-color: var(--tinta); }
+.btn.borde:hover:not(:disabled) { background: var(--tinta); border-color: var(--tinta); color: #fff; }
 .btn.texto { background: none; color: var(--tinta-suave); font-weight: 600; padding: 8px 4px; }
 .btn.texto:hover:not(:disabled) { background: none; color: var(--tinta); }
 
@@ -532,38 +511,38 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 20px 128px; }
  * persona está mirando si le falta algo. Así queda encima pero sin comerse
  * contenido, y el catálogo tiene abajo el espacio para que nada quede debajo.
  *
- * Lleva el degradé del logo: es la única acción que importa en esta pantalla,
- * y el importe va en una píldora blanca adentro para que se lea primero.
+ * Negro como el botón principal de la tienda: es la única acción que importa
+ * en esta pantalla, y el importe va en una píldora blanca adentro.
  */
 .flotante {
   position: fixed; left: 50%; bottom: 18px; z-index: 35;
   transform: translateX(-50%) translateY(140%);
   transition: transform .32s var(--curva), box-shadow .2s var(--curva);
   display: flex; align-items: center; gap: 14px;
-  background: var(--degrade); color: #fff; border: 0;
+  background: var(--tinta); color: #fff; border: 0;
   border-radius: 999px; padding: 7px 7px 7px 22px;
-  box-shadow: 0 2px 6px rgba(21, 45, 60, .12), 0 16px 36px -12px rgba(38, 88, 110, .62);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, .12), 0 16px 36px -12px rgba(0, 0, 0, .5);
   font-size: 14.5px; font-weight: 700; max-width: calc(100vw - 24px);
   /* En una sola línea siempre: partido en dos, el botón crece hacia abajo y
      se sale de la pantalla justo donde el pulgar lo va a buscar. */
   white-space: nowrap;
 }
-.flotante:hover { box-shadow: 0 2px 6px rgba(21, 45, 60, .14), 0 20px 44px -12px rgba(38, 88, 110, .72); }
+.flotante:hover { background: var(--azul-hover); }
 .flotante.visible { transform: translateX(-50%); }
-.flotante.visible:active { transform: translateX(-50%) translateY(1px); }
+.flotante.visible:active { transform: translateX(-50%) scale(.97); }
 .flotante .cuenta-items { font-weight: 400; opacity: .92; font-size: 13px; }
 /* Con el carrito por debajo del mínimo, el botón lo dice desde el catálogo. */
 .flotante .falta { font-weight: 600; }
 .flotante.corto .ir { background: var(--ambar-claro); color: var(--ambar); }
 .flotante .ir {
-  background: var(--papel); color: var(--azul); border-radius: 999px; padding: 9px 16px;
+  background: var(--papel); color: var(--tinta); border-radius: 999px; padding: 9px 16px;
   font-family: var(--letra-titulo); font-size: 15px; font-variant-numeric: tabular-nums;
 }
 
 /* ── Diálogo del pedido ─────────────────────────────────────────── */
 .dialogo {
   position: fixed; inset: 0; z-index: 50; display: none;
-  background: rgba(14, 30, 40, .42); overflow-y: auto; overscroll-behavior: contain;
+  background: rgba(0, 0, 0, .42); overflow-y: auto; overscroll-behavior: contain;
   padding: 32px 16px;
   -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px);
 }
@@ -619,12 +598,12 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 20px 128px; }
   white-space: nowrap; font-variant-numeric: tabular-nums;
 }
 .resumen-item .lineas { margin-top: 7px; font-size: 12.5px; color: var(--tinta-2); line-height: 1.7; }
-.resumen-item .lineas b { color: var(--verde); }
-.resumen-item .curva { font-size: 12px; color: var(--verde); font-weight: 700; margin-top: 4px; }
+.resumen-item .lineas b { color: var(--azul); }
+.resumen-item .curva { font-size: 12px; color: var(--azul); font-weight: 700; margin-top: 4px; }
 .resumen-item .quitar { border: 0; background: none; color: var(--rojo); font-size: 12px; font-weight: 600; padding: 4px 0 0; }
 
 .total-caja {
-  background: var(--degrade); color: #fff; border-radius: 14px;
+  background: var(--tinta); color: #fff; border-radius: var(--radio);
   padding: 16px 20px; display: flex; justify-content: space-between; align-items: center; margin-top: 14px;
 }
 .total-caja .u { font-size: 13px; opacity: .9; }
@@ -654,7 +633,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 20px 128px; }
 .cargando { text-align: center; padding: 60px 20px; color: var(--tinta-suave); font-size: 14px; }
 .cargando::before {
   content: ""; display: block; width: 26px; height: 26px; margin: 0 auto 12px;
-  border-radius: 50%; border: 3px solid var(--linea); border-top-color: var(--teal);
+  border-radius: 50%; border: 3px solid var(--linea); border-top-color: var(--azul);
   animation: girar .8s linear infinite;
 }
 @keyframes girar { to { transform: rotate(360deg); } }
@@ -826,7 +805,6 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 20px 128px; }
   background: var(--papel);
   border: 1px solid var(--linea);
   border-radius: 18px;
-  box-shadow: var(--sombra-1);
   cursor: pointer;
   transition: box-shadow .22s var(--curva), border-color .22s var(--curva);
   /*
@@ -838,7 +816,9 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 20px 128px; }
   content-visibility: auto;
   contain-intrinsic-size: auto 280px;
 }
-.fila-producto:hover { box-shadow: var(--sombra); border-color: var(--linea-fuerte); }
+.fila-producto:hover { border-color: var(--tinta-suave); }
+.fila-producto:hover .carrusel img { transform: scale(1.04); }
+.carrusel img { transition: transform .7s var(--curva); }
 
 .carrusel {
   position: relative;
@@ -863,7 +843,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 20px 128px; }
   position: absolute; top: 50%; transform: translateY(-50%);
   width: 32px; height: 32px; padding: 0; border-radius: 50%; font-size: 0;
   border: 0; background: rgba(255, 255, 255, .92); color: var(--tinta);
-  box-shadow: 0 2px 10px rgba(15, 35, 50, .2);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, .2);
   display: grid; place-items: center;
   transition: background-color .15s var(--curva), transform .15s var(--curva);
 }
@@ -878,7 +858,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 20px 128px; }
 .carrusel-ir.despues { right: 8px; }
 .carrusel-cuenta {
   position: absolute; bottom: 8px; right: 8px;
-  background: rgba(21, 35, 44, .72); color: #fff;
+  background: rgba(23, 23, 23, .72); color: #fff;
   font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 999px;
   font-variant-numeric: tabular-nums;
 }
@@ -886,8 +866,8 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 20px 128px; }
 .fila-datos { padding: 8px 10px 8px 0; display: flex; flex-direction: column; gap: 12px; }
 .fila-encabezado { display: flex; justify-content: space-between; gap: 14px; align-items: flex-start; }
 .fila-encabezado h3 {
-  margin: 0; font-family: var(--letra-titulo); font-size: 18px; font-weight: 700;
-  letter-spacing: -.005em; line-height: 1.22;
+  margin: 0; font-family: var(--letra-titulo); font-size: 19px; font-weight: 700;
+  letter-spacing: -.015em; line-height: 1.22;
 }
 .fila-encabezado .sku { margin: 4px 0 0; font-size: 12px; color: var(--tinta-suave); }
 .fila-precio {
@@ -919,8 +899,8 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 20px 128px; }
 .pastilla-nuevo {
   display: inline-block; vertical-align: middle; margin-left: 6px;
   font-family: var(--letra); font-size: 11px; font-weight: 700; letter-spacing: .02em;
-  color: var(--verde); background: var(--verde-claro); border: 1px solid var(--verde-borde);
-  border-radius: 999px; padding: 2px 8px;
+  color: #fff; background: var(--tinta); border: 1px solid var(--tinta);
+  border-radius: 999px; padding: 2px 9px;
 }
 .categorias-lista .cuenta-cat {
   display: inline-block; margin-left: 6px; padding: 1px 7px;
@@ -933,11 +913,11 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 20px 128px; }
 .talle-chip {
   min-width: 34px; text-align: center;
   font-size: 12px; font-weight: 700; color: var(--tinta-2);
-  background: var(--papel); border: 1px solid var(--linea-fuerte); border-radius: 8px; padding: 3px 8px;
+  background: var(--papel); border: 1px solid var(--linea-fuerte); border-radius: 999px; padding: 3px 9px;
 }
 .fila-pie { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: auto; }
-.fila-pie .btn { padding: 10px 18px; font-size: 13.5px; }
-.fila-pie .en-pedido { font-size: 13px; font-weight: 700; color: var(--verde); }
+.fila-pie .btn { padding: 11px 22px; font-size: 14px; }
+.fila-pie .en-pedido { font-size: 13px; font-weight: 700; color: var(--azul); }
 
 @media (max-width: 640px) {
   .fila-producto { grid-template-columns: 122px 1fr; gap: 12px; padding: 6px; border-radius: 16px; contain-intrinsic-size: auto 340px; }
@@ -981,7 +961,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 20px 128px; }
 }
 .bloque-color > header .nombre { flex: 1; font-size: 13.5px; font-weight: 700; color: var(--tinta); }
 .bloque-color > header .cuenta-color {
-  background: var(--verde); color: #fff; border-radius: 999px;
+  background: var(--tinta); color: #fff; border-radius: 999px;
   font-size: 11px; font-weight: 700; padding: 2px 8px; flex: 0 0 auto; font-variant-numeric: tabular-nums;
 }
 /*
@@ -1013,7 +993,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 20px 128px; }
 }
 .celda input::-webkit-outer-spin-button,
 .celda input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-.celda input:focus { outline: none; border-color: var(--azul); box-shadow: 0 0 0 3px rgba(42, 93, 150, .18); }
+.celda input:focus { outline: none; border-color: var(--azul); box-shadow: 0 0 0 3px rgba(58, 103, 184, .18); }
 .celda .sin {
   display: grid; place-items: center; height: 42px;
   font-size: 11px; font-weight: 600; color: var(--tinta-suave);
@@ -1054,7 +1034,7 @@ th.col-color .cuadro {
 }
 th.col-color .nombre { flex: 1; text-align: left; line-height: 1.15; }
 th.col-color .cuenta-color {
-  background: var(--verde); color: #fff; border-radius: 999px;
+  background: var(--tinta); color: #fff; border-radius: 999px;
   font-size: 11px; font-weight: 700; padding: 1px 7px; flex: 0 0 auto; font-variant-numeric: tabular-nums;
 }
 
@@ -1068,7 +1048,7 @@ table.matriz-talles input {
 table.matriz-talles input::-webkit-outer-spin-button,
 table.matriz-talles input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 table.matriz-talles input:hover { border-color: var(--tinta-suave); }
-table.matriz-talles input:focus { outline: none; border-color: var(--azul); box-shadow: 0 0 0 3px rgba(42, 93, 150, .18); }
+table.matriz-talles input:focus { outline: none; border-color: var(--azul); box-shadow: 0 0 0 3px rgba(58, 103, 184, .18); }
 
 /* El cruce que no se fabrica: rayado tenue, para que se lea "no existe" y no
    "está en cero". */
@@ -1076,7 +1056,7 @@ td.agotado span {
   display: inline-block; font-size: 11px; font-weight: 600;
   color: var(--tinta-suave); border-radius: 9px; padding: 10px 6px; width: 100%; max-width: 64px;
   background: var(--gris-claro)
-    repeating-linear-gradient(135deg, transparent 0 6px, rgba(21, 45, 60, .045) 6px 12px);
+    repeating-linear-gradient(135deg, transparent 0 6px, rgba(0, 0, 0, .045) 6px 12px);
 }
 
 .carrusel-panel {

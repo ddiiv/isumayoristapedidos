@@ -13,6 +13,7 @@ const { completarClientesDePedidos } = require('./src/clientes');
 const { comprimir } = require('./src/comprimir');
 const eventos = require('./src/eventos');
 const stocker = require('./src/stocker');
+const respaldos = require('./src/respaldos');
 
 const app = express();
 const PORT = Number(process.env.PORT) || 8080;
@@ -77,6 +78,15 @@ app.use((req, res, next) => {
 app.use(comprimir);
 
 app.get('/healthz', (req, res) => res.json({ ok: true, datos: DATA_DIR }));
+/*
+ * Para un monitor externo (BetterStack, UptimeRobot): 503 si hay pedidos que
+ * hace más de una hora no llegan a STOCKER. Aparte de /healthz a propósito:
+ * una cola trabada no tiene que frenar un deploy ni reiniciar el portal.
+ */
+app.get('/healthz/stocker', (req, res) => {
+  const n = stocker.trabados();
+  res.set('Cache-Control', 'no-store').status(n ? 503 : 200).json({ ok: !n, trabados: n });
+});
 
 /*
  * Quién sos se resuelve UNA vez, antes que cualquier ruta.
@@ -163,6 +173,10 @@ const server = app.listen(PORT, () => {
   const podar = () => { try { eventos.podar(); } catch (e) { console.error('  eventos:', e.message); } };
   podar();
   setInterval(podar, 24 * 60 * 60 * 1000).unref();
+
+  // Una copia de la base por día, las últimas siete (src/respaldos.js).
+  respaldos.respaldoDiario();
+  setInterval(respaldos.respaldoDiario, 24 * 60 * 60 * 1000).unref();
 
   /*
    * Los pedidos que STOCKER todavía no vio salen ahora: si el servicio estuvo

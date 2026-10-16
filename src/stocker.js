@@ -344,6 +344,13 @@ function reintentar(numero = null) {
   return r.changes;
 }
 
+/** Pedidos que hace más de una hora no llegan a STOCKER (sin cola, cero). */
+function trabados() {
+  if (!configurado()) return 0;
+  const hace = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+  return db.prepare(`SELECT COUNT(*) n FROM stocker_cola WHERE estado IN ('pendiente', 'error') AND creado_en < ?`).get(hace).n;
+}
+
 /** Cómo va la sincronización, para la pantalla de avisos del panel. */
 function estadoPublico() {
   if (!configurado()) {
@@ -724,7 +731,7 @@ function arrancar() {
 }
 
 module.exports = {
-  configurado, anotar, procesarCola, reintentar, estadoPublico, arrancar,
+  configurado, anotar, procesarCola, reintentar, estadoPublico, arrancar, trabados,
   traerResoluciones, sincronizarPrecios, aplicarResolucion,
   localesDeStocker, localElegido, elegirLocal, sincronizarStock,
   cuerpoDelPedido, lineasDelPedido, sinDireccion, EVENTOS,

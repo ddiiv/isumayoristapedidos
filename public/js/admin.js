@@ -1471,7 +1471,17 @@ function vistaAjustes() {
         ${minimo ? '<button class="btn texto quitar" data-sacar-minimo>Sacar el mínimo</button>' : ''}
       </div>
     </div>
-    ${tarjetaDelLocal()}`;
+    ${tarjetaDelLocal()}
+    <div class="tarjeta">
+      <h3>Respaldo de la base</h3>
+      <p class="sub">El portal guarda solo una copia por día (las últimas siete) dentro del
+        servidor. Si se perdiera el servidor entero, esas copias se van con él: descargá una
+        de vez en cuando y guardala en otro lado (Drive, la compu). Tiene los datos de los
+        clientes: no la compartas.</p>
+      <div class="acciones">
+        <a class="btn borde" href="/api/admin/respaldo" download>Descargar respaldo</a>
+      </div>
+    </div>`;
 }
 
 /*

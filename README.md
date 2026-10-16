@@ -64,6 +64,18 @@ Sin volumen, la base y las fotos viven en el disco efímero del contenedor y
 El volumen se monta al arrancar, no durante el build: por eso la base se crea
 en el primer arranque y no antes.
 
+**Respaldos.** El portal copia la base una vez por día en `respaldos/`, dentro
+del volumen, y guarda las últimas siete (`src/respaldos.js`). Eso cubre un
+borrado o una importación equivocada, pero no perder el volumen: para eso,
+**Panel → Ajustes → Descargar respaldo** baja una copia al momento para
+guardarla fuera de Railway. Tiene los datos de los clientes.
+
+**Monitoreo.** `GET /healthz` dice si el portal está vivo. `GET /healthz/stocker`
+contesta 503 si hay pedidos que hace más de una hora no llegan a STOCKER:
+conviene apuntarle un monitor externo (BetterStack, UptimeRobot) que avise por
+mail. No lo uses como healthcheck de Railway: una cola trabada no tiene por qué
+frenar un deploy.
+
 ### 3. Las variables
 
 En **Variables** del servicio (`.env.example` las tiene todas comentadas):

@@ -79,11 +79,24 @@ const CLIENTE_OK = {
 };
 
 (async () => {
+  // Base recién creada (CI o DATA_DIR nuevo): se carga la planilla de prueba antes de empezar.
+  if (!(await pedir('/api/catalogo')).json?.productos?.length) {
+    const s = await pedir('/api/sesion', { metodo: 'POST', cuerpo: { email: EMAIL_ADMIN, password: CLAVE_ADMIN } });
+    const fd = new FormData();
+    fd.append('planilla', new Blob([fs.readFileSync(path.join(__dirname, 'catalogo-isuwaya.xlsx'))]), 'export.xlsx');
+    const imp = await pedir('/api/admin/importar', { metodo: 'POST', cuerpo: fd, admin: true });
+    console.log(`  (base vacía: se cargó la planilla de prueba — sesión ${s.status}, importación ${imp.status})`);
+    cookieAdmin = '';
+    await new Promise((r) => setTimeout(r, 1100)); // el limitador de /api/sesion deja un intento por segundo
+  }
+
   tit('1. EL CATÁLOGO SE SIRVE ENTERO Y CON LA GRILLA RESUELTA');
   const cat = await pedir('/api/catalogo');
   chk('responde', 200, cat.status);
   const productos = cat.json?.productos || [];
   chk('hay productos', true, productos.length > 0);
+  const cola = await pedir('/healthz/stocker');
+  chk('el chequeo de la cola de STOCKER responde', [200, true], [cola.status, cola.json?.ok]);
 
   const p = productos.find((x) => x.combinaciones.length > 1) || productos[0];
   chk('cada producto trae su grilla de SKU', true, p.combinaciones.every((c) => c.sku && 'precio' in c));
@@ -228,6 +241,7 @@ const CLIENTE_OK = {
   chk('los productos piden sesión', 401, (await pedir('/api/admin/productos', { admin: true })).status);
   chk('los pedidos también', 401, (await pedir('/api/admin/pedidos', { admin: true })).status);
   chk('importar también', 401, (await pedir('/api/admin/importar', { metodo: 'POST', admin: true })).status);
+  chk('el respaldo de la base también', 401, (await pedir('/api/admin/respaldo', { admin: true })).status);
 
   /*
    * Se entra por la MISMA puerta que los clientes: /api/sesion. El servidor
@@ -248,6 +262,9 @@ const CLIENTE_OK = {
   chk('con la correcta sí',   200,     entra.status);
   chk('y el rol es admin',    'admin', entra.json?.rol);
   chk('y ahora los productos se ven', 200, (await pedir('/api/admin/productos', { admin: true })).status);
+  const respaldo = await pedir('/api/admin/respaldo', { admin: true, crudo: true });
+  chk('el respaldo baja una base SQLite entera', [200, true],
+    [respaldo.status, respaldo.buffer.subarray(0, 16).toString() === 'SQLite format 3\0' && respaldo.buffer.length > 4096]);
 
   tit('9. UNA COOKIE FALSIFICADA NO SIRVE');
   const guardada = cookieAdmin;
@@ -539,7 +556,7 @@ const planilla = path.join(__dirname, 'catalogo-isuwaya.xlsx');
   };
   const cssBr = await codificacion('/css/estilos.css', 'br, gzip');
   chk('el CSS sale comprimido con brotli', ['br', true], [cssBr.enc, /accept-encoding/i.test(cssBr.vary)]);
-  chk('y se descomprime entero', true, cssBr.texto.includes('--degrade') && cssBr.texto.includes('prefers-reduced-motion'));
+  chk('y se descomprime entero', true, cssBr.texto.includes('--azul-vivo') && cssBr.texto.includes('prefers-reduced-motion'));
   const catBr = await codificacion('/api/catalogo', 'br');
   chk('el catálogo también sale comprimido', 'br', catBr.enc);
   chk('y sigue siendo el JSON de siempre', true, Array.isArray(JSON.parse(catBr.texto).productos));

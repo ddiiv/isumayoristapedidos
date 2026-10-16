@@ -21,6 +21,7 @@ const {
   leerPedido, armarPedido, minimoDeCompra, guardarMinimoDeCompra, faltaParaElMinimo,
 } = require('../pedidos');
 const auth = require('../auth');
+const respaldos = require('../respaldos');
 
 const r = express.Router();
 
@@ -33,6 +34,15 @@ const r = express.Router();
  * autenticado y dos lugares donde arreglar lo mismo.
  */
 r.use(auth.exigirAdmin);
+
+// Una copia de la base al momento, para guardarla fuera de Railway (src/respaldos.js).
+r.get('/respaldo', async (req, res, next) => {
+  try {
+    const archivo = await respaldos.respaldar(`descarga-${crypto.randomUUID()}.db`);
+    res.set('Cache-Control', 'no-store');
+    res.download(archivo, `isuwaya-${new Date().toISOString().slice(0, 10)}.db`, () => fs.rm(archivo, { force: true }, () => {}));
+  } catch (e) { next(e); }
+});
 
 /*
  * Importar la planilla de STOCKER.
