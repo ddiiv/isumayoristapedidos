@@ -259,30 +259,6 @@ r.post('/pedidos/previsualizar', frenar(demasiadosPapeles), (req, res) => {
   });
 });
 
-/*
- * POST /api/pedidos/pdf — el remito preliminar, antes de confirmar.
- *
- * Se genera con el mismo código que el definitivo. Con una vista previa hecha
- * aparte, el papel que el cliente descarga y el que llega al depósito pueden
- * decir cosas distintas, y nadie lo nota hasta que hay un reclamo.
- */
-r.post('/pedidos/pdf', frenar(demasiadosPapeles), async (req, res, next) => {
-  try {
-    const { datos, ocultos } = clientes.completarConGuardados(req.body?.cliente);
-    const { cliente } = validarCliente(datos);
-    const { items, total, unidades } = armarPedido(req.body?.carrito);
-    if (!items.length) return res.status(400).json({ message: 'El pedido está vacío.' });
-
-    const pdf = await pdfPedido({
-      numero: 'PRELIMINAR', creado_en: new Date().toISOString(),
-      cliente: clientes.enmascarar(cliente, ocultos), items, total, unidades,
-    });
-    res.type('application/pdf')
-      .setHeader('Content-Disposition', 'attachment; filename="pedido-preliminar.pdf"');
-    res.send(pdf);
-  } catch (e) { next(e); }
-});
-
 // POST /api/pedidos — confirma, guarda y avisa.
 r.post('/pedidos', frenar(demasiadosPedidos), async (req, res, next) => {
   try {

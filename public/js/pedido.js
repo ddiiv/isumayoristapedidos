@@ -349,8 +349,15 @@ function pintar() {
     cuerpo.innerHTML = vistaResumen();
     // Si el carrito quedó corto —cambió un precio, se quitó algo—, tampoco se confirma.
     const frena = enviando || corto || previsualizacion?.minimo;
+    /*
+     * Acá NO se baja ningún papel.
+     *
+     * Había un «Descargar PDF» en este paso y era una trampa: el archivo salía
+     * con los datos del cliente y todo lo que pedía, así que se lo llevaban
+     * creyendo que ya habían comprado y el pedido nunca se hacía. El papel
+     * existe recién cuando el pedido existe.
+     */
     pie.innerHTML = `<button class="btn texto" data-ir="datos">Corregir datos</button>
-                     <button class="btn borde" id="bajar-pdf">Descargar PDF</button>
                      <button class="btn" id="confirmar"${frena ? ' disabled' : ''}>
                        ${enviando ? 'Enviando…' : 'Confirmar pedido'}</button>`;
   } else {
@@ -410,34 +417,6 @@ async function irAResumen() {
   pintar();
 }
 
-async function bajarPdf(boton) {
-  const original = boton.textContent;
-  boton.disabled = true;
-  boton.textContent = 'Generando…';
-  try {
-    const r = await fetch('/api/pedidos/pdf', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(cuerpoDelPedido()),
-    });
-    if (!r.ok) throw new Error('falló');
-    const blob = await r.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'pedido-isuwaya.pdf';
-    a.click();
-    // Se libera enseguida: cada blob que queda vivo retiene el PDF entero en
-    // memoria, y alguien que descarga cinco veces se lleva cinco copias.
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-  } catch {
-    cuerpo.insertAdjacentHTML('afterbegin',
-      '<p class="mensaje error">No pudimos generar el PDF. Probá de nuevo.</p>');
-  } finally {
-    boton.disabled = false;
-    boton.textContent = original;
-  }
-}
-
 async function confirmar(boton) {
   if (enviando) return;
   enviando = true;
@@ -471,6 +450,9 @@ async function confirmar(boton) {
     olvidarCarrito();
     paso = 'listo';
     pintar();
+    // El papel del pedido, que ya existe, sale solo. El botón queda igual por
+    // si el navegador bloquea la descarga automática.
+    el('.descargas a')?.click();
   } catch {
     pintar();
     cuerpo.insertAdjacentHTML('afterbegin',
@@ -504,7 +486,6 @@ dialogo.addEventListener('click', async (e) => {
   }
 
   if (e.target.id === 'ir-a-entrar') { cerrarDialogo(); abrirCuenta('entrar'); return; }
-  if (e.target.id === 'bajar-pdf') return bajarPdf(e.target);
   if (e.target.id === 'confirmar') return confirmar(e.target);
 });
 
