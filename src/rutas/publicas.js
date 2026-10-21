@@ -1,27 +1,11 @@
 const express = require('express');
 const { db } = require('../db');
-const {
-  validarCliente, cuitValido, armarPedido, guardarPedido, leerPedido,
-  minimoDeCompra, faltaParaElMinimo,
-} = require('../pedidos');
+const { cuitValido, leerPedido, minimoDeCompra } = require('../pedidos');
 const clientes = require('../clientes');
 const { pdfPedido, pdfRotulo } = require('../pdf');
-const { avisarPedido, avisarCliente } = require('../notificaciones');
 const auth = require('../auth');
 const eventos = require('../eventos');
-const stocker = require('../stocker');
-
-const pesos = (n) => '$ ' + Number(n || 0).toLocaleString('es-AR', { maximumFractionDigits: 0 });
-
-/*
- * El aviso del mínimo, con las mismas palabras en todos lados.
- *
- * Lo arma el servidor y no la pantalla: es el texto que se muestra mientras se
- * arma el carrito y también el que vuelve si alguien igual intenta confirmar.
- * Dos redacciones distintas para la misma regla se leen como dos reglas.
- */
-const avisoDelMinimo = ({ minimo, falta }) =>
-  `El pedido mínimo es de ${pesos(minimo)}. Te faltan ${pesos(falta)} para llegar.`;
+const tomar = require('../tomarPedido');
 
 const r = express.Router();
 
@@ -247,115 +231,16 @@ r.post('/clientes/por-cuit', frenar(demasiadasBusquedas), (req, res) => {
 });
 
 r.post('/pedidos/previsualizar', frenar(demasiadosPapeles), (req, res) => {
-  const { datos, ocultos } = clientes.completarConGuardados(req.body?.cliente);
-  const { cliente, errores: erroresCliente } = validarCliente(datos);
-  const { items, total, unidades, errores } = armarPedido(req.body?.carrito);
-
-  if (!items.length) {
-    return res.status(400).json({ message: 'El pedido está vacío.', errores, erroresCliente });
-  }
-  const falta = faltaParaElMinimo(total);
-  // Lo que salió de lo guardado vuelve tapado: el resumen lo ve quien escribió el CUIT, que puede no ser el dueño.
-  res.json({
-    cliente: clientes.enmascarar(cliente, ocultos),
-    items,
-    total,
-    unidades,
-    errores,
-    erroresCliente,
-    // El resumen avisa, pero no rechaza: rechazar es cosa de confirmar.
-    minimo: falta ? { ...falta, aviso: avisoDelMinimo(falta) } : null,
-  });
+  const { status, json } = tomar.previsualizar(req.body);
+  res.status(status).json(json);
 });
 
 // POST /api/pedidos — confirma, guarda y avisa.
 r.post('/pedidos', frenar(demasiadosPedidos), async (req, res, next) => {
   try {
-    const { datos, ocultos } = clientes.completarConGuardados(req.body?.cliente);
-    const { cliente, errores: erroresCliente } = validarCliente(datos);
-    if (Object.keys(erroresCliente).length) {
-      return res.status(400).json({ message: 'Faltan datos para el envío.', erroresCliente });
-    }
-
-    const { items, total, unidades, errores } = armarPedido(req.body?.carrito);
-    if (!items.length) return res.status(400).json({ message: 'El pedido está vacío.', errores });
-
-    /*
-     * El mínimo se exige acá, con los precios del servidor.
-     *
-     * La tienda ya avisa y no deja seguir, pero el total que decide es este: el
-     * del navegador lo puede armar cualquiera desde la consola, y los precios
-     * pueden haber cambiado entre que se armó el carrito y se confirmó.
-     */
-    const falta = faltaParaElMinimo(total);
-    if (falta) {
-      return res.status(400).json({ message: avisoDelMinimo(falta), minimo: falta });
-    }
-
-    /*
-     * El pedido queda atado a su cliente: a la cuenta si hay sesión, y si no al
-     * cliente de ese CUIT, que se crea reservado la primera vez. Así cada compra
-     * suma en la sección de clientes y la próxima vez el CUIT completa los datos.
-     *
-     * Se guarda igual el cliente que vino en el formulario: son los datos de
-     * ESTE envío, que puede ir a otra dirección. El cliente dice quién lo pidió;
-     * el formulario, a dónde va. Todo en una transacción: no puede quedar un
-     * cliente registrado por un pedido que no se guardó.
-     */
     const cuentaId = req.sesion?.rol === 'cliente' ? req.sesion.cliente.id : null;
-    const pedido = db.transaction(() => guardarPedido({
-      cliente, items, total, unidades,
-      clienteId: clientes.registrarCompra(cliente, { cuentaId }),
-      conSesion: Boolean(cuentaId),
-      datosGuardados: ocultos,
-    }))();
-
-    /*
-     * El pedido ya está guardado antes de avisar.
-     *
-     * Si el mail o el WhatsApp fallaran y eso devolviera un error, el cliente
-     * volvería a mandar el mismo pedido y llegarían dos. Primero se guarda —que
-     * es lo que no se puede perder— y después se avisa.
-     */
-    const [pdfDelPedido, pdfDelRotulo] = await Promise.all([pdfPedido(pedido), pdfRotulo(pedido)]);
-    /*
-     * A ISUWAYA y al cliente a la vez. A ISUWAYA le llega el pedido para revisar
-     * el stock; al cliente, la copia con el aviso de que falta esa confirmación.
-     * El cliente no recibe el rótulo: es un papel del depósito.
-     */
-    const conCuenta = { ...pedido, seVeEnCuenta: clientes.seVeEnCuenta(pedido) };
-    const [avisosNegocio, avisoCliente] = await Promise.all([
-      avisarPedido(pedido, { pedido: pdfDelPedido, rotulo: pdfDelRotulo }),
-      avisarCliente(conCuenta, 'pendiente', { pdf: pdfDelPedido }),
-    ]);
-    const avisos = { ...avisosNegocio, cliente: avisoCliente };
-    db.prepare('UPDATE pedidos SET aviso_mail = ?, aviso_whatsapp = ?, aviso_cliente = ? WHERE id = ?')
-      .run(avisos.mail, avisos.whatsapp, avisos.cliente, pedido.id);
-
-    /*
-     * Y a STOCKER, para que aparte el stock.
-     *
-     * Se anota en su cola y se manda en segundo plano: el pedido del cliente ya
-     * está guardado y no puede depender de que otro sistema conteste a tiempo.
-     * Si STOCKER está caído, la cola reintenta sola (ver src/stocker.js).
-     */
-    try {
-      stocker.anotar(db.prepare('SELECT * FROM pedidos WHERE id = ?').get(pedido.id), 'alta');
-    } catch (e) {
-      console.error('  stocker:', e.message);
-    }
-
-    res.status(201).json({
-      numero: pedido.numero,
-      total: pedido.total,
-      unidades: pedido.unidades,
-      avisos,
-      /*
-       * La firma para bajar el remito. Quien pidió sin cuenta no tiene otra
-       * forma de probar que el pedido es suyo.
-       */
-      token: auth.firmarDocumento(pedido.numero),
-    });
+    const { status, json } = await tomar.confirmar(req.body, { cuentaId });
+    res.status(status).json(json);
   } catch (e) { next(e); }
 });
 

@@ -74,7 +74,7 @@ async function avisarPorMail(pedido, adjuntos) {
     to: destino,
     // El nombre del cliente en el asunto: la bandeja se lee en el celular y
     // así se sabe de quién es sin abrirlo.
-    subject: `Pedido ${pedido.numero} — ${pedido.cliente.nombre} — ${pesos(pedido.total)}`,
+    subject: `Pedido ${pedido.numero}${pedido.cambio ? ' (actualizado)' : ''} — ${pedido.cliente.nombre} — ${pesos(pedido.total)}`,
     text: cuerpoDelMail(pedido),
     attachments: [
       { filename: `${pedido.numero}-pedido.pdf`, content: adjuntos.pedido },
@@ -111,7 +111,7 @@ async function avisarPorWhatsapp(pedido, adjuntos = {}) {
   if (!token || !phoneId) return { ok: false, motivo: 'sin credenciales de WhatsApp' };
 
   const c = pedido.cliente;
-  const resumen = `Pedido ${pedido.numero}\n${c.nombre} (CUIT ${c.cuit})\n`
+  const resumen = `Pedido ${pedido.numero}${pedido.cambio ? ' (actualizado)' : ''}\n${c.nombre} (CUIT ${c.cuit})\n`
     + `${pedido.unidades} u. — ${pesos(pedido.total)}\n`
     + `Envío: ${c.formaEnvio} · ${c.ciudad}, ${c.provincia}`;
 

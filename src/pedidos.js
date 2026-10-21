@@ -236,19 +236,19 @@ function armarPedido(carrito = []) {
  * revisa que tenga todo, y desde el panel lo confirma, lo rearma o lo cancela.
  */
 function guardarPedido({
-  cliente, items, total, unidades, clienteId = null, conSesion = false, datosGuardados = [],
+  cliente, items, total, unidades, clienteId = null, conSesion = false, datosGuardados = [], origen = null,
 }) {
   const numero = proximoNumeroDePedido();
   const creadoEn = new Date().toISOString();
   const info = db.prepare(`
     INSERT INTO pedidos (numero, cliente, items, total, unidades, estado, creado_en,
-                         cliente_id, con_sesion, datos_guardados)
-    VALUES (?, ?, ?, ?, ?, 'pendiente', ?, ?, ?, ?)`)
+                         cliente_id, con_sesion, datos_guardados, origen)
+    VALUES (?, ?, ?, ?, ?, 'pendiente', ?, ?, ?, ?, ?)`)
     .run(numero, JSON.stringify(cliente), JSON.stringify(items), total, unidades, creadoEn,
-      clienteId, conSesion ? 1 : 0, datosGuardados.length ? JSON.stringify(datosGuardados) : null);
+      clienteId, conSesion ? 1 : 0, datosGuardados.length ? JSON.stringify(datosGuardados) : null, origen);
   return {
     id: info.lastInsertRowid, numero, cliente, items, total, unidades, creado_en: creadoEn,
-    cliente_id: clienteId, con_sesion: conSesion ? 1 : 0,
+    cliente_id: clienteId, con_sesion: conSesion ? 1 : 0, origen,
   };
 }
 

@@ -651,7 +651,7 @@ const configurado = () => Boolean(grupoElegido()?.id);
 function resumenDelPedido(p) {
   const c = p.cliente || {};
   return [
-    `*Pedido ${p.numero}* — esperando confirmación de stock`,
+    `*Pedido ${p.numero}*${p.cambio ? ' (actualizado)' : ''} — esperando confirmación de stock${p.origen === 'asistente' ? ' · tomado por el asistente' : ''}`,
     `${c.nombre || ''}${c.cuit ? ` (CUIT ${c.cuit})` : ''}${c.telefono ? ` · Tel. ${c.telefono}` : ''}`,
     `${p.unidades} u. — ${pesos(p.total)}`,
     `Envío: ${c.formaEnvio || '—'} · ${c.ciudad || ''} (${c.codigoPostal || ''}), ${c.provincia || ''}`,

@@ -407,6 +407,8 @@ asegurarColumna('pedidos', 'ajuste', 'TEXT');
 asegurarColumna('pedidos', 'actualizado_en', 'TEXT');
 // Qué pasó con el último aviso al cliente: el panel muestra si se enteró.
 asegurarColumna('pedidos', 'aviso_cliente', 'TEXT');
+// Quién tomó el pedido: vacío es la página; 'asistente', el de ventas por chat (src/rutas/asistente.js).
+asegurarColumna('pedidos', 'origen', 'TEXT');
 // La versión chica de cada foto, para las miniaturas (ver src/miniaturas.js).
 asegurarColumna('fotos', 'miniatura', 'TEXT');
 // Y la mediana, para la fila del catálogo en pantallas densas y la foto grande del panel.
