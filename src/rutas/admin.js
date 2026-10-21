@@ -175,7 +175,7 @@ r.post('/productos/:sku/fotos', recibirFotos, async (req, res, next) => {
     const archivos = [...(req.files?.fotos || []), ...(req.files?.foto || [])];
     if (!archivos.length) return res.status(400).json({ message: 'Falta la imagen.' });
 
-    const producto = db.prepare('SELECT id FROM productos WHERE sku_agrupador = ?').get(req.params.sku);
+    const producto = db.prepare('SELECT id, novedad FROM productos WHERE sku_agrupador = ?').get(req.params.sku);
     if (!producto) return res.status(404).json({ message: 'No existe ese producto.' });
 
     // El color vale para toda la tanda: se eligen juntas las fotos de un color.
@@ -357,6 +357,17 @@ r.put('/productos/:sku', (req, res) => {
       return res.status(400).json({ message: 'La novedad es 1 (modelo nuevo), 0 (ya existía) o nula.' });
     }
     campos.push('novedad = ?'); valores.push(v);
+    /*
+     * Pasarlo a novedad arranca sus 30 días hoy: es la forma de relanzar un
+     * producto viejo. Sacarlo borra la fecha y vuelve a mandar el alta.
+     *
+     * Sólo cuando CAMBIA: el editor manda este campo en cada guardado, así que
+     * sellarlo siempre haría que tocarle el precio a una novedad le reiniciara
+     * los 30 días sin que nadie lo pidiera.
+     */
+    if (v !== producto.novedad) {
+      campos.push('nuevo_desde = ?'); valores.push(v === 1 ? new Date().toISOString() : null);
+    }
   }
   if (req.body?.categoriaId !== undefined) {
     const id = req.body.categoriaId ? Number(req.body.categoriaId) : null;

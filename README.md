@@ -231,6 +231,25 @@ avisar: el total estimado se pone en ámbar con cuánto falta, antes de confirma
 pregunta con los dos montos, y el mensaje del final lo recuerda. La decisión es
 de quien está mirando el pedido.
 
+## Productos nuevos
+
+Un producto figura como **Nuevo** —pastilla en la tarjeta, sección propia y una
+tira arriba de todo en «Todo el catálogo»— durante **30 días**, y después se cae
+solo: nadie tiene que acordarse de bajarlo.
+
+Los 30 días corren desde el alta, que la plataforma pone sola al importar la
+planilla. En **Catálogo → el producto**, y también en **Tráfico** para los
+recién cargados, hay un selector de novedad:
+
+- **No mostrar como nuevo**: lo saca aunque se haya cargado ayer. Es cargar hoy
+  un modelo de hace tres años.
+- **Novedad: 30 días desde hoy**: lo relanza. Sirve para un producto viejo que
+  vuelve a entrar. No le toca el alta —eso es cuándo entró a la plataforma y no
+  se reescribe—: se guarda aparte en `nuevo_desde`.
+
+Guardar otra cosa del producto no reinicia el reloj: la fecha se sella sólo
+cuando la novedad cambia.
+
 ## Los clientes
 
 Todo el que confirma un pedido queda en **Clientes**, reconocido por su **CUIT**

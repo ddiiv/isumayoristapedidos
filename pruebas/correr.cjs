@@ -878,6 +878,33 @@ const planilla = path.join(__dirname, 'catalogo-isuwaya.xlsx');
   chk('el catálogo dice cuántos son nuevos', true,
     (await pedir('/api/catalogo')).json.nuevos === ordenDespues.filter((p) => p.nuevo).length);
 
+  /*
+   * Relanzar: un producto viejo vuelve a ser novedad por 30 días contados
+   * desde hoy, sin tocarle el alta —que es cuándo entró a la plataforma y no
+   * se reescribe—. Y marcar «no mostrar como nuevo» lo saca aunque la fecha
+   * diera, que es cargar hoy un modelo de hace tres años.
+   */
+  const viejito = ordenDespues.find((p) => !p.nuevo);
+  const comoEsta = (sku) => pedir('/api/catalogo')
+    .then((r) => r.json.productos.find((p) => p.sku === sku));
+  const marcar = (sku, cuerpo) => pedir(`/api/admin/productos/${encodeURIComponent(sku)}`,
+    { metodo: 'PUT', admin: true, cuerpo });
+
+  chk('se puede relanzar un producto viejo', 200, (await marcar(viejito.sku, { novedad: 1 })).status);
+  const relanzado = await comoEsta(viejito.sku);
+  chk('y figura como nuevo, con su fecha de hoy', [true, true],
+    [relanzado.nuevo, Date.now() - Date.parse(relanzado.nuevoDesde) < 60_000]);
+  chk('sin tocarle el alta', viejito.altaEn ?? null, relanzado.altaEn ?? null);
+
+  await marcar(viejito.sku, { precio: relanzado.precio });
+  chk('guardarle el precio no le reinicia los 30 días', relanzado.nuevoDesde,
+    (await comoEsta(viejito.sku)).nuevoDesde);
+
+  await marcar(viejito.sku, { novedad: 0 });
+  const bajado = await comoEsta(viejito.sku);
+  chk('y se puede bajar a mano, borrando la fecha', [false, null], [bajado.nuevo, bajado.nuevoDesde]);
+  await marcar(viejito.sku, { novedad: null });
+
   tit('22b. HASTA CINCO FOTOS POR COLOR');
   /*
    * La regla del negocio: hasta cinco fotos por color, y el producto 20 o cinco

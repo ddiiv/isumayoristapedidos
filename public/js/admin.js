@@ -186,6 +186,13 @@ function vistaProducto() {
         <label class="enlinea">
           <input type="checkbox" id="ed-visible"${p.visible ? ' checked' : ''}> Visible en el catálogo
         </label>
+        <label class="enlinea">
+          Novedad
+          <select id="ed-novedad" class="select-mini">
+            ${NOVEDAD.map(([v, etq]) => `<option value="${v}"${
+              String(p.novedad ?? '') === v ? ' selected' : ''}>${etq}</option>`).join('')}
+          </select>
+        </label>
       </div>
     </div>
 
@@ -506,6 +513,12 @@ const ESTADOS = {
   confirmado: 'Confirmado', modificado: 'Modificado',
   enviado: 'Enviado', entregado: 'Entregado', cancelado: 'Cancelado',
 };
+/*
+ * Si un producto es novedad. Marcarlo arranca sus 30 días hoy, así que sirve
+ * tanto para clasificar lo recién cargado como para relanzar algo viejo.
+ */
+const NOVEDAD = [['', 'Sin clasificar'], ['1', 'Novedad: 30 días desde hoy'], ['0', 'No mostrar como nuevo']];
+
 const SIGUIENTES = {
   pendiente: ['confirmado', 'cancelado'],
   confirmado: ['enviado', 'cancelado'],
@@ -1785,8 +1798,6 @@ function vistaTrafico() {
       <td><b>${n(p.puntaje)}</b></td>
     </tr>`;
 
-  const NOVEDAD = [['', 'Sin clasificar'], ['1', 'Modelo nuevo'], ['0', 'Ya existía: no mostrar como nuevo']];
-
   return `
     <div class="tarjeta">
       <h3>Tráfico de la tienda</h3>
@@ -2004,6 +2015,7 @@ raiz.addEventListener('click', (e) => conError(async () => {
         titulo: el('#ed-titulo').value,
         precio: Number(el('#ed-precio').value),
         categoriaId: Number(el('#ed-categoria').value),
+        novedad: el('#ed-novedad').value === '' ? null : Number(el('#ed-novedad').value),
         descripcion: el('#ed-descripcion').value,
         visible: el('#ed-visible').checked,
       }),

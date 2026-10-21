@@ -267,7 +267,9 @@ function filaProducto(producto) {
         <div class="fila-encabezado">
           <div>
             <h3>${esc(producto.titulo)}${producto.nuevo
-              ? ` <span class="pastilla-nuevo" title="Se cargó el ${esc(fechaCorta(producto.altaEn))}">Nuevo</span>`
+              ? ` <span class="pastilla-nuevo" title="${producto.nuevoDesde
+                ? `Novedad desde el ${esc(fechaCorta(producto.nuevoDesde))}`
+                : `Se cargó el ${esc(fechaCorta(producto.altaEn))}`}">Nuevo</span>`
               : ''}</h3>
             <p class="sku">${esc(producto.sku)}${producto.modelo ? ` · ${esc(producto.modelo)}` : ''}</p>
           </div>

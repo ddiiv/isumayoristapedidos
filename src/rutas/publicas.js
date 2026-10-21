@@ -103,7 +103,7 @@ r.get('/catalogo', (req, res) => {
 
   const productos = db.prepare(`
     SELECT p.id, p.sku_agrupador, p.titulo, p.precio, p.foto, p.modelo, p.genero,
-           p.categoria_id, p.guia_talles, p.descripcion, p.creado_en, p.novedad
+           p.categoria_id, p.guia_talles, p.descripcion, p.creado_en, p.novedad, p.nuevo_desde
     FROM productos p
     WHERE p.visible = 1
     ORDER BY p.orden, p.titulo`).all();
@@ -173,6 +173,8 @@ r.get('/catalogo', (req, res) => {
     const talles = [...new Map(vs.map((v) => [v.talle, v.orden_talle])).entries()]
       .sort((a, b) => a[1] - b[1]).map(([t]) => t);
     const grupos = [...new Set(vs.map((v) => v.grupo_talle))];
+    // Los 30 días corren desde el relanzamiento si lo hubo, y si no desde el alta.
+    const desdeCuandoEsNuevo = p.nuevo_desde || p.creado_en;
     return {
       grupoTalle: grupos.includes('nino') && grupos.includes('adulto') ? 'mixto' : (grupos[0] || 'adulto'),
       guiaTalles: p.guia_talles ? JSON.parse(p.guia_talles) : null,
@@ -184,13 +186,13 @@ r.get('/catalogo', (req, res) => {
       // = se cargó antes de que se registraran las altas, no que sea viejo.
       altaEn: p.creado_en || null,
       /*
-       * Nuevo se cae solo a los 30 días del alta: nadie tiene que acordarse de
-       * bajarlo. Lo que sí puede hacer una persona desde el panel es sacarlo
-       * antes —`novedad = 0`, «ya existía en el negocio»—, para el caso de
-       * cargar hoy un modelo de hace tres años. Marcarlo como nuevo no lo
-       * revive pasados los 30 días: la fecha de alta es una sola.
+       * Nuevo se cae solo a los 30 días y nadie tiene que acordarse de bajarlo.
+       * Los 30 días corren desde el alta, salvo que alguien lo haya relanzado
+       * desde el panel: ahí corren desde ese día. Y `novedad = 0` lo saca
+       * aunque la fecha diera, que es cargar hoy un modelo de hace tres años.
        */
-      nuevo: p.novedad !== 0 && Boolean(p.creado_en && p.creado_en >= HACE_30_DIAS),
+      nuevoDesde: p.nuevo_desde || null,
+      nuevo: p.novedad !== 0 && Boolean(desdeCuandoEsNuevo && desdeCuandoEsNuevo >= HACE_30_DIAS),
       precio: p.precio,
       modelo: p.modelo,
       genero: p.genero,

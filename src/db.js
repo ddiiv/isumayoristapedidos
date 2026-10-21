@@ -438,6 +438,17 @@ asegurarColumna('productos', 'creado_en', 'TEXT');
 asegurarColumna('productos', 'novedad', 'INTEGER');
 
 /*
+ * Desde cuándo cuenta como novedad, cuando no es el alta.
+ *
+ * El alta no se reescribe nunca: es cuándo entró el producto a la
+ * plataforma, y el panel la usa para saber qué se cargó último. Pero un
+ * modelo de hace dos años puede volver a ser novedad —vuelve a entrar
+ * mercadería, se relanza—, y ahí los 30 días tienen que empezar de nuevo.
+ * Se sella al marcarlo como nuevo desde el panel; nulo = corre por el alta.
+ */
+asegurarColumna('productos', 'nuevo_desde', 'TEXT');
+
+/*
  * Cómo se pagó el pedido. Lo elige el administrador al confirmar el stock, que
  * es cuando se sabe de verdad, y viaja a STOCKER para que la venta quede con su
  * forma de pago y no como un cobro sin identificar.
