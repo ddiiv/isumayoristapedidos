@@ -418,7 +418,21 @@ export function pintarCatalogo() {
     ? `<p class="resultado-busqueda">${visibles.length} ${visibles.length === 1 ? 'producto' : 'productos'}`
       + ` con “${esc(estado.busqueda.trim())}”</p>`
     : '';
-  cont.innerHTML = encabezado + [...porCategoria.entries()]
+  /*
+   * La tira de nuevos, arriba de todo, sólo en «Todo el catálogo».
+   *
+   * Se repiten abajo en su categoría a propósito: quien entra a Pantalones
+   * tiene que encontrar ahí el pantalón nuevo. La impresión se cuenta una
+   * sola vez por producto y visita, así que verse dos veces no le infla el
+   * puntaje con el que se ordena el catálogo.
+   */
+  const nuevos = estado.categoriaActiva || palabras.length
+    ? [] : visibles.filter((p) => p.nuevo);
+  cont.innerHTML = encabezado
+    + (nuevos.length ? `
+      <h2 class="titulo-categoria">Productos Nuevos <small>${nuevos.length}</small></h2>
+      <div class="lista">${nuevos.map(filaProducto).join('')}</div>` : '')
+    + [...porCategoria.entries()]
     .map(([id, items]) => `
       <h2 class="titulo-categoria">${esc(nombre(id))} <small>${items.length}</small></h2>
       <div class="lista">${items.map(filaProducto).join('')}</div>`)

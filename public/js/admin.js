@@ -1785,7 +1785,7 @@ function vistaTrafico() {
       <td><b>${n(p.puntaje)}</b></td>
     </tr>`;
 
-  const NOVEDAD = [['', 'Sin clasificar'], ['1', 'Modelo nuevo'], ['0', 'Ya existía en el negocio']];
+  const NOVEDAD = [['', 'Sin clasificar'], ['1', 'Modelo nuevo'], ['0', 'Ya existía: no mostrar como nuevo']];
 
   return `
     <div class="tarjeta">

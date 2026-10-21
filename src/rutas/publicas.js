@@ -183,7 +183,14 @@ r.get('/catalogo', (req, res) => {
       // Cuándo entró a la plataforma, y si eso fue hace menos de 30 días. Nulo
       // = se cargó antes de que se registraran las altas, no que sea viejo.
       altaEn: p.creado_en || null,
-      nuevo: Boolean(p.creado_en && p.creado_en >= HACE_30_DIAS),
+      /*
+       * Nuevo se cae solo a los 30 días del alta: nadie tiene que acordarse de
+       * bajarlo. Lo que sí puede hacer una persona desde el panel es sacarlo
+       * antes —`novedad = 0`, «ya existía en el negocio»—, para el caso de
+       * cargar hoy un modelo de hace tres años. Marcarlo como nuevo no lo
+       * revive pasados los 30 días: la fecha de alta es una sola.
+       */
+      nuevo: p.novedad !== 0 && Boolean(p.creado_en && p.creado_en >= HACE_30_DIAS),
       precio: p.precio,
       modelo: p.modelo,
       genero: p.genero,
