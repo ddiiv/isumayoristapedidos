@@ -1,6 +1,7 @@
 const {
   db, leerConfig, guardarConfig, normalizarEstado, puedePasar, registrarEstado,
 } = require('./db');
+const { importarFilas } = require('./excel');
 
 /*
  * Lo que ISUWAYA le cuenta a STOCKER.
@@ -44,6 +45,8 @@ const RUTA_PRECIOS = process.env.STOCKER_RUTA_PRECIOS
   || `${RUTA.replace(/\/pedidos$/, '')}/precios`;
 const RUTA_STOCK = process.env.STOCKER_RUTA_STOCK
   || `${RUTA.replace(/\/pedidos$/, '')}/stock`;
+const RUTA_CATALOGO = process.env.STOCKER_RUTA_CATALOGO
+  || `${RUTA.replace(/\/pedidos$/, '')}/catalogo`;
 const RUTA_LOCALES = process.env.STOCKER_RUTA_LOCALES
   || `${RUTA.replace(/\/pedidos$/, '')}/locales`;
 // Los precios cambian por día, no por minuto.
@@ -51,6 +54,7 @@ const CADA_PRECIOS = Number(process.env.STOCKER_PRECIOS_CADA_MS) || 15 * 60_000;
 let ultimoErrorVuelta = null;
 let ultimoErrorPrecios = null;
 let ultimoErrorStock = null;
+let ultimoErrorCatalogo = null;
 const ESPERA_ENVIO = Number(process.env.STOCKER_TIMEOUT_MS) || 15_000;
 const CADA = Number(process.env.STOCKER_CADA_MS) || 20_000;
 const TOPE_INTENTOS = 12;      // con la espera creciente, son casi dos días de reintentos
@@ -700,6 +704,50 @@ async function sincronizarStock({ completo = false } = {}) {
   };
 }
 
+// ── El catálogo ───────────────────────────────────────────────────
+/*
+ * El catálogo se arma solo desde STOCKER, sin planilla.
+ *
+ * Antes cada producto nuevo o cada cambio de título había que exportarlo
+ * allá y subirlo acá. Ahora se trae y se guarda con el mismo código que la
+ * planilla (excel.js, importarFilas): actualiza lo que ya está por SKU, nunca
+ * borra —los productos tienen fotos cargadas acá—, respeta los colores
+ * corregidos y las variantes quitadas en el panel, y no toca fotos,
+ * descripción, guía de talles ni stock. Lo nuevo entra oculto: sin fotos no
+ * se publica.
+ */
+const CLAVE_CATALOGO = 'stocker_catalogo_ultimo';
+
+function ultimoCatalogo() {
+  try { return JSON.parse(leerConfig(CLAVE_CATALOGO) || 'null'); } catch { return null; }
+}
+
+async function sincronizarCatalogo() {
+  if (!configurado()) return { apagado: true };
+  let datos;
+  try {
+    datos = await traer(`${URL_BASE}${RUTA_CATALOGO}`);
+    ultimoErrorCatalogo = null;
+  } catch (e) {
+    ultimoErrorCatalogo = String(e.message || e).slice(0, 200);
+    throw e;
+  }
+  const filas = [];
+  for (const p of datos.productos || []) {
+    for (const v of p.variantes || []) {
+      filas.push({
+        skuAgrupador: p.skuAgrupador, titulo: p.titulo, categoria: p.categoria,
+        modelo: p.modelo, genero: p.genero, precio: p.precioMayorista ?? null,
+        skuVariante: v.sku, color: v.color || '', talle: v.talle || '',
+        precioVariante: v.precioMayorista ?? null,
+      });
+    }
+  }
+  const resumen = { ...importarFilas(filas, { visibleNuevos: false }), truncado: Boolean(datos.truncado) };
+  guardarConfig(CLAVE_CATALOGO, JSON.stringify({ fecha: new Date().toISOString(), resumen }));
+  return resumen;
+}
+
 function arrancar() {
   if (!configurado()) return null;
   const vuelta = () => {
@@ -717,6 +765,7 @@ function arrancar() {
    * nada nuevo.
    */
   const relojPrecios = setInterval(() => {
+    sincronizarCatalogo().catch(() => { /* queda anotado adentro */ });
     sincronizarPrecios().catch(() => { /* queda anotado adentro */ });
     sincronizarStock().catch(() => { /* queda anotado adentro */ });
   }, CADA_PRECIOS);
@@ -733,9 +782,9 @@ function arrancar() {
 module.exports = {
   configurado, anotar, procesarCola, reintentar, estadoPublico, arrancar, trabados,
   traerResoluciones, sincronizarPrecios, aplicarResolucion,
-  localesDeStocker, localElegido, elegirLocal, sincronizarStock,
+  localesDeStocker, localElegido, elegirLocal, sincronizarStock, sincronizarCatalogo, ultimoCatalogo,
   cuerpoDelPedido, lineasDelPedido, sinDireccion, EVENTOS,
   erroresDeLaVuelta: () => ({
-    resoluciones: ultimoErrorVuelta, precios: ultimoErrorPrecios, stock: ultimoErrorStock,
+    resoluciones: ultimoErrorVuelta, precios: ultimoErrorPrecios, stock: ultimoErrorStock, catalogo: ultimoErrorCatalogo,
   }),
 };

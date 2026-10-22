@@ -106,6 +106,16 @@ arranque. Entrá a `/admin.html` con `ADMIN_EMAIL` y `ADMIN_PASSWORD` →
 **Catálogo → Traer catálogo de STOCKER** → subí el `.xlsx`. Los colores
 repetidos, los talles y las categorías se ordenan solos al importar.
 
+Con STOCKER conectado (variables `STOCKER_*`) no hace falta la planilla: el
+catálogo se trae solo de STOCKER cada 15 minutos, y en **Ajustes → Catálogo
+desde STOCKER** hay un botón para no esperar. Lo que ya está se actualiza por
+SKU (título, categoría, modelo, género, talles, precios) y nunca se borra: las
+fotos, la descripción, la guía de talles y lo publicado quedan como están, y
+no vuelven las variantes quitadas ni se pisan los colores corregidos. Lo
+nuevo entra **oculto**, para publicarlo cuando tenga fotos. El stock no se
+trae con el catálogo: es aparte, eligiendo un local en **Stock del local que
+despacha** (o ninguno).
+
 ### Si Railway dice «Application failed to respond»
 
 Es un 502: el proxy de Railway no pudo hablar con la app. El motivo está en

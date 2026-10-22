@@ -1484,6 +1484,7 @@ function vistaAjustes() {
         ${minimo ? '<button class="btn texto quitar" data-sacar-minimo>Sacar el mínimo</button>' : ''}
       </div>
     </div>
+    ${tarjetaDelCatalogo()}
     ${tarjetaDelLocal()}
     <div class="tarjeta">
       <h3>Respaldo de la base</h3>
@@ -1494,6 +1495,26 @@ function vistaAjustes() {
       <div class="acciones">
         <a class="btn borde" href="/api/admin/respaldo" download>Descargar respaldo</a>
       </div>
+    </div>`;
+}
+
+/*
+ * El catálogo se trae solo de STOCKER cada cuarto de hora; el botón es para no
+ * esperar. Sin STOCKER conectado no se muestra: la tarjeta del local ya lo dice.
+ */
+function tarjetaDelCatalogo() {
+  const st = datos.ajustes?.stocker;
+  if (!st?.configurado) return '';
+  const u = st.catalogo;
+  return `
+    <div class="tarjeta">
+      <h3>Catálogo desde STOCKER</h3>
+      <p class="sub">Productos, colores, talles y precios se traen solos de STOCKER cada 15 minutos.
+        Lo que ya está se actualiza y nunca se borra: las fotos quedan. Lo nuevo entra
+        <b>oculto</b>; cargale las fotos y publicalo desde Productos. El stock no se toca.</p>
+      ${u ? `<p class="sub">Última vez: ${esc(new Date(u.fecha).toLocaleString('es-AR'))} · ${
+        u.resumen.productos} productos, ${u.resumen.nuevos || 0} nuevos.</p>` : ''}
+      <div class="acciones"><button class="btn borde" data-traer-catalogo>Traer el catálogo ahora</button></div>
     </div>`;
 }
 
@@ -2158,6 +2179,13 @@ raiz.addEventListener('click', (e) => conError(async () => {
     pintar();
     return;
   }
+  if (t.closest('[data-traer-catalogo]')) {
+    const r = await api('/stocker/catalogo', { method: 'POST', body: JSON.stringify({}) });
+    datos.ajustes = await api('/ajustes');
+    mensaje(`Catálogo al día: ${r.productos} productos${r.nuevos ? `, ${r.nuevos} nuevos (ocultos hasta que les cargues fotos)` : ''}.`);
+    pintar();
+    return;
+  }
   if (t.closest('[data-traer-stock]')) {
     const r = await api('/stocker/stock', { method: 'POST', body: JSON.stringify({ completo: true }) });
     mensaje(`Stock al día: ${r.aplicados} artículos${r.sinCatalogo ? `, ${r.sinCatalogo} que acá no están` : ''}.`);
@@ -2168,7 +2196,7 @@ raiz.addEventListener('click', (e) => conError(async () => {
   // ── Ajustes: el mínimo de compra
   const guardarMinimo = async (valor) => {
     const r = await api('/ajustes', { method: 'PUT', body: JSON.stringify({ minimoCompra: valor }) });
-    datos.ajustes = r;
+    datos.ajustes = { ...datos.ajustes, ...r };
     mensaje(r.minimoCompra
       ? `Listo: el pedido mínimo es de ${pesos(r.minimoCompra)}.`
       : 'Listo: ya no hay mínimo de compra.');

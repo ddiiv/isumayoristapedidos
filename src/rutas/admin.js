@@ -1937,7 +1937,7 @@ const estadoDelMail = () => ({
  */
 r.get('/ajustes', (req, res) => res.json({
   minimoCompra: minimoDeCompra(),
-  stocker: { configurado: stocker.configurado(), local: stocker.localElegido() },
+  stocker: { configurado: stocker.configurado(), local: stocker.localElegido(), catalogo: stocker.ultimoCatalogo() },
 }));
 
 r.put('/ajustes', conAviso(async (req, res) => {
@@ -1971,6 +1971,9 @@ r.put('/stocker/local', conAviso(async (req, res) => {
   const traido = local ? await stocker.sincronizarStock({ completo: true }).catch((e) => ({ error: e.message })) : null;
   res.json({ local, traido });
 }));
+
+// Trae el catálogo de STOCKER ahora, sin esperar la vuelta de cada cuarto de hora.
+r.post('/stocker/catalogo', conAviso(async (req, res) => res.json(await stocker.sincronizarCatalogo())));
 
 r.post('/stocker/stock', conAviso(async (req, res) => {
   res.json(await stocker.sincronizarStock({ completo: Boolean(req.body?.completo) }));

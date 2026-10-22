@@ -93,14 +93,7 @@ const aNumero = (v) => {
   return Number.isFinite(num) ? num : null;
 };
 
-/**
- * Importa el .xlsx exportado de STOCKER.
- *
- * Es idempotente: la misma planilla dos veces deja el catálogo igual, no
- * duplicado. La clave es el SKU Agrupador para el producto y el SKU Variante
- * para la variante — los mismos que usa STOCKER, así que reimportar después de
- * editar precios actualiza lo que cambió y respeta lo demás.
- */
+/** Importa el .xlsx exportado de STOCKER (ver importarFilas). */
 async function importarPlanilla(buffer) {
   const libro = new ExcelJS.Workbook();
   try {
@@ -129,8 +122,43 @@ async function importarPlanilla(buffer) {
     );
   }
 
+  // Cada fila de la hoja, con los nombres de campo que entiende importarFilas.
+  const filas = [];
+  hoja.eachRow((fila, n) => {
+    if (n === 1) return;
+    const leer = (c) => (cols[c] ? norm(fila.getCell(cols[c]).value) : '');
+    filas.push({
+      titulo: leer('titulo'),
+      skuVariante: leer('skuVariante'),
+      skuAgrupador: leer('skuAgrupador'),
+      skuPadre: leer('skuPadre'),
+      categoria: leer('categoria'),
+      modelo: leer('modelo'),
+      genero: leer('genero'),
+      precio: aNumero(cols.precio ? fila.getCell(cols.precio).value : null),
+      precioVariante: aNumero(cols.precioVariante ? fila.getCell(cols.precioVariante).value : null),
+      ...repartirAtributos(fila, cols),
+    });
+  });
+  return importarFilas(filas);
+}
+
+/**
+ * Guarda filas de catálogo, vengan de la planilla o de STOCKER directo
+ * (src/stocker.js, sincronizarCatalogo).
+ *
+ * Es idempotente: las mismas filas dos veces dejan el catálogo igual, no
+ * duplicado. La clave es el SKU Agrupador para el producto y el SKU Variante
+ * para la variante — los mismos que usa STOCKER, así que volver a importar
+ * actualiza lo que cambió y respeta lo demás. Nunca borra: un producto que ya
+ * no viene sigue acá con sus fotos.
+ *
+ * `visibleNuevos` decide si un producto que no existía sale publicado. La
+ * sincronización automática los deja ocultos: llegarían a la página sin fotos.
+ */
+function importarFilas(filas, { visibleNuevos = true } = {}) {
   const resumen = {
-    filas: 0, productos: 0, variantes: 0, categorias: 0,
+    filas: 0, productos: 0, variantes: 0, categorias: 0, nuevos: 0,
     sinAgrupador: 0, atributosPorPosicion: 0, ignoradas: 0,
   };
 
@@ -140,12 +168,12 @@ async function importarPlanilla(buffer) {
   /*
    * `creado_en` sólo se escribe al dar de alta: una reimportación actualiza
    * precios y títulos, pero un producto no vuelve a ser nuevo porque se subió
-   * la planilla otra vez.
+   * la planilla otra vez. Lo mismo `visible`: se elige en el panel.
    */
   const ahora = new Date().toISOString();
   const upsertProducto = db.prepare(`
-    INSERT INTO productos (sku_agrupador, titulo, categoria_id, modelo, genero, precio, creado_en)
-    VALUES (@sku, @titulo, @categoriaId, @modelo, @genero, @precio, @ahora)
+    INSERT INTO productos (sku_agrupador, titulo, categoria_id, modelo, genero, precio, creado_en, visible)
+    VALUES (@sku, @titulo, @categoriaId, @modelo, @genero, @precio, @ahora, @visible)
     ON CONFLICT(sku_agrupador) DO UPDATE SET
       titulo = excluded.titulo, categoria_id = excluded.categoria_id,
       modelo = excluded.modelo, genero = excluded.genero, precio = excluded.precio`);
@@ -165,59 +193,63 @@ async function importarPlanilla(buffer) {
   const vistos = new Set();
 
   const correr = db.transaction(() => {
-    hoja.eachRow((fila, n) => {
-      if (n === 1) return;
+    for (const f of filas) {
       resumen.filas += 1;
 
-      const leer = (c) => (cols[c] ? norm(fila.getCell(cols[c]).value) : '');
-      const titulo = leer('titulo');
-      const skuVariante = leer('skuVariante');
-      if (!titulo || !skuVariante) { resumen.ignoradas += 1; return; }
+      const titulo = norm(f.titulo);
+      const skuVariante = norm(f.skuVariante);
+      if (!titulo || !skuVariante) { resumen.ignoradas += 1; continue; }
 
-      let agrupador = leer('skuAgrupador');
+      let agrupador = norm(f.skuAgrupador);
       if (!agrupador) {
         // Sin agrupador cada fila sería su propio producto y el catálogo
         // quedaría con un "producto" por talle. Se cae al SKU padre, que es lo
         // que STOCKER usa cuando el agrupador está vacío.
-        agrupador = leer('skuPadre') || `SIN-AGRUP-${titulo}`;
+        agrupador = norm(f.skuPadre) || `SIN-AGRUP-${titulo}`;
         resumen.sinAgrupador += 1;
       }
 
-      const nombreCategoria = leer('categoria') || 'Sin categoría';
+      const nombreCategoria = norm(f.categoria) || 'Sin categoría';
       insCategoria.run(nombreCategoria);
       const categoria = buscarCategoria.get(nombreCategoria);
       if (categoria) resumen.categorias = db.prepare('SELECT COUNT(*) c FROM categorias').get().c;
 
+      const existia = buscarProducto.get(agrupador);
       upsertProducto.run({
         ahora,
         sku: agrupador,
         titulo,
         categoriaId: categoria?.id ?? null,
-        modelo: leer('modelo') || null,
-        genero: leer('genero') || null,
-        precio: aNumero(cols.precio ? fila.getCell(cols.precio).value : null) ?? 0,
+        modelo: norm(f.modelo) || null,
+        genero: norm(f.genero) || null,
+        precio: f.precio ?? 0,
+        visible: visibleNuevos ? 1 : 0,
       });
-      const producto = buscarProducto.get(agrupador);
-      if (!vistos.has(agrupador)) { vistos.add(agrupador); resumen.productos += 1; }
+      const producto = existia || buscarProducto.get(agrupador);
+      if (!vistos.has(agrupador)) {
+        vistos.add(agrupador);
+        resumen.productos += 1;
+        if (!existia) resumen.nuevos += 1;
+      }
 
-      const { color, talle, porPosicion } = repartirAtributos(fila, cols);
-      if (porPosicion) resumen.atributosPorPosicion += 1;
+      if (f.porPosicion) resumen.atributosPorPosicion += 1;
 
-      if (quitada.get(skuVariante)) { resumen.quitadasSalteadas = (resumen.quitadasSalteadas || 0) + 1; return; }
+      if (quitada.get(skuVariante)) { resumen.quitadasSalteadas = (resumen.quitadasSalteadas || 0) + 1; continue; }
 
+      const talle = norm(f.talle);
       upsertVariante.run({
         productoId: producto.id,
         sku: skuVariante,
-        color, talle,
+        color: norm(f.color), talle,
         ordenTalle: ordenDeTalle(talle),
-        precio: aNumero(cols.precioVariante ? fila.getCell(cols.precioVariante).value : null),
+        precio: f.precioVariante ?? null,
       });
       resumen.variantes += 1;
-    });
+    }
   });
 
   correr();
   return resumen;
 }
 
-module.exports = { importarPlanilla, repartirAtributos, ordenDeTalle };
+module.exports = { importarPlanilla, importarFilas, repartirAtributos, ordenDeTalle };

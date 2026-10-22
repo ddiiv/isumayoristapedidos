@@ -181,8 +181,9 @@ volver a mandar el estado actual.
 | `STOCKER_RUTA_PRECIOS` | Opcional. Por omisión `/integraciones/isuwaya/precios` |
 | `STOCKER_RUTA_STOCK` | Opcional. Por omisión `/integraciones/isuwaya/stock` |
 | `STOCKER_RUTA_LOCALES` | Opcional. Por omisión `/integraciones/isuwaya/locales` |
+| `STOCKER_RUTA_CATALOGO` | Opcional. Por omisión `/integraciones/isuwaya/catalogo`: el catálogo se trae solo de ahí cada 15 min (ver README, «La primera carga») |
 | `STOCKER_CADA_MS` | Opcional. Cada cuánto sale la cola (20 s) |
-| `STOCKER_PRECIOS_CADA_MS` | Opcional. Cada cuánto se traen precios y stock (15 min) |
+| `STOCKER_PRECIOS_CADA_MS` | Opcional. Cada cuánto se traen catálogo, precios y stock (15 min) |
 | `STOCKER_TIMEOUT_MS` | Opcional. Cuánto espera cada llamada (15 s) |
 
 Sin las tres primeras, la integración queda apagada: los pedidos se guardan y se

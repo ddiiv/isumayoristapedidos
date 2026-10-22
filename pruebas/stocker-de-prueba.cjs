@@ -42,7 +42,8 @@ const servidor = http.createServer((req, res) => {
    * carpeta: acá no hay lógica que simular, sólo la forma de la respuesta.
    */
   if (req.method === 'GET') {
-    const archivo = req.url.includes('/precios') ? '_precios.json'
+    const archivo = req.url.includes('/catalogo') ? '_catalogo.json'
+      : req.url.includes('/precios') ? '_precios.json'
       : req.url.includes('/resoluciones') ? '_resoluciones.json'
       : req.url.includes('/locales') ? '_locales.json'
       : req.url.includes('/stock') ? '_stock.json' : null;
@@ -58,6 +59,7 @@ const servidor = http.createServer((req, res) => {
         '_precios.json': { precios: [], generadoEn: new Date().toISOString() },
         '_resoluciones.json': { resoluciones: [], hasta: null },
         '_locales.json': { locales: [] },
+        '_catalogo.json': { productos: [] },
         '_stock.json': { stock: [], generadoEn: new Date().toISOString() },
       };
       return contestar(200, vacios[archivo]);

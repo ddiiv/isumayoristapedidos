@@ -380,6 +380,46 @@ function armarDatos() {
   chk('una cantidad imposible se descarta sin romper', [0, 0, 2],
     [basura.aplicados, basura.sinCatalogo, basura.recibidos]);
 
+  tit('10. EL CATÁLOGO SE ARMA DESDE STOCKER');
+  /*
+   * Lo que no puede pasar: que se pierdan las fotos (se cargan acá, una por
+   * una), que vuelva lo que se quitó a mano, que se pise un color corregido, o
+   * que un producto nuevo salga publicado sin fotos.
+   */
+  const prueba = db.prepare("SELECT * FROM productos WHERE sku_agrupador = 'ISUPRU'").get();
+  db.prepare("INSERT INTO fotos (producto_id, ruta) VALUES (?, 'fotos/remera.webp')").run(prueba.id);
+  db.prepare("UPDATE variantes SET color = 'Negro Azabache', color_manual = 1 WHERE sku = 'ISUPRU-NEG-M'").run();
+  db.prepare("INSERT INTO variantes_quitadas (sku, producto_id, color, quitada_en) VALUES ('ISUPRU-ROJ-M', ?, 'Rojo', ?)")
+    .run(prueba.id, new Date().toISOString());
+  db.prepare("INSERT INTO productos (sku_agrupador, titulo, precio) VALUES ('ISUVIEJO', 'Producto que STOCKER ya no manda', 5000)").run();
+  const stockAntes = db.prepare("SELECT stock FROM variantes WHERE sku = 'ISUPRU-NEG-M'").get().stock;
+  const v = (sku, color, talle, precioMayorista) => ({ sku, color, talle, precioMayorista });
+  fs.writeFileSync(path.join(CARPETA, '_catalogo.json'), JSON.stringify({ productos: [
+    { skuAgrupador: 'ISUPRU', titulo: 'Remera de prueba v2', categoria: 'Remeras', modelo: 'Clásica', genero: 'Mujer',
+      precioMayorista: 11000,
+      variantes: [v('ISUPRU-NEG-M', 'Negro', 'M', 11000), v('ISUPRU-NEG-L', 'Negro', 'L', 11500), v('ISUPRU-ROJ-M', 'Rojo', 'M', 11000)] },
+    { skuAgrupador: 'ISUNUE', titulo: 'Buzo nuevo', categoria: 'Buzos', modelo: null, genero: null, precioMayorista: 20000,
+      variantes: [v('ISUNUE-NEG-S', 'Negro', 'S', 20000)] },
+  ] }));
+
+  const cat = await stocker.sincronizarCatalogo();
+  chk('trae los dos productos, uno nuevo', [2, 1], [cat.productos, cat.nuevos]);
+  const despues = db.prepare("SELECT * FROM productos WHERE sku_agrupador = 'ISUPRU'").get();
+  chk('el que ya estaba es el mismo (mismo id), actualizado', [prueba.id, 'Remera de prueba v2', 11000, 'Clásica'],
+    [despues.id, despues.titulo, despues.precio, despues.modelo]);
+  chk('conserva sus fotos y sigue publicado', [1, 1],
+    [db.prepare('SELECT COUNT(*) AS n FROM fotos WHERE producto_id = ?').get(prueba.id).n, despues.visible]);
+  chk('suma el talle nuevo con su precio', 11500, db.prepare("SELECT precio FROM variantes WHERE sku = 'ISUPRU-NEG-L'").get()?.precio);
+  chk('no vuelve lo que se quitó a mano', undefined, db.prepare("SELECT 1 FROM variantes WHERE sku = 'ISUPRU-ROJ-M'").get());
+  chk('ni pisa un color corregido en el panel', 'Negro Azabache', db.prepare("SELECT color FROM variantes WHERE sku = 'ISUPRU-NEG-M'").get().color);
+  chk('el producto nuevo entra oculto, hasta que tenga fotos', 0,
+    db.prepare("SELECT visible FROM productos WHERE sku_agrupador = 'ISUNUE'").get()?.visible);
+  chk('lo que STOCKER no manda no se borra', true, Boolean(db.prepare("SELECT 1 FROM productos WHERE sku_agrupador = 'ISUVIEJO'").get()));
+  chk('y el stock no se toca', stockAntes, db.prepare("SELECT stock FROM variantes WHERE sku = 'ISUPRU-NEG-M'").get().stock);
+  const otra = await stocker.sincronizarCatalogo();
+  chk('traerlo otra vez no duplica nada', [0, 2], [otra.nuevos, db.prepare("SELECT COUNT(*) AS n FROM variantes WHERE producto_id = ?").get(prueba.id).n]);
+  chk('y el panel sabe cuándo fue la última vez', 2, stocker.ultimoCatalogo()?.resumen?.productos);
+
   /*
    * Que la vuelta falle en silencio es peor que la ida fallando: los pedidos
    * salen igual y nadie se entera de que ya hay una respuesta esperando.
