@@ -186,6 +186,7 @@ function vistaProducto() {
         <label class="enlinea">
           <input type="checkbox" id="ed-visible"${p.visible ? ' checked' : ''}> Visible en el catálogo
         </label>
+        <button class="btn texto quitar" data-eliminar-producto>Eliminar producto</button>
         <label class="enlinea">
           Novedad
           <select id="ed-novedad" class="select-mini">
@@ -273,10 +274,12 @@ function vistaProducto() {
       <p class="sub">
         El precio vacío significa que sigue el del producto (${pesos(p.precio)}).
         Se guarda solo al salir del casillero.
+        <br><b>Quitar</b> saca ese color y talle de la venta, y no vuelve aunque se
+        importe la planilla. Para devolverlo, agregá de nuevo el color al producto.
       </p>
       <div class="envoltorio-tabla">
         <table class="datos">
-          <thead><tr><th>Color</th><th>Talle</th><th>SKU</th><th>Precio propio</th></tr></thead>
+          <thead><tr><th>Color</th><th>Talle</th><th>SKU</th><th>Precio propio</th><th></th></tr></thead>
           <tbody>${detalle.variantes.map((v) => `
             <tr>
               <td><span class="muestra"><i data-hex="${esc(v.hex)}"></i>${esc(v.color)}</span></td>
@@ -287,6 +290,8 @@ function vistaProducto() {
                        value="${v.precio ?? ''}" placeholder="${p.precio}"
                        aria-label="Precio de ${esc(v.color)} ${esc(v.talle)}">
               </td>
+              <td><button class="btn texto quitar btn-mini" data-quitar-variante="${v.id}"
+                  aria-label="Quitar ${esc(v.color)} ${esc(v.talle)} de la venta">Quitar</button></td>
             </tr>`).join('')}</tbody>
         </table>
       </div>
@@ -517,6 +522,9 @@ const ESTADOS = {
  * Si un producto es novedad. Marcarlo arranca sus 30 días hoy, así que sirve
  * tanto para clasificar lo recién cargado como para relanzar algo viejo.
  */
+// El mismo tope que multer aplica en el servidor, para avisar antes de subir.
+const MAX_FOTO_BYTES = 20 * 1024 * 1024;
+
 const NOVEDAD = [['', 'Sin clasificar'], ['1', 'Novedad: 30 días desde hoy'], ['0', 'No mostrar como nuevo']];
 
 const SIGUIENTES = {
@@ -2110,6 +2118,29 @@ raiz.addEventListener('click', (e) => conError(async () => {
     pintar();
     return;
   }
+  if (t.closest('[data-eliminar-producto]')) {
+    if (!window.confirm(`¿Eliminar ${vista.sku} del catálogo?\n\nSe va con sus fotos, sus colores y sus variantes, y no vuelve aunque se importe la planilla. Los pedidos que ya lo incluyen no se tocan.`)) return;
+    const r = await api(`/productos/${encodeURIComponent(vista.sku)}`, { method: 'DELETE' });
+    const cual = vista.sku;
+    vista.sku = null;
+    detalle = null;
+    await cargar();
+    mensaje(`Listo: se eliminó ${cual} (${r.variantes} variantes, ${r.fotos} fotos).`);
+    pintar();
+    return;
+  }
+
+  const quitarVariante = t.closest('[data-quitar-variante]');
+  if (quitarVariante) {
+    if (!window.confirm('¿Quitar esta variante de la venta? No vuelve aunque se importe la planilla.')) return;
+    await api(`/variantes/${quitarVariante.dataset.quitarVariante}`, { method: 'DELETE' });
+    detalle = await api(`/productos/${encodeURIComponent(vista.sku)}`);
+    await cargar();
+    mensaje('Listo: esa variante ya no se vende.');
+    pintar();
+    return;
+  }
+
   const quitarColor = t.closest('[data-quitar-color]');
   if (quitarColor) {
     const nombre = quitarColor.dataset.nombre;
@@ -2731,8 +2762,25 @@ raiz.addEventListener('submit', (e) => conError(async () => {
      * Subir treinta fotos lleva su tiempo: de cada una se hacen la miniatura y
      * la mediana. Sin avisar, el botón parece colgado y se vuelve a apretar.
      */
-    const cuantas = f.querySelector('input[type="file"]').files?.length || 0;
+    const elegidas = [...(f.querySelector('input[type="file"]').files || [])];
+    const cuantas = elegidas.length;
     if (!cuantas) return;
+
+    /*
+     * El tope se mira ACÁ y no se deja para el servidor.
+     *
+     * Cuando una foto se pasa, el servidor corta la subida en el medio y el
+     * navegador ve la conexión cortada, no el motivo: desde el panel se ve
+     * como que tardó mucho y no subió nada. Peor con una tanda, porque se
+     * pierden también las que estaban bien.
+     */
+    const pesadas = elegidas.filter((x) => x.size > MAX_FOTO_BYTES);
+    if (pesadas.length) {
+      const cuales = pesadas.slice(0, 3).map((x) => `${x.name} (${(x.size / 1024 / 1024).toFixed(1)} MB)`).join(', ');
+      mensaje(`Cada foto puede pesar hasta 20 MB. Se pasan ${pesadas.length}: ${cuales}`
+        + `${pesadas.length > 3 ? ' y otras más' : ''}. Achicalas o subilas de a menos.`, 'error');
+      return pintar();
+    }
     const boton = f.querySelector('button');
     boton.disabled = true;
     boton.textContent = cuantas === 1 ? 'Subiendo…' : `Subiendo ${cuantas} fotos…`;

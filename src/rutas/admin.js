@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const express = require('express');
 const multer = require('multer');
 const {
-  db, FOTOS_DIR, ordenDeTalle,
+  db, DATA_DIR, FOTOS_DIR, ordenDeTalle,
   ESTADOS, normalizarEstado, puedePasar, registrarEstado, historialDePedido,
 } = require('../db');
 const { hacerMiniatura, hacerMedia, nombreMiniatura, nombreMedia } = require('../miniaturas');
@@ -138,9 +138,29 @@ const fotosDelColor = (productoId, colorId) => db.prepare(
  */
 const MAX_POR_TANDA = 30;
 
+const MAX_FOTO = 20 * 1024 * 1024;
+
+/*
+ * Las fotos se reciben EN DISCO, no en memoria.
+ *
+ * Con memoryStorage, una tanda de treinta fotos de veinte megas son
+ * seiscientos megas de buffers vivos a la vez: el contenedor se queda sin
+ * memoria, lo matan, y desde el panel se ve como que tardó mucho y no subió
+ * nada. En disco no hay pico: cada foto se procesa de a una y el original ya
+ * está escrito, así que después sólo se renombra a su lugar definitivo.
+ *
+ * La carpeta va al lado de las fotos, en el mismo volumen: renombrar entre
+ * sistemas de archivos distintos falla.
+ */
+const TMP_FOTOS = path.join(DATA_DIR, 'subidas-a-medio');
+fs.mkdirSync(TMP_FOTOS, { recursive: true });
+
 const subirFoto = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 6 * 1024 * 1024, files: MAX_POR_TANDA },
+  storage: multer.diskStorage({
+    destination: TMP_FOTOS,
+    filename: (req, file, cb) => cb(null, crypto.randomBytes(12).toString('hex')),
+  }),
+  limits: { fileSize: MAX_FOTO, files: MAX_POR_TANDA },
   fileFilter: (req, file, cb) => {
     // Se mira el tipo declarado Y se renombra con nuestra extensión: un archivo
     // llamado "foto.php" servido desde el volumen es un problema de otra clase.
@@ -162,7 +182,7 @@ const recibirFotos = (req, res, next) => subirFoto.fields([
     return res.status(400).json({ message: `De a ${MAX_POR_TANDA} fotos por vez como máximo.` });
   }
   if (e?.code === 'LIMIT_FILE_SIZE') {
-    return res.status(400).json({ message: 'Cada foto puede pesar hasta 6 MB.' });
+    return res.status(400).json({ message: `Cada foto puede pesar hasta ${MAX_FOTO / 1024 / 1024} MB.` });
   }
   if (e?.code === 'LIMIT_UNEXPECTED_FILE') {
     return res.status(400).json({ message: 'Mandá las fotos en el campo "fotos".' });
@@ -192,12 +212,17 @@ r.post('/productos/:sku/fotos', recibirFotos, async (req, res, next) => {
 
       // Los topes se miran foto por foto y no al principio: dentro de la misma
       // tanda pueden entrar las primeras y no las últimas.
+      // El temporal se borra en cualquier salida que no lo mueva a su lugar.
+      const descartar = () => { try { fs.unlinkSync(archivo.path); } catch { /* ya no está */ } };
+
       if (cuantas >= tope) {
         rechazadas.push({ nombre: nombreOriginal, motivo: `el producto llegó a su máximo de ${tope} fotos` });
+        descartar();
         continue;
       }
       if (colorId && enElColor >= MAX_POR_COLOR) {
         rechazadas.push({ nombre: nombreOriginal, motivo: `ese color ya tiene ${MAX_POR_COLOR} fotos` });
+        descartar();
         continue;
       }
 
@@ -209,17 +234,19 @@ r.post('/productos/:sku/fotos', recibirFotos, async (req, res, next) => {
       let mini;
       let media;
       try {
-        mini = await hacerMiniatura(archivo.buffer);
-        media = await hacerMedia(archivo.buffer);
+        mini = await hacerMiniatura(archivo.path);
+        media = await hacerMedia(archivo.path);
       } catch {
         rechazadas.push({ nombre: nombreOriginal, motivo: 'no es una imagen que se pueda abrir' });
+        descartar();
         continue;
       }
 
       const nombre = `${crypto.randomBytes(12).toString('hex')}${TIPOS_FOTO[archivo.mimetype]}`;
       const nombreMini = nombreMiniatura(nombre);
       const nombreMed = nombreMedia(nombre);
-      fs.writeFileSync(path.join(FOTOS_DIR, nombre), archivo.buffer);
+      // El original ya está escrito: se mueve, no se vuelve a copiar.
+      fs.renameSync(archivo.path, path.join(FOTOS_DIR, nombre));
       fs.writeFileSync(path.join(FOTOS_DIR, nombreMini), mini);
       fs.writeFileSync(path.join(FOTOS_DIR, nombreMed), media);
 
@@ -285,6 +312,19 @@ r.put('/fotos/:id', (req, res) => {
   res.json({ ok: true });
 });
 
+/*
+ * Los tres archivos de una foto salen del volumen con ella.
+ *
+ * Las filas se van solas por la cascada de la base, pero los archivos no: cada
+ * foto que se borra sin esto queda ocupando lugar para siempre y el volumen se
+ * llena sin que nadie lo note.
+ */
+function borrarArchivosDeFoto(foto) {
+  for (const ruta of [foto.ruta, foto.miniatura, foto.media].filter(Boolean)) {
+    try { fs.unlinkSync(path.join(FOTOS_DIR, path.basename(ruta))); } catch { /* ya no está */ }
+  }
+}
+
 r.delete('/fotos/:id', (req, res) => {
   const foto = db.prepare('SELECT * FROM fotos WHERE id = ?').get(Number(req.params.id));
   if (!foto) return res.status(404).json({ message: 'No existe esa foto.' });
@@ -304,12 +344,7 @@ r.delete('/fotos/:id', (req, res) => {
     db.prepare('UPDATE productos SET foto = ? WHERE id = ?').run(otra?.ruta ?? null, foto.producto_id);
   }
 
-  // El archivo se borra del volumen: si no, cada foto reemplazada queda
-  // ocupando lugar para siempre y el volumen se llena sin que nadie lo note.
-  try { fs.unlinkSync(path.join(FOTOS_DIR, path.basename(foto.ruta))); } catch { /* ya no está */ }
-  for (const version of [foto.miniatura, foto.media].filter(Boolean)) {
-    try { fs.unlinkSync(path.join(FOTOS_DIR, path.basename(version))); } catch { /* ya no está */ }
-  }
+  borrarArchivosDeFoto(foto);
 
   res.json({ ok: true });
 });
@@ -440,6 +475,40 @@ r.put('/categorias/:id/nombre', (req, res) => {
  * cada cosa por separado, abrir un producto son cuatro vueltas al servidor y
  * cuatro formas distintas de quedar a medio cargar.
  */
+/*
+ * DELETE /api/admin/productos/:sku — el producto deja de existir acá.
+ *
+ * Las variantes, las fotos, los colores y los eventos se van solos por la
+ * cascada de la base; lo que no se va solo son los archivos de las fotos, que
+ * viven en el volumen.
+ *
+ * Las variantes quedan anotadas en `variantes_quitadas`: si no, la próxima
+ * importación de la planilla vuelve a crear el producto entero y la decisión
+ * dura hasta el import siguiente.
+ *
+ * Los pedidos NO se tocan: guardan lo pedido como copia, con su propio
+ * detalle y sus precios. Un pedido viejo de un producto borrado se sigue
+ * leyendo y su remito se sigue generando.
+ */
+r.delete('/productos/:sku', (req, res) => {
+  const producto = db.prepare('SELECT id FROM productos WHERE sku_agrupador = ?').get(req.params.sku);
+  if (!producto) return res.status(404).json({ message: 'No existe ese producto.' });
+
+  const fotos = db.prepare('SELECT ruta, miniatura, media FROM fotos WHERE producto_id = ?').all(producto.id);
+  const variantes = db.prepare('SELECT sku, color FROM variantes WHERE producto_id = ?').all(producto.id);
+
+  db.transaction(() => {
+    const anotar = db.prepare('INSERT OR REPLACE INTO variantes_quitadas (sku, producto_id, color, quitada_en) VALUES (?, ?, ?, ?)');
+    const ahora = new Date().toISOString();
+    for (const v of variantes) anotar.run(v.sku, producto.id, v.color, ahora);
+    db.prepare('DELETE FROM productos WHERE id = ?').run(producto.id);
+  })();
+
+  // Después de la transacción: si el borrado falla, los archivos siguen ahí.
+  for (const foto of fotos) borrarArchivosDeFoto(foto);
+  res.json({ ok: true, variantes: variantes.length, fotos: fotos.length });
+});
+
 r.get('/productos/:sku', (req, res) => {
   const p = db.prepare(`
     SELECT p.*, c.nombre AS categoria FROM productos p
@@ -763,6 +832,37 @@ r.delete('/productos/:sku/colores/:colorId', (req, res) => {
     return moverFotosDeColor(producto.id, color.id, null);
   })();
   res.json({ ok: true, variantes: quitar.length, fotosAGenerales: fotos.generales });
+});
+
+/*
+ * DELETE /api/admin/variantes/:id — este color y talle no se venden.
+ *
+ * Mismo trato que quitar un color entero: la variante se borra y queda anotada
+ * en `variantes_quitadas`, para que la próxima importación de la planilla no
+ * la traiga de vuelta. Sin esa anotación, la decisión dura hasta el próximo
+ * import y nadie entiende por qué reapareció.
+ *
+ * Volver a agregarle el color al producto la devuelve: esa ruta limpia la
+ * anotación.
+ */
+r.delete('/variantes/:id', (req, res) => {
+  const variante = db.prepare('SELECT * FROM variantes WHERE id = ?').get(Number(req.params.id));
+  if (!variante) return res.status(404).json({ message: 'No existe esa variante.' });
+
+  const quedan = db.prepare('SELECT COUNT(*) n FROM variantes WHERE producto_id = ? AND id <> ?')
+    .get(variante.producto_id, variante.id).n;
+  if (!quedan) {
+    return res.status(409).json({
+      message: 'Es la única variante del producto. Si no se vende, ocultá el producto o eliminalo.',
+    });
+  }
+
+  db.transaction(() => {
+    db.prepare('INSERT OR REPLACE INTO variantes_quitadas (sku, producto_id, color, quitada_en) VALUES (?, ?, ?, ?)')
+      .run(variante.sku, variante.producto_id, variante.color, new Date().toISOString());
+    db.prepare('DELETE FROM variantes WHERE id = ?').run(variante.id);
+  })();
+  res.json({ ok: true });
 });
 
 r.put('/variantes/:id', (req, res) => {

@@ -689,6 +689,19 @@ const planilla = path.join(__dirname, 'catalogo-isuwaya.xlsx');
   const archivoRaro = await pedir('/no-existe.js', { crudo: true });
   chk('un archivo que no está da 404, no el index', 404, archivoRaro.status);
 
+  /*
+   * Borrar algo que no existe no puede contestar que salió bien: quien automatiza
+   * contra esto necesita saber que no borró nada.
+   */
+  chk('borrar un producto que no existe da 404', 404,
+    (await pedir('/api/admin/productos/NO-EXISTE-ESTE-SKU', { metodo: 'DELETE', admin: true })).status);
+  chk('quitar una variante que no existe da 404', 404,
+    (await pedir('/api/admin/variantes/99999999', { metodo: 'DELETE', admin: true })).status);
+  chk('y sin ser administrador no se borra nada', [401, 401], [
+    (await pedir('/api/admin/productos/CUALQUIERA', { metodo: 'DELETE' })).status,
+    (await pedir('/api/admin/variantes/1', { metodo: 'DELETE' })).status,
+  ]);
+
   tit('22. LAS FOTOS DEL PANEL LLEGAN AL CATÁLOGO');
   /*
    * El panel guardaba las fotos en una tabla y el catálogo leía de otra: se

@@ -214,6 +214,16 @@ function importarFilas(filas, { visibleNuevos = true } = {}) {
       const categoria = buscarCategoria.get(nombreCategoria);
       if (categoria) resumen.categorias = db.prepare('SELECT COUNT(*) c FROM categorias').get().c;
 
+      /*
+       * Lo quitado se saltea antes de tocar el producto.
+       *
+       * Si se mirara después, un producto borrado desde el panel volvería a
+       * crearse en cada sincronización como un cascarón sin variantes: no se
+       * ve en la tienda —no tiene qué vender— pero ensucia el panel, y el
+       * borrado parece no haber funcionado.
+       */
+      if (quitada.get(skuVariante)) { resumen.quitadasSalteadas = (resumen.quitadasSalteadas || 0) + 1; continue; }
+
       const existia = buscarProducto.get(agrupador);
       upsertProducto.run({
         ahora,
@@ -233,8 +243,6 @@ function importarFilas(filas, { visibleNuevos = true } = {}) {
       }
 
       if (f.porPosicion) resumen.atributosPorPosicion += 1;
-
-      if (quitada.get(skuVariante)) { resumen.quitadasSalteadas = (resumen.quitadasSalteadas || 0) + 1; continue; }
 
       const talle = norm(f.talle);
       upsertVariante.run({
