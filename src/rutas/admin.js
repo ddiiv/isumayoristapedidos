@@ -22,6 +22,7 @@ const {
 } = require('../pedidos');
 const auth = require('../auth');
 const respaldos = require('../respaldos');
+const tienda = require('../tienda');
 
 const r = express.Router();
 
@@ -277,6 +278,9 @@ r.post('/productos/:sku/fotos', recibirFotos, async (req, res, next) => {
         rechazadas,
       });
     }
+
+    // Con la lectura de la tienda prendida, subir acá es elegir las fotos de acá (aunque la tienda todavía no haya contestado).
+    if (tienda.activa()) db.prepare('UPDATE productos SET fotos_propias = 1 WHERE id = ?').run(producto.id);
 
     res.json({
       ok: true,
@@ -595,6 +599,7 @@ r.get('/productos/:sku', (req, res) => {
     variantes.filter((v) => v.talle_id).map((v) => [v.talle_id, { id: v.talle_id, nombre: v.talle, orden: v.orden_talle }]),
   ).values()].sort((a, b) => a.orden - b.orden);
 
+  const deLaTienda = tienda.de(p.sku_agrupador, variantes.map((v) => v.sku));
   res.json({
     producto: {
       ...p,
@@ -607,7 +612,21 @@ r.get('/productos/:sku', (req, res) => {
     talles: tallesDelProducto,
     maxFotos: topeDeFotos(p.id),
     maxPorTanda: MAX_POR_TANDA,
+    tienda: { fotos: deLaTienda?.fotos.length || 0, guia: !!deLaTienda?.guia },
   });
+});
+
+/*
+ * PUT /api/admin/productos/:sku/fotos-propias — { propias: true|false }
+ *
+ * Qué fotos ve el cliente cuando la tienda online también tiene: las de acá
+ * (true) o las de la tienda (false, lo normal: allá se cargan).
+ */
+r.put('/productos/:sku/fotos-propias', (req, res) => {
+  if (typeof req.body?.propias !== 'boolean') return res.status(400).json({ message: 'Falta propias (sí o no).' });
+  const hecho = db.prepare('UPDATE productos SET fotos_propias = ? WHERE sku_agrupador = ?').run(req.body.propias ? 1 : 0, req.params.sku);
+  if (!hecho.changes) return res.status(404).json({ message: 'No existe ese producto.' });
+  res.json({ ok: true, propias: req.body.propias });
 });
 
 /*

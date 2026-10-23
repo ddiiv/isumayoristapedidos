@@ -549,7 +549,7 @@ function abrirGuia() {
         </tbody>
       </table>
     </div>
-    <p class="chico-2 separado">Medidas en centímetros, tomadas sobre la prenda apoyada.</p>`;
+    <p class="chico-2 separado">${esc(g.pie || 'Medidas en centímetros, tomadas sobre la prenda apoyada.')}</p>`;
   el('#dialogo-guia').classList.add('abierto');
 }
 

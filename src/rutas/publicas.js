@@ -6,6 +6,7 @@ const { pdfPedido, pdfRotulo } = require('../pdf');
 const auth = require('../auth');
 const eventos = require('../eventos');
 const tomar = require('../tomarPedido');
+const tienda = require('../tienda');
 
 const r = express.Router();
 
@@ -82,12 +83,14 @@ r.post('/eventos', frenar(demasiadosEventos), (req, res) => {
  * instantánea, que es lo que hace que alguien recorra el catálogo entero.
  */
 r.get('/catalogo', (req, res) => {
+  // ?propias=1: las fotos cargadas acá aunque la tienda tenga las suyas. Es lo que lee el importador de la tienda.
+  const soloPropias = req.query.propias === '1';
   const categorias = db.prepare(`
     SELECT id, nombre FROM categorias WHERE visible = 1 ORDER BY orden, nombre`).all();
 
   const productos = db.prepare(`
     SELECT p.id, p.sku_agrupador, p.titulo, p.precio, p.foto, p.modelo, p.genero,
-           p.categoria_id, p.guia_talles, p.descripcion, p.creado_en, p.novedad, p.nuevo_desde
+           p.categoria_id, p.guia_talles, p.descripcion, p.creado_en, p.novedad, p.nuevo_desde, p.fotos_propias
     FROM productos p
     WHERE p.visible = 1
     ORDER BY p.orden, p.titulo`).all();
@@ -159,9 +162,16 @@ r.get('/catalogo', (req, res) => {
     const grupos = [...new Set(vs.map((v) => v.grupo_talle))];
     // Los 30 días corren desde el relanzamiento si lo hubo, y si no desde el alta.
     const desdeCuandoEsNuevo = p.nuevo_desde || p.creado_en;
+    // Fotos y guía: las de la tienda (isu), salvo que este producto tenga las suyas.
+    const deLaTienda = tienda.de(p.sku_agrupador, vs.map((v) => v.sku));
+    const propias = conLaPrincipalPrimero(fotosPorProducto.get(p.id) || [], p.foto);
+    // Marcado «propias» pero sin ninguna: mejor las de la tienda que la fila vacía.
+    const fotos = !soloPropias && (!p.fotos_propias || !propias.length) && deLaTienda?.fotos.length
+      ? tienda.fotosDeLaTienda(deLaTienda, vs)
+      : propias;
     return {
       grupoTalle: grupos.includes('nino') && grupos.includes('adulto') ? 'mixto' : (grupos[0] || 'adulto'),
-      guiaTalles: p.guia_talles ? JSON.parse(p.guia_talles) : null,
+      guiaTalles: p.guia_talles ? JSON.parse(p.guia_talles) : deLaTienda?.guia || null,
       descripcion: p.descripcion || null,
       sku: p.sku_agrupador,
       titulo: p.titulo,
@@ -180,8 +190,8 @@ r.get('/catalogo', (req, res) => {
       precio: p.precio,
       modelo: p.modelo,
       genero: p.genero,
-      foto: p.foto,
-      fotos: conLaPrincipalPrimero(fotosPorProducto.get(p.id) || [], p.foto),
+      foto: fotos[0]?.ruta || p.foto,
+      fotos,
       colores,
       talles,
       // La grilla completa: con qué SKU se pide cada cruce de color y talle.

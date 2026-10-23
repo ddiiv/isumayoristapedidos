@@ -413,6 +413,8 @@ asegurarColumna('pedidos', 'origen', 'TEXT');
 asegurarColumna('fotos', 'miniatura', 'TEXT');
 // Y la mediana, para la fila del catálogo en pantallas densas y la foto grande del panel.
 asegurarColumna('fotos', 'media', 'TEXT');
+// 1 = se muestran las fotos de acá aunque la tienda (isu) tenga las suyas (ver src/tienda.js).
+asegurarColumna('productos', 'fotos_propias', 'INTEGER NOT NULL DEFAULT 0');
 
 /*
  * Cuándo entró cada producto A LA PLATAFORMA.

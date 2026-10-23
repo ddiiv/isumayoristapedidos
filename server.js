@@ -15,6 +15,7 @@ const { comprimir } = require('./src/comprimir');
 const eventos = require('./src/eventos');
 const stocker = require('./src/stocker');
 const respaldos = require('./src/respaldos');
+const tienda = require('./src/tienda');
 
 const app = express();
 const PORT = Number(process.env.PORT) || 8080;
@@ -64,7 +65,7 @@ app.use((req, res, next) => {
     "default-src 'none'",
     "script-src 'self'",
     "style-src 'self'",
-    "img-src 'self' data: blob:",
+    `img-src 'self' data: blob:${tienda.origenFotos() ? ` ${tienda.origenFotos()}` : ''}`,
     "font-src 'self'",
     "connect-src 'self'",
     "form-action 'self'",
@@ -168,6 +169,8 @@ const server = app.listen(PORT, () => {
   try { completarClientesDePedidos(); } catch (e) { console.error('  clientes:', e.message); }
   // Si el WhatsApp del grupo ya estaba vinculado, se reconecta solo: un deploy no obliga a escanear de nuevo.
   whatsapp.arrancarSiHaySesion();
+  // Fotos y guías de talles de la tienda online: cada minuto, en memoria.
+  tienda.iniciar();
   /*
    * Los eventos de la tienda duran seis meses: sirven para ver tendencias, no
    * para archivar lo que mira cada uno. Se poda al arrancar y una vez por día.

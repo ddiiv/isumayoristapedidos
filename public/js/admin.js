@@ -214,6 +214,14 @@ function vistaProducto() {
         <br>Medida recomendada: <b>vertical 3:4</b>, tipo 1440×1920. Es la proporción con
         la que se recortan las fotos; una apaisada se recorta arriba y abajo.
       </p>
+      ${detalle.tienda?.fotos ? `
+        <div class="acciones">
+          ${p.fotos_propias && detalle.fotos.length
+            ? `<span class="mensaje info">La tienda online tiene ${detalle.tienda.fotos} fotos de este producto, pero se muestran <b>las de acá</b>.</span>
+               <button class="btn borde" data-fotos-propias="no">Usar las de la tienda</button>`
+            : `<span class="mensaje info">Se muestran las <b>${detalle.tienda.fotos} fotos de la tienda online</b>: se cargan allá. Si subís fotos acá, pasan a verse las de acá.</span>
+               ${detalle.fotos.length ? '<button class="btn borde" data-fotos-propias="si">Mostrar las de acá</button>' : ''}`}
+        </div>` : ''}
       ${detalle.fotos.length > 1 ? `
         <div class="acciones">
           <button class="btn borde" data-agrupar-fotos>Agrupar por color</button>
@@ -236,6 +244,9 @@ function vistaProducto() {
         Las medidas de <b>este</b> producto. Un talle M no mide lo mismo en una remera
         que en una campera, así que el cliente necesita las de acá y no una tabla general.
         Lo que dejes vacío no se muestra.
+        ${detalle.tienda?.guia ? (g
+          ? '<br>La tienda online también tiene una guía para este producto: quitando la de acá, se muestra la de la tienda.'
+          : '<br><b>Ahora se muestra la guía de la tienda online.</b> Si guardás una acá, se ve la de acá.') : ''}
       </p>
       <div class="campos">
         <div class="campo ancho">
@@ -2084,6 +2095,17 @@ raiz.addEventListener('click', (e) => conError(async () => {
     });
     detalle.producto.guia_talles = r.guia;
     mensaje('Guía de talles guardada.');
+    pintar();
+    return;
+  }
+
+  const fotosPropias = t.closest('[data-fotos-propias]');
+  if (fotosPropias) {
+    await api(`/productos/${encodeURIComponent(vista.sku)}/fotos-propias`, {
+      method: 'PUT', body: JSON.stringify({ propias: fotosPropias.dataset.fotosPropias === 'si' }),
+    });
+    detalle = await api(`/productos/${encodeURIComponent(vista.sku)}`);
+    mensaje(detalle.producto.fotos_propias ? 'Se muestran las fotos de acá.' : 'Se muestran las fotos de la tienda online.');
     pintar();
     return;
   }
