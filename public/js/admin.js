@@ -127,9 +127,16 @@ function vistaProducto() {
   if (!detalle) return '<p class="cargando">Abriendo el producto…</p>';
   const p = detalle.producto;
 
-  const fotos = detalle.fotos.map((f) => `
+  const fotos = detalle.fotos.map((f, i) => `
     <li class="foto-item ${p.foto === f.ruta ? 'principal' : ''}" data-foto="${f.id}">
       <img src="${esc(f.miniatura || f.ruta)}" alt="" loading="lazy">
+      <div class="foto-orden">
+        <button class="btn texto" data-mover-foto="${f.id}" data-hacia="-1"${i === 0 ? ' disabled' : ''}
+                aria-label="Mover esta foto antes">↑</button>
+        <b>${i + 1}</b>
+        <button class="btn texto" data-mover-foto="${f.id}" data-hacia="1"${
+          i === detalle.fotos.length - 1 ? ' disabled' : ''} aria-label="Mover esta foto después">↓</button>
+      </div>
       <select class="select-mini" data-color-foto="${f.id}" aria-label="Color de la foto">
         <option value="">Foto general</option>
         ${detalle.colores.map((c) => `<option value="${c.id}"${c.id === f.color_id ? ' selected' : ''}>${esc(c.nombre)}</option>`).join('')}
@@ -200,12 +207,18 @@ function vistaProducto() {
     <div class="tarjeta">
       <h3>Fotos <span class="apagado">(${detalle.fotos.length} de ${detalle.maxFotos})</span></h3>
       <p class="sub">
-        La principal es la que se ve en la fila del catálogo. Las que tengan un color
-        asignado se muestran al elegir ese color — sólo aparecen los colores que
-        <b>este</b> producto tiene.
+        <b>El orden es el que ve el cliente</b>: con las flechas se acomodan, y la
+        número 1 es la principal, la que se ve en la fila del catálogo.
+        Las que tengan un color asignado se muestran al elegir ese color — sólo
+        aparecen los colores que <b>este</b> producto tiene.
         <br>Medida recomendada: <b>vertical 3:4</b>, tipo 1440×1920. Es la proporción con
         la que se recortan las fotos; una apaisada se recorta arriba y abajo.
       </p>
+      ${detalle.fotos.length > 1 ? `
+        <div class="acciones">
+          <button class="btn borde" data-agrupar-fotos>Agrupar por color</button>
+          <span class="chico">Primero las generales, después cada color junto, en el orden de los colores del producto.</span>
+        </div>` : ''}
       ${detalle.fotos.length < detalle.maxFotos
         ? `<form class="subida" id="form-foto">
              <input type="file" name="fotos" accept="image/jpeg,image/png,image/webp" multiple required>
@@ -2289,6 +2302,42 @@ raiz.addEventListener('click', (e) => conError(async () => {
   }
 
   // ── Fotos
+  /*
+   * Mover una foto manda la lista entera, no «subí esta una posición»: el
+   * panel ya la tiene armada y así el servidor nunca queda con un orden a
+   * medio aplicar.
+   */
+  const guardarOrdenFotos = async (ids) => {
+    await api(`/productos/${encodeURIComponent(vista.sku)}/fotos/orden`, {
+      method: 'PUT', body: JSON.stringify({ ids }),
+    });
+    detalle = await api(`/productos/${encodeURIComponent(vista.sku)}`);
+    await cargar();
+    pintar();
+  };
+
+  const moverFoto = t.closest('[data-mover-foto]');
+  if (moverFoto) {
+    const ids = detalle.fotos.map((x) => x.id);
+    const desde = ids.indexOf(Number(moverFoto.dataset.moverFoto));
+    const hasta = desde + Number(moverFoto.dataset.hacia);
+    if (hasta < 0 || hasta >= ids.length) return;
+    [ids[desde], ids[hasta]] = [ids[hasta], ids[desde]];
+    return guardarOrdenFotos(ids);
+  }
+
+  if (t.closest('[data-agrupar-fotos]')) {
+    // Las generales primero: son las del producto, no las de un color.
+    const lugar = new Map(detalle.colores.map((c, i) => [c.id, i]));
+    const ids = [...detalle.fotos]
+      .sort((a, b) => (a.color_id ? lugar.get(a.color_id) ?? 998 : -1)
+        - (b.color_id ? lugar.get(b.color_id) ?? 998 : -1))
+      .map((x) => x.id);
+    await guardarOrdenFotos(ids);
+    mensaje('Listo: las fotos quedaron agrupadas por color.');
+    return pintar();
+  }
+
   const principal = t.closest('[data-principal]');
   if (principal) {
     await api(`/fotos/${principal.dataset.principal}`, { method: 'PUT', body: JSON.stringify({ principal: true }) });

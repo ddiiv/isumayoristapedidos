@@ -291,6 +291,44 @@ r.post('/productos/:sku/fotos', recibirFotos, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+/*
+ * PUT /api/admin/productos/:sku/fotos/orden — { ids: [...] }
+ *
+ * El orden en que el cliente las va a ver: el catálogo ya las sirve por este
+ * campo. Llega la lista entera y no un «movela una posición» porque el panel
+ * ya la tiene armada, y así una tanda de movimientos no deja órdenes a medio
+ * aplicar si algo falla en el medio.
+ */
+r.put('/productos/:sku/fotos/orden', (req, res) => {
+  const producto = db.prepare('SELECT id FROM productos WHERE sku_agrupador = ?').get(req.params.sku);
+  if (!producto) return res.status(404).json({ message: 'No existe ese producto.' });
+
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(Number) : null;
+  if (!ids?.length) return res.status(400).json({ message: 'Mandá las fotos en orden, por id.' });
+
+  /*
+   * Tienen que venir TODAS las del producto y ninguna ajena. Con una lista
+   * parcial, las que faltan conservan un orden viejo y quedan intercaladas
+   * entre las nuevas, que es peor que no haber ordenado nada.
+   */
+  const suyas = db.prepare('SELECT id FROM fotos WHERE producto_id = ?').all(producto.id).map((x) => x.id);
+  const completas = ids.length === suyas.length
+    && new Set(ids).size === ids.length
+    && ids.every((id) => suyas.includes(id));
+  if (!completas) {
+    return res.status(400).json({ message: 'La lista tiene que traer todas las fotos del producto, una sola vez.' });
+  }
+
+  db.transaction(() => {
+    const poner = db.prepare('UPDATE fotos SET orden = ? WHERE id = ?');
+    ids.forEach((id, i) => poner.run(i, id));
+    // La primera es la principal: la que se ve en la fila del catálogo.
+    const primera = db.prepare('SELECT ruta FROM fotos WHERE id = ?').get(ids[0]);
+    db.prepare('UPDATE productos SET foto = ? WHERE id = ?').run(primera.ruta, producto.id);
+  })();
+  res.json({ ok: true });
+});
+
 r.put('/fotos/:id', (req, res) => {
   const foto = db.prepare('SELECT * FROM fotos WHERE id = ?').get(Number(req.params.id));
   if (!foto) return res.status(404).json({ message: 'No existe esa foto.' });
@@ -307,7 +345,18 @@ r.put('/fotos/:id', (req, res) => {
     db.prepare('UPDATE fotos SET orden = ? WHERE id = ?').run(Math.trunc(Number(req.body.orden) || 0), foto.id);
   }
   if (req.body?.principal) {
-    db.prepare('UPDATE productos SET foto = ? WHERE id = ?').run(foto.ruta, foto.producto_id);
+    /*
+     * La principal es siempre la primera del orden.
+     *
+     * Si fueran dos cosas separadas, el panel mostraría las fotos en un orden
+     * y la tienda en otro —porque el carrusel arranca por la principal—, y la
+     * pantalla estaría mintiendo sobre lo que ve el cliente.
+     */
+    db.transaction(() => {
+      db.prepare('UPDATE fotos SET orden = orden + 1 WHERE producto_id = ?').run(foto.producto_id);
+      db.prepare('UPDATE fotos SET orden = 0 WHERE id = ?').run(foto.id);
+      db.prepare('UPDATE productos SET foto = ? WHERE id = ?').run(foto.ruta, foto.producto_id);
+    })();
   }
   res.json({ ok: true });
 });

@@ -828,6 +828,47 @@ const planilla = path.join(__dirname, 'catalogo-isuwaya.xlsx');
     await pedir(`/api/admin/fotos/${foto.id}`, { metodo: 'DELETE', admin: true });
   }
 
+  tit('22f. EL ORDEN DE LAS FOTOS LO DECIDE EL PANEL');
+  /*
+   * El catálogo sirve las fotos por este campo, así que el orden del panel es
+   * literalmente lo que ve el cliente. Y la número 1 es la principal: si fueran
+   * dos cosas separadas, el panel mostraría un orden y la tienda otro.
+   */
+  {
+    // Las secciones de arriba dejan el producto sin fotos: se suben las de acá.
+    const fd = new FormData();
+    for (let i = 0; i < 3; i += 1) fd.append('fotos', new Blob([png], { type: 'image/png' }), `orden-${i}.png`);
+    await pedir(`${rutaAdmin}/fotos`, { metodo: 'POST', cuerpo: fd, admin: true });
+
+    const antes = (await pedir(rutaAdmin, { admin: true })).json;
+    const ids = antes.fotos.map((x) => x.id);
+    chk('hay varias fotos para ordenar', true, ids.length > 1);
+
+    const ordenar = (lista) => pedir(`${rutaAdmin}/fotos/orden`,
+      { metodo: 'PUT', admin: true, cuerpo: { ids: lista } });
+
+    const alReves = [...ids].reverse();
+    chk('se puede mandar el orden entero', 200, (await ordenar(alReves)).status);
+    const dadaVuelta = (await pedir(rutaAdmin, { admin: true })).json;
+    chk('y las fotos quedan en ese orden', alReves, dadaVuelta.fotos.map((x) => x.id));
+    chk('la primera pasa a ser la principal', dadaVuelta.fotos[0].ruta, dadaVuelta.producto.foto);
+    chk('y el catálogo la muestra primera', dadaVuelta.fotos[0].ruta,
+      (await pedir('/api/catalogo')).json.productos.find((x) => x.sku === conFoto.sku)?.fotos?.[0]?.ruta);
+
+    chk('una lista a la que le falta una foto se rechaza', 400, (await ordenar(ids.slice(1))).status);
+    chk('una con repetidas también', 400, (await ordenar([ids[0], ...ids.slice(0, -1)])).status);
+    chk('y una foto de otro producto no entra', 400, (await ordenar([...ids.slice(1), 999999])).status);
+    chk('el orden no se movió por los rechazos', alReves,
+      (await pedir(rutaAdmin, { admin: true })).json.fotos.map((x) => x.id));
+
+    await ordenar(ids);
+    chk('y vuelve a como estaba', ids, (await pedir(rutaAdmin, { admin: true })).json.fotos.map((x) => x.id));
+
+    for (const foto of antes.fotos) {
+      await pedir(`/api/admin/fotos/${foto.id}`, { metodo: 'DELETE', admin: true });
+    }
+  }
+
   tit('22c. LA MEDICIÓN DE LO QUE SE MIRA');
   /*
    * La tienda informa qué se mira y con eso se ordena el catálogo. Todo lo que

@@ -79,6 +79,11 @@ table.datos input[type="number"], table.datos input[type="text"] {
   border: 1px solid var(--linea); border-radius: 12px; overflow: hidden; background: var(--papel);
 }
 .foto-item.principal { border-color: var(--verde); box-shadow: 0 0 0 1px var(--verde); }
+.foto-orden { display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: 4px; }
+.foto-orden b { font-variant-numeric: tabular-nums; min-width: 1.4em; text-align: center; }
+.foto-orden button { padding: 2px 8px; font-size: 15px; line-height: 1; }
+.foto-orden button[disabled] { opacity: .3; cursor: default; }
+
 .foto-item img { width: 100%; aspect-ratio: 3/4; object-fit: cover; display: block; }
 .foto-item select { width: 100%; border: 0; border-top: 1px solid var(--linea); border-radius: 0; }
 .foto-acciones {
