@@ -79,7 +79,26 @@ table.datos input[type="number"], table.datos input[type="text"] {
   border: 1px solid var(--linea); border-radius: 12px; overflow: hidden; background: var(--papel);
 }
 .foto-item.principal { border-color: var(--verde); box-shadow: 0 0 0 1px var(--verde); }
+/* ── Ordenar las fotos arrastrándolas ──────────────────────────── */
+/*
+ * El asa lleva `touch-action: none` sólo ella: es lo que le dice al navegador
+ * que ahí el dedo no scrollea. Si estuviera en la tarjeta entera, bajar la
+ * página sería imposible — las fotos ocupan casi todo.
+ */
 .foto-orden { display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: 4px; }
+.asa {
+  touch-action: none; cursor: grab; user-select: none;
+  color: var(--tinta-suave); font-size: 15px; line-height: 1; padding: 2px 4px;
+}
+.asa:active { cursor: grabbing; }
+
+.fotos-grilla.ordenando { user-select: none; }
+/* La que se arrastra no recibe punteros: así se sabe sobre cuál está. */
+.foto-item.arrastrando {
+  position: relative; z-index: 5; pointer-events: none; cursor: grabbing;
+  box-shadow: 0 12px 26px -8px rgba(21, 45, 60, .45);
+  border-color: var(--azul-borde);
+}
 .foto-orden b { font-variant-numeric: tabular-nums; min-width: 1.4em; text-align: center; }
 .foto-orden button { padding: 2px 8px; font-size: 15px; line-height: 1; }
 .foto-orden button[disabled] { opacity: .3; cursor: default; }

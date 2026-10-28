@@ -136,6 +136,7 @@ function vistaProducto() {
         <b>${i + 1}</b>
         <button class="btn texto" data-mover-foto="${f.id}" data-hacia="1"${
           i === detalle.fotos.length - 1 ? ' disabled' : ''} aria-label="Mover esta foto después">↓</button>
+        <span class="asa" data-asa aria-hidden="true" title="Arrastrar para ordenar">⠿</span>
       </div>
       <select class="select-mini" data-color-foto="${f.id}" aria-label="Color de la foto">
         <option value="">Foto general</option>
@@ -2324,19 +2325,6 @@ raiz.addEventListener('click', (e) => conError(async () => {
   }
 
   // ── Fotos
-  /*
-   * Mover una foto manda la lista entera, no «subí esta una posición»: el
-   * panel ya la tiene armada y así el servidor nunca queda con un orden a
-   * medio aplicar.
-   */
-  const guardarOrdenFotos = async (ids) => {
-    await api(`/productos/${encodeURIComponent(vista.sku)}/fotos/orden`, {
-      method: 'PUT', body: JSON.stringify({ ids }),
-    });
-    detalle = await api(`/productos/${encodeURIComponent(vista.sku)}`);
-    await cargar();
-    pintar();
-  };
 
   const moverFoto = t.closest('[data-mover-foto]');
   if (moverFoto) {
@@ -2697,6 +2685,173 @@ const filtroMasivo = () => ({
   colorId: el('#m-color').value || null,
   talleId: el('#m-talle').value || null,
 });
+
+/*
+ * Guardar el orden manda la lista entera, no «subí esta una posición»: el
+ * panel ya la tiene armada y así el servidor nunca queda con un orden a medio
+ * aplicar. La usan las flechas y el arrastre, por eso vive acá afuera.
+ */
+async function guardarOrdenFotos(ids) {
+  await api(`/productos/${encodeURIComponent(vista.sku)}/fotos/orden`, {
+    method: 'PUT', body: JSON.stringify({ ids }),
+  });
+  detalle = await api(`/productos/${encodeURIComponent(vista.sku)}`);
+  await cargar();
+  pintar();
+}
+
+/*
+ * ══ ARRASTRAR LAS FOTOS PARA ORDENARLAS ═══════════════════════════
+ *
+ * Con eventos de puntero y no con la API de arrastre del navegador: esa no
+ * existe en el teléfono, y las fotos se acomodan tanto desde la compu como
+ * desde el teléfono con la prenda en la mano.
+ *
+ * Las demás se corren con FLIP: se anota dónde estaban, se las deja ahí con
+ * una transformación y se las suelta. El navegador anima el camino con sólo
+ * `transform`, que resuelve el compositor sin recalcular la página en cada
+ * cuadro — es lo que hace que no pese en un teléfono.
+ *
+ * Las flechas siguen estando: con el teclado no se arrastra, y son también
+ * la salida cuando la lista es más larga que la pantalla.
+ */
+const MOVIDA_MINIMA = 4;        // píxeles antes de tomarlo como arrastre y no como clic
+const ANIMACION_ORDEN = 180;    // lo que tarda cada foto en correrse a su lugar
+
+let arrastre = null;
+
+/*
+ * La posición se mide con offsetLeft/offsetTop y no con el rectángulo en
+ * pantalla: el rectángulo ya viene con la transformación aplicada, así que
+ * medir con él en el medio de una animación devuelve dónde se ve la foto, no
+ * dónde la puso la grilla.
+ */
+const dondeEstan = (grilla) => new Map(
+  [...grilla.children].map((li) => [li, { x: li.offsetLeft, y: li.offsetTop }]),
+);
+
+function animarHastaSuLugar(grilla, antes) {
+  for (const li of grilla.children) {
+    const viejo = antes.get(li);
+    if (!viejo || li === arrastre?.li) continue;
+    const dx = viejo.x - li.offsetLeft;
+    const dy = viejo.y - li.offsetTop;
+    if (!dx && !dy) continue;
+    li.style.transition = 'none';
+    li.style.transform = `translate(${dx}px, ${dy}px)`;
+  }
+  requestAnimationFrame(() => {
+    for (const li of grilla.children) {
+      if (li === arrastre?.li) continue;
+      li.style.transition = `transform ${ANIMACION_ORDEN}ms ease`;
+      li.style.transform = '';
+    }
+  });
+}
+
+/** Los números vuelven a su lugar en el acto: esperar al servidor se nota. */
+function renumerarFotos(grilla) {
+  [...grilla.children].forEach((li, i) => {
+    const n = li.querySelector('.foto-orden b');
+    if (n) n.textContent = i + 1;
+  });
+}
+
+function seguirArrastre(e) {
+  if (!arrastre) return;
+  const { li, grilla } = arrastre;
+  li.style.transform = `translate(${e.clientX - arrastre.x0 + arrastre.ajusteX}px, `
+    + `${e.clientY - arrastre.y0 + arrastre.ajusteY}px)`;
+
+  // La que se arrastra no recibe punteros, así que esto devuelve la de abajo.
+  const destino = document.elementFromPoint(e.clientX, e.clientY)?.closest('.foto-item');
+  if (!destino || destino === li || destino.parentElement !== grilla) return;
+
+  const antes = dondeEstan(grilla);
+  const antesX = li.offsetLeft;
+  const antesY = li.offsetTop;
+  const estabaAntes = Boolean(destino.compareDocumentPosition(li) & Node.DOCUMENT_POSITION_PRECEDING);
+  grilla.insertBefore(li, estabaAntes ? destino.nextSibling : destino);
+  /*
+   * Al cambiar de lugar en la grilla, la foto que se arrastra cambia de
+   * posición de base. Sin corregir el desvío daría un salto justo debajo del
+   * dedo, que es lo que hace sentir rota una lista arrastrable.
+   */
+  arrastre.ajusteX += antesX - li.offsetLeft;
+  arrastre.ajusteY += antesY - li.offsetTop;
+  li.style.transform = `translate(${e.clientX - arrastre.x0 + arrastre.ajusteX}px, `
+    + `${e.clientY - arrastre.y0 + arrastre.ajusteY}px)`;
+  animarHastaSuLugar(grilla, antes);
+  renumerarFotos(grilla);
+}
+
+function soltarArrastre() {
+  if (!arrastre) return;
+  const { li, grilla, orden } = arrastre;
+  arrastre = null;
+
+  li.classList.remove('arrastrando');
+  grilla.classList.remove('ordenando');
+  li.style.transition = `transform ${ANIMACION_ORDEN}ms ease`;
+  li.style.transform = '';
+  setTimeout(() => { li.style.transition = ''; }, ANIMACION_ORDEN);
+
+  const ahora = [...grilla.children].map((x) => Number(x.dataset.foto));
+  // Si quedó como estaba, no se le escribe a la base por nada.
+  if (ahora.join() === orden.join()) return;
+  conError(() => guardarOrdenFotos(ahora));
+}
+
+raiz.addEventListener('pointerdown', (e) => {
+  if (e.button) return;   // sólo el botón principal
+  const li = e.target.closest('.foto-item');
+  const grilla = li?.parentElement;
+  if (!li || !grilla?.classList.contains('fotos-grilla') || grilla.children.length < 2) return;
+
+  /*
+   * Con el dedo se arrastra sólo desde el asa; con el mouse, de cualquier
+   * parte de la tarjeta.
+   *
+   * Si el dedo pudiera arrastrar desde la foto, no se podría bajar la página:
+   * las fotos ocupan casi toda la tarjeta y cualquier gesto para scrollear
+   * empezaría arrastrando.
+   */
+  const enElAsa = Boolean(e.target.closest('[data-asa]'));
+  if (e.pointerType === 'touch' && !enElAsa) return;
+  if (e.target.closest('button, select, a, input')) return;
+
+  const empezar = () => {
+    arrastre = {
+      li, grilla, x0: e.clientX, y0: e.clientY, ajusteX: 0, ajusteY: 0,
+      orden: [...grilla.children].map((x) => Number(x.dataset.foto)),
+    };
+    li.classList.add('arrastrando');
+    grilla.classList.add('ordenando');
+    li.style.transition = 'none';
+    try { li.setPointerCapture(e.pointerId); } catch { /* el puntero ya se fue */ }
+  };
+
+  if (enElAsa) { e.preventDefault(); empezar(); return; }
+
+  /*
+   * Desde la foto, recién se arranca al moverse: si no, un clic en «Hacer
+   * principal» que se corre un píxel se comería el clic.
+   */
+  const alMover = (m) => {
+    if (Math.hypot(m.clientX - e.clientX, m.clientY - e.clientY) < MOVIDA_MINIMA) return;
+    raiz.removeEventListener('pointermove', alMover);
+    empezar();
+    // El movimiento que lo arrancó también cuenta: si no, un arrastre rápido
+    // de dos cuadros no acomoda nada.
+    seguirArrastre(m);
+  };
+  raiz.addEventListener('pointermove', alMover);
+  raiz.addEventListener('pointerup', () => raiz.removeEventListener('pointermove', alMover), { once: true });
+});
+
+raiz.addEventListener('pointermove', seguirArrastre);
+raiz.addEventListener('pointerup', soltarArrastre);
+raiz.addEventListener('pointercancel', soltarArrastre);
 
 raiz.addEventListener('change', (e) => conError(async () => {
   const t = e.target;
