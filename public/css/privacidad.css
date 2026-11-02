@@ -1,0 +1,9 @@
+/* La política de privacidad: texto largo, así que una columna angosta y cómoda de leer. */
+.legal { max-width: 720px; margin: 0 auto; padding: 32px 20px 64px; line-height: 1.6; }
+.legal header { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; }
+.legal h1 { font-size: 1.75rem; margin: 0 0 4px; }
+.legal h2 { font-size: 1.15rem; margin: 32px 0 8px; }
+.legal p, .legal li { margin: 0 0 10px; }
+.legal ul { padding-left: 20px; }
+.legal .fecha { color: #666; font-size: .9rem; }
+.legal .aviso { border-left: 3px solid #ccc; padding-left: 12px; font-size: .9rem; color: #444; }
