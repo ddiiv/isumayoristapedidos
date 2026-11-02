@@ -391,6 +391,9 @@ asegurarColumna('variantes', 'talle_id', 'INTEGER');
 // medidas de ESTE producto, no una tabla general.
 asegurarColumna('productos', 'guia_talles', 'TEXT');
 asegurarColumna('productos', 'descripcion', 'TEXT');
+// La que manda STOCKER, aparte: la de arriba es la cargada en el panel y gana
+// siempre; esta se pisa en cada sincronización.
+asegurarColumna('productos', 'stocker_descripcion', 'TEXT');
 
 /*
  * El pedido tal como lo confirmó el cliente, guardado entero antes de tocarlo.

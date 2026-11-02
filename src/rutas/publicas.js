@@ -90,7 +90,8 @@ r.get('/catalogo', (req, res) => {
 
   const productos = db.prepare(`
     SELECT p.id, p.sku_agrupador, p.titulo, p.precio, p.foto, p.modelo, p.genero,
-           p.categoria_id, p.guia_talles, p.descripcion, p.creado_en, p.novedad, p.nuevo_desde, p.fotos_propias
+           p.categoria_id, p.guia_talles,
+           COALESCE(NULLIF(TRIM(p.descripcion), ''), p.stocker_descripcion) AS descripcion, p.creado_en, p.novedad, p.nuevo_desde, p.fotos_propias
     FROM productos p
     WHERE p.visible = 1
     ORDER BY p.orden, p.titulo`).all();

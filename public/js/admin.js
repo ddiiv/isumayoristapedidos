@@ -186,7 +186,8 @@ function vistaProducto() {
         </div>
         <div class="campo ancho">
           <label for="ed-descripcion">Descripción <span class="apagado">(la ve el cliente)</span></label>
-          <textarea id="ed-descripcion" rows="2">${esc(p.descripcion || '')}</textarea>
+          <textarea id="ed-descripcion" rows="3"${p.stocker_descripcion ? ` placeholder="${esc(p.stocker_descripcion)}"` : ''}>${esc(p.descripcion || '')}</textarea>
+          ${p.stocker_descripcion ? '<small class="apagado">Vacía, el cliente ve la de STOCKER (la que aparece en gris). Lo que escribas acá la reemplaza.</small>' : ''}
         </div>
       </div>
       <div class="acciones">

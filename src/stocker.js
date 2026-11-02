@@ -715,6 +715,10 @@ async function sincronizarStock({ completo = false } = {}) {
  * corregidos y las variantes quitadas en el panel, y no toca fotos,
  * descripción, guía de talles ni stock. Lo nuevo entra oculto: sin fotos no
  * se publica.
+ *
+ * La descripción de STOCKER se guarda en su propia columna y no en la del
+ * panel: así la cargada acá nunca se pisa, y si se borra vuelve a verse la de
+ * STOCKER en vez de quedar el producto sin nada.
  */
 const CLAVE_CATALOGO = 'stocker_catalogo_ultimo';
 
@@ -744,6 +748,12 @@ async function sincronizarCatalogo() {
     }
   }
   const resumen = { ...importarFilas(filas, { visibleNuevos: false }), truncado: Boolean(datos.truncado) };
+  const guardarDescripcion = db.prepare('UPDATE productos SET stocker_descripcion = ? WHERE sku_agrupador = ?');
+  db.transaction(() => {
+    for (const p of datos.productos || []) {
+      guardarDescripcion.run(String(p.descripcion || '').trim() || null, p.skuAgrupador);
+    }
+  })();
   guardarConfig(CLAVE_CATALOGO, JSON.stringify({ fecha: new Date().toISOString(), resumen }));
   return resumen;
 }

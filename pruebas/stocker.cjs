@@ -394,9 +394,10 @@ function armarDatos() {
   db.prepare("INSERT INTO productos (sku_agrupador, titulo, precio) VALUES ('ISUVIEJO', 'Producto que STOCKER ya no manda', 5000)").run();
   const stockAntes = db.prepare("SELECT stock FROM variantes WHERE sku = 'ISUPRU-NEG-M'").get().stock;
   const v = (sku, color, talle, precioMayorista) => ({ sku, color, talle, precioMayorista });
+  const DESCRIPCION_STOCKER = 'Remera de algodón peinado 24/1. Calce recto, cuello redondo con ribete. Se lava a mano o en lavarropas con agua fría.';
   fs.writeFileSync(path.join(CARPETA, '_catalogo.json'), JSON.stringify({ productos: [
     { skuAgrupador: 'ISUPRU', titulo: 'Remera de prueba v2', categoria: 'Remeras', modelo: 'Clásica', genero: 'Mujer',
-      precioMayorista: 11000,
+      precioMayorista: 11000, descripcion: DESCRIPCION_STOCKER,
       variantes: [v('ISUPRU-NEG-M', 'Negro', 'M', 11000), v('ISUPRU-NEG-L', 'Negro', 'L', 11500), v('ISUPRU-ROJ-M', 'Rojo', 'M', 11000)] },
     { skuAgrupador: 'ISUNUE', titulo: 'Buzo nuevo', categoria: 'Buzos', modelo: null, genero: null, precioMayorista: 20000,
       variantes: [v('ISUNUE-NEG-S', 'Negro', 'S', 20000)] },
@@ -419,6 +420,38 @@ function armarDatos() {
   const otra = await stocker.sincronizarCatalogo();
   chk('traerlo otra vez no duplica nada', [0, 2], [otra.nuevos, db.prepare("SELECT COUNT(*) AS n FROM variantes WHERE producto_id = ?").get(prueba.id).n]);
   chk('y el panel sabe cuándo fue la última vez', 2, stocker.ultimoCatalogo()?.resumen?.productos);
+
+  /*
+   * La descripción: la de STOCKER va aparte de la cargada en el panel. La del
+   * panel gana; vacía, vuelve la de STOCKER. Se mira en el catálogo público,
+   * que es lo que lee el cliente.
+   */
+  const publicas = require('../src/rutas/publicas');
+  const app = require('express')().use('/api', publicas);
+  const servidor = await new Promise((ok) => { const s = app.listen(0, '127.0.0.1', () => ok(s)); });
+  const descripcionPublica = async () => {
+    const r = await fetch(`http://127.0.0.1:${servidor.address().port}/api/catalogo`);
+    return (await r.json()).productos.find((x) => x.sku === 'ISUPRU')?.descripcion;
+  };
+  const ponerPropia = (texto) => db.prepare("UPDATE productos SET descripcion = ? WHERE sku_agrupador = 'ISUPRU'").run(texto);
+  chk('guarda la descripción de STOCKER aparte', [DESCRIPCION_STOCKER, null],
+    Object.values(db.prepare("SELECT stocker_descripcion, descripcion FROM productos WHERE sku_agrupador = 'ISUPRU'").get()));
+  chk('sin descripción propia, el cliente ve la de STOCKER', DESCRIPCION_STOCKER, await descripcionPublica());
+  ponerPropia('La cargada en el panel.');
+  await stocker.sincronizarCatalogo();
+  chk('la del panel gana, y otra sincronización no la pisa', 'La cargada en el panel.', await descripcionPublica());
+  ponerPropia(null);
+  chk('borrada en el panel, vuelve la de STOCKER', DESCRIPCION_STOCKER, await descripcionPublica());
+  ponerPropia('   ');
+  chk('y solo espacios cuenta como vacía', DESCRIPCION_STOCKER, await descripcionPublica());
+  ponerPropia(null);
+  fs.writeFileSync(path.join(CARPETA, '_catalogo.json'), JSON.stringify({ productos: [
+    { skuAgrupador: 'ISUPRU', titulo: 'Remera de prueba v2', categoria: 'Remeras', precioMayorista: 11000,
+      variantes: [v('ISUPRU-NEG-M', 'Negro', 'M', 11000)] },
+  ] }));
+  await stocker.sincronizarCatalogo();
+  chk('si STOCKER la saca, se saca acá también', null, await descripcionPublica());
+  servidor.close();
 
   /*
    * Que la vuelta falle en silencio es peor que la ida fallando: los pedidos
