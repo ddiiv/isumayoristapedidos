@@ -751,7 +751,8 @@ async function sincronizarCatalogo() {
   const guardarDescripcion = db.prepare('UPDATE productos SET stocker_descripcion = ? WHERE sku_agrupador = ?');
   db.transaction(() => {
     for (const p of datos.productos || []) {
-      guardarDescripcion.run(String(p.descripcion || '').trim() || null, p.skuAgrupador);
+      // La misma clave recortada con la que importarFilas guardó el producto.
+      guardarDescripcion.run(String(p.descripcion || '').trim() || null, String(p.skuAgrupador ?? '').trim());
     }
   })();
   guardarConfig(CLAVE_CATALOGO, JSON.stringify({ fecha: new Date().toISOString(), resumen }));
