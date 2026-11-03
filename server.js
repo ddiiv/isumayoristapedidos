@@ -1,6 +1,8 @@
 require('./src/entorno').cargarEnv();
 
 const path = require('node:path');
+const fs = require('node:fs');
+const crypto = require('node:crypto');
 const express = require('express');
 const { FOTOS_DIR, DATA_DIR } = require('./src/db');
 const publicas = require('./src/rutas/publicas');
@@ -79,6 +81,7 @@ app.use((req, res, next) => {
 // Todo lo que sale, comprimido: ver src/comprimir.js. Va antes de las rutas y de /public.
 app.use(comprimir);
 
+
 app.get('/healthz', (req, res) => res.json({ ok: true, datos: DATA_DIR }));
 /*
  * Para un monitor externo (BetterStack, UptimeRobot): 503 si hay pedidos que
@@ -122,17 +125,60 @@ app.use('/fuentes', express.static(path.join(__dirname, 'public', 'fuentes'), {
   maxAge: '365d', immutable: true, index: false,
 }));
 
-app.use(express.static(path.join(__dirname, 'public'), { index: 'index.html' }));
+/*
+ * El JS y el CSS, guardados un año bajo una ruta con la versión.
+ *
+ * Sin versión iban con max-age=0: quien volvía a la tienda revalidaba nueve
+ * archivos, cada uno una vuelta entera hasta el servidor. Con la versión en la
+ * ruta, un deploy es una ruta nueva y no hay forma de que se mezcle un módulo
+ * viejo con uno nuevo; los `import './util.js'` heredan el prefijo solos. Las
+ * páginas se reescriben al servirlas (ver enviarPagina) y siguen sin guardarse.
+ *
+ * Se acepta cualquier versión, no sólo la actual: una pestaña abierta antes
+ * del deploy que pide un módulo tarde recibe el de ahora en vez de un 404.
+ */
+const PUBLIC = path.join(__dirname, 'public');
+const COMMIT = String(process.env.RAILWAY_GIT_COMMIT_SHA || '').slice(0, 12);
+function version() {
+  if (COMMIT) return COMMIT;
+  // Sin commit (local, o un deploy con `railway up`): sale de la fecha y el tamaño de cada archivo, así editar uno cambia la ruta sin reiniciar.
+  const h = crypto.createHash('sha1');
+  for (const carpeta of ['js', 'css']) {
+    for (const f of fs.readdirSync(path.join(PUBLIC, carpeta))) {
+      const st = fs.statSync(path.join(PUBLIC, carpeta, f));
+      h.update(`${carpeta}/${f}:${st.size}:${st.mtimeMs};`);
+    }
+  }
+  return h.digest('hex').slice(0, 12);
+}
+for (const carpeta of ['js', 'css']) {
+  app.use(`/v/:version/${carpeta}`, express.static(path.join(PUBLIC, carpeta), {
+    maxAge: '365d', immutable: true, index: false,
+  }));
+}
+
+function enviarPagina(res, nombre, next) {
+  fs.readFile(path.join(PUBLIC, nombre), 'utf8', (err, html) => {
+    if (err) return next(err.code === 'ENOENT' ? undefined : err);
+    // La primera foto viene de otro origen (la tienda): la conexión se abre mientras baja el resto.
+    if (tienda.origenFotos()) res.set('Link', `<${tienda.origenFotos()}>; rel=preconnect`);
+    const v = version();
+    res.type('html').send(html.replace(/(href|src)="\/(js|css)\//g, `$1="/v/${v}/$2/`));
+  });
+}
+app.get(/^\/([a-z-]+\.html)?$/, (req, res, next) => enviarPagina(res, req.params[0] || 'index.html', next));
+
+app.use(express.static(PUBLIC, { index: 'index.html' }));
 
 // Cualquier /api que no existe contesta JSON, no el HTML de la página: un 200
 // con HTML donde se espera JSON es la respuesta más confusa posible.
 app.use('/api', (req, res) => res.status(404).json({ message: 'No existe ese endpoint.' }));
 
-app.use((req, res) => {
+app.use((req, res, next) => {
   // Lo que parece un archivo y no está, es 404. Devolver el index con 200 hace
   // que un asset mal escrito llegue como HTML y reviente con "unexpected token".
   if (/\.[a-z0-9]{1,8}$/i.test(req.path)) return res.status(404).type('text/plain').send('No encontrado.');
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+  enviarPagina(res, 'index.html', next);
 });
 
 // eslint-disable-next-line no-unused-vars

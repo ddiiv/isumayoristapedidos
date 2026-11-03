@@ -9,6 +9,10 @@
 <link rel="icon" type="image/png" sizes="32x32" href="/img/icono-32.png">
 <link rel="apple-touch-icon" href="/img/icono-180.png">
 <link rel="preload" href="/fuentes/InstrumentSans-Regular.ttf" as="font" type="font/ttf" crossorigin>
+<!-- El catálogo baja junto con el JS y no después: app.js lo pide recién
+     cuando cargaron todos sus módulos. Tiene que coincidir con ese fetch
+     (misma URL, sin credenciales aparte) o se baja dos veces. -->
+<link rel="preload" href="/api/catalogo" as="fetch" crossorigin>
 <link rel="stylesheet" href="/css/estilos.css">
 <link rel="stylesheet" href="/css/seguimiento.css">
 <!-- Los módulos que app.js importa, pedidos de entrada y en paralelo: si no,
@@ -17,6 +21,7 @@
 <link rel="modulepreload" href="/js/panel.js">
 <link rel="modulepreload" href="/js/pedido.js">
 <link rel="modulepreload" href="/js/sesion.js">
+<link rel="modulepreload" href="/js/medir.js">
 </head>
 <body>
 
@@ -52,7 +57,17 @@
 </nav>
 
 <main id="catalogo">
-  <p class="cargando">Cargando el catálogo…</p>
+  <!-- Filas de mentira con la forma de las de verdad, mientras baja el
+       catálogo. pintarCatalogo reemplaza todo el <main>, así que se van solas. -->
+  <div class="esqueleto" role="status">
+    <div class="titulo-categoria" aria-hidden="true"><i></i></div>
+    <div class="lista" aria-hidden="true">
+      <div class="fila-producto"><div class="carrusel"></div><div class="fila-datos"><i></i><i></i><i></i></div></div>
+      <div class="fila-producto"><div class="carrusel"></div><div class="fila-datos"><i></i><i></i><i></i></div></div>
+      <div class="fila-producto"><div class="carrusel"></div><div class="fila-datos"><i></i><i></i><i></i></div></div>
+    </div>
+    <span class="solo-lector">Cargando el catálogo…</span>
+  </div>
 </main>
 
 <!-- Botón flotante. Nace oculto y aparece con el primer ítem. -->

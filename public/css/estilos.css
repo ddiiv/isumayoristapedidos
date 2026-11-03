@@ -637,6 +637,31 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 20px 128px; }
 }
 @keyframes girar { to { transform: rotate(360deg); } }
 
+/*
+ * El catálogo mientras baja: las filas con su forma real y un brillo que pasa.
+ * Miden lo que una fila típica (medido: 238-271 px en escritorio, 325-429 en
+ * el teléfono), así que cuando llega el catálogo la página casi no salta.
+ */
+.esqueleto .fila-producto { cursor: default; height: 250px; content-visibility: visible; }
+@media (max-width: 640px) { .esqueleto .fila-producto { height: 360px; } }
+.esqueleto .fila-producto:hover { border-color: var(--linea); }
+.esqueleto i { display: block; height: 14px; width: 40%; border-radius: 7px; }
+.esqueleto .fila-datos i:first-child { height: 22px; width: 65%; }
+.esqueleto .fila-datos i:last-child { width: 85%; margin-top: auto; }
+.esqueleto .titulo-categoria i { height: 26px; width: 220px; }
+.esqueleto i, .esqueleto .carrusel {
+  background: linear-gradient(90deg, var(--gris-claro) 30%, var(--fondo-suave) 50%, var(--gris-claro) 70%) 0 0 / 300% 100%;
+  animation: brillo 1.4s ease-in-out infinite;
+}
+@keyframes brillo { from { background-position: 100% 0; } to { background-position: 0 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .esqueleto i, .esqueleto .carrusel { animation: none; }
+}
+.solo-lector {
+  position: absolute; width: 1px; height: 1px; overflow: hidden;
+  clip-path: inset(50%); white-space: nowrap;
+}
+
 /* ── Confirmación ───────────────────────────────────────────────── */
 .confirmado { text-align: center; padding: 12px 0 4px; }
 .confirmado .numero {

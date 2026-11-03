@@ -235,13 +235,13 @@ export function refrescarFlotante() {
  * fila ancha entran de un vistazo, y la página se recorre bajando, que es lo
  * que la mano hace sola en el teléfono.
  */
-function filaProducto(producto) {
+function filaProducto(producto, arriba = false) {
   const enPedido = cuentaDeEntrada(producto.sku, estado.carrito[producto.sku]);
   const fotos = fotosDe(producto);
 
   const carrusel = fotos.length
     ? `<div class="carrusel" data-sku="${esc(producto.sku)}" data-foto="0" data-color="">${
-      carruselPorDentro(producto, '', 0)}</div>`
+      carruselPorDentro(producto, '', 0, arriba)}</div>`
     : '<div class="carrusel vacio"><span class="sin-foto">SIN FOTO</span></div>';
 
   /*
@@ -332,7 +332,7 @@ export function coloresConFotos(producto) {
  * Se rearma entero al cambiar de color en vez de tocar pieza por pieza: con
  * un color de una sola foto las flechas sobran, y con "todas" vuelven.
  */
-function carruselPorDentro(producto, color, i) {
+function carruselPorDentro(producto, color, i, arriba = false) {
   const fotos = fotosDe(producto, color || null);
   const k = Math.min(Math.max(0, i), fotos.length - 1);
   const f = fotos[k];
@@ -343,7 +343,8 @@ function carruselPorDentro(producto, color, i) {
    */
   const chica = f.miniatura || f.media || f.ruta;
   const densa = f.media || f.ruta;
-  return `<img src="${esc(chica)}" srcset="${esc(chica)} 1x, ${esc(densa)} 2x" alt="${esc(producto.titulo)}${f.color ? ` en ${esc(f.color)}` : ''}" loading="lazy" decoding="async">
+  // Las de las primeras filas se ven sin bajar: pedirlas tarde y con prioridad baja demoraba la primera foto.
+  return `<img src="${esc(chica)}" srcset="${esc(chica)} 1x, ${esc(densa)} 2x" alt="${esc(producto.titulo)}${f.color ? ` en ${esc(f.color)}` : ''}" ${arriba ? 'fetchpriority="high"' : 'loading="lazy"'} decoding="async">
     ${fotos.length > 1 ? `
       <button class="carrusel-ir antes" data-paso="-1" aria-label="Foto anterior">‹</button>
       <button class="carrusel-ir despues" data-paso="1" aria-label="Foto siguiente">›</button>` : ''}
@@ -430,14 +431,16 @@ export function pintarCatalogo() {
    */
   const nuevos = estado.categoriaActiva || palabras.length
     ? [] : visibles.filter((p) => p.nuevo);
+  let arriba = 2;   // filas que se ven sin bajar, contando de la primera lista que se pinte
+  const fila = (p) => filaProducto(p, arriba-- > 0);
   cont.innerHTML = encabezado
     + (nuevos.length ? `
       <h2 class="titulo-categoria">Productos Nuevos <small>${nuevos.length}</small></h2>
-      <div class="lista">${nuevos.map(filaProducto).join('')}</div>` : '')
+      <div class="lista">${nuevos.map(fila).join('')}</div>` : '')
     + [...porCategoria.entries()]
     .map(([id, items]) => `
       <h2 class="titulo-categoria">${esc(nombre(id))} <small>${items.length}</small></h2>
-      <div class="lista">${items.map(filaProducto).join('')}</div>`)
+      <div class="lista">${items.map(fila).join('')}</div>`)
     .join('');
 
   pintarMuestras(cont);

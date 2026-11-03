@@ -219,6 +219,12 @@ r.get('/catalogo', (req, res) => {
   salida.sort((a, b) => ((puntajeDe(b)?.puntajeFinal || 0) - (puntajeDe(a)?.puntajeFinal || 0))
     || ((puntajeDe(b)?.unidades || 0) - (puntajeDe(a)?.unidades || 0)));
 
+  /*
+   * Es el mismo para todos, así que puede guardarse, pero revalidando cada vez:
+   * con el ETag, si nada cambió vuelve un 304 sin cuerpo; si cambió un precio,
+   * baja el nuevo. El no-store de todo /api obligaba a bajarlo entero en cada visita.
+   */
+  res.set('Cache-Control', 'no-cache');
   res.json({
     categorias,
     productos: salida,

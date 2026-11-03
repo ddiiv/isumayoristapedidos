@@ -545,6 +545,39 @@ const planilla = path.join(__dirname, 'catalogo-isuwaya.xlsx');
   chk('y el JavaScript también',          false, (await cabeceras('/js/admin.js')).includes('no-store'));
 
   /*
+   * El JS y el CSS van bajo una ruta con la versión y se guardan un año. Si
+   * alguna página quedara pidiendo la ruta sin versión, se mezclarían módulos
+   * de dos deploys; si un import relativo no heredara el prefijo, daría 404.
+   */
+  const paginas = {};
+  for (const ruta of ['/', '/admin.html', '/privacidad.html', '/un/camino/de/la/tienda']) paginas[ruta] = await (await fetch(`${API}${ruta}`)).text();
+  chk('ninguna página pide JS o CSS sin versión', [], Object.entries(paginas)
+    .filter(([, html]) => /(href|src)="\/(js|css)\//.test(html)).map(([ruta]) => ruta));
+  const appVersionado = paginas['/'].match(/src="(\/v\/[a-z0-9]+\/js\/app\.js)"/)?.[1];
+  chk('la tienda carga app.js versionado', true, Boolean(appVersionado));
+  const rApp = await fetch(`${API}${appVersionado}`);
+  chk('y responde, guardado un año sin revalidar', [200, true, true],
+    [rApp.status, /max-age=31536000/.test(rApp.headers.get('cache-control')), /immutable/.test(rApp.headers.get('cache-control'))]);
+  const rUtil = await fetch(`${API}${appVersionado.replace('app.js', 'util.js')}`);
+  chk('los imports relativos heredan la versión', [200, true], [rUtil.status, /javascript/.test(rUtil.headers.get('content-type'))]);
+  const cssVersionado = paginas['/'].match(/href="(\/v\/[a-z0-9]+\/css\/estilos\.css)"/)?.[1];
+  chk('el CSS también', 200, cssVersionado ? (await fetch(`${API}${cssVersionado}`)).status : null);
+  chk('lo versionado sólo sirve JS y CSS', 404, (await fetch(`${API}${appVersionado.replace('js/app.js', 'admin.html')}`)).status);
+
+  /*
+   * El catálogo es el mismo para todos: se guarda pero se revalida siempre, y
+   * si no cambió vuelve un 304 vacío en lugar de bajarlo entero.
+   */
+  const rCat = await fetch(`${API}/api/catalogo`);
+  chk('el catálogo se guarda revalidando', 'no-cache', rCat.headers.get('cache-control'));
+  // Con node:http y no fetch: fetch le agrega Cache-Control: no-cache a un pedido condicional y el 304 no sale nunca.
+  const rCat304 = await new Promise((ok, mal) => require('node:http')
+    .get(`${API}/api/catalogo`, { headers: { 'If-None-Match': rCat.headers.get('etag') } }, (r) => { r.resume(); ok(r.statusCode); })
+    .on('error', mal));
+  chk('y si no cambió contesta 304', 304, rCat304);
+  chk('lo del panel sigue sin guardarse', true, (await cabeceras('/api/admin/pedidos')).includes('no-store'));
+
+  /*
    * Todo viajaba sin comprimir: 350 KB de catálogo en un teléfono con datos. Se
    * pide como un navegador —aceptando brotli—, como uno viejo que sólo sabe
    * gzip y como algo que no acepta ninguna, y se mira que el texto llegue entero.
