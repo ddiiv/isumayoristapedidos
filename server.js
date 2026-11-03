@@ -81,6 +81,16 @@ app.use((req, res, next) => {
 // Todo lo que sale, comprimido: ver src/comprimir.js. Va antes de las rutas y de /public.
 app.use(comprimir);
 
+// Lo que tarda más de medio segundo queda en el log de Railway. Sólo la ruta: la query puede traer un CUIT o un token.
+app.use((req, res, next) => {
+  const desde = process.hrtime.bigint();
+  const ruta = req.path;   // acá, antes de que un router montado le saque el prefijo
+  res.on('finish', () => {
+    const ms = Number(process.hrtime.bigint() - desde) / 1e6;
+    if (ms > 500) console.warn('  lento', req.method, ruta, res.statusCode, `${Math.round(ms)}ms`);
+  });
+  next();
+});
 
 app.get('/healthz', (req, res) => res.json({ ok: true, datos: DATA_DIR }));
 /*

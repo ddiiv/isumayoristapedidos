@@ -363,6 +363,9 @@ asegurarColumna('pedidos', 'cliente_id', 'INTEGER');
 db.exec(`
   CREATE INDEX IF NOT EXISTS idx_clientes_email ON clientes(email);
   CREATE INDEX IF NOT EXISTS idx_clientes_cuit  ON clientes(cuit_numero);
+  -- Los pedidos de un cliente (Mis pedidos, su ficha en el panel) y los pendientes, que el panel cuenta en cada carga.
+  CREATE INDEX IF NOT EXISTS idx_pedidos_cliente ON pedidos(cliente_id, id);
+  CREATE INDEX IF NOT EXISTS idx_pedidos_estado  ON pedidos(estado);
   -- Dos CUENTAS no pueden tener el mismo email: es con lo que se entra.
   CREATE UNIQUE INDEX IF NOT EXISTS idx_clientes_email_cuenta ON clientes(email) WHERE password_hash IS NOT NULL;
 `);
