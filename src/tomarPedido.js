@@ -188,7 +188,9 @@ async function cambiar(numero, cuerpo, { origen }) {
     return { status: 409, json: { message: 'ISUWAYA ya revisó ese pedido: lo nuevo tiene que ir en otro pedido.' } };
   }
 
-  const { datos } = clientes.completarConGuardados(cuerpo?.cliente);
+  // Lo que no vuelve a decir sigue como estaba: un pedido retomado otro día no tiene que pedir todos los datos de nuevo.
+  const dichos = Object.fromEntries(Object.entries(cuerpo?.cliente || {}).filter(([, v]) => String(v ?? '').trim()));
+  const { datos } = clientes.completarConGuardados({ ...JSON.parse(fila.cliente), ...dichos });
   const { cliente, errores: erroresCliente } = validarCliente(datos);
   if (Object.keys(erroresCliente).length) {
     return { status: 400, json: { message: 'Faltan datos para el envío.', erroresCliente } };
@@ -211,4 +213,47 @@ async function cambiar(numero, cuerpo, { origen }) {
   return { status: 200, json: { numero: pedido.numero, total, unidades, items } };
 }
 
-module.exports = { previsualizar, confirmar, cambiar, avisoDelMinimo, pesos, avisosEnCurso };
+/*
+ * Un pedido que el cliente trae por número al chat ("¿me pasás el PDF del
+ * ISU-000123?"). Los números son correlativos: alcanza con probar para
+ * adivinar uno ajeno. Por eso sólo se da si el WhatsApp que escribe es el
+ * teléfono del pedido; si no, la misma respuesta que si no existiera.
+ * shortcut: compara los últimos 6 dígitos, que en Argentina son del abonado con
+ * o sin 0, 15 y +549; si hiciera falta más, normalizar el número completo.
+ */
+const finDelTelefono = (t) => String(t || '').replace(/\D/g, '').slice(-6);
+
+function reclamar(numero, telefono) {
+  const digitos = String(numero || '').replace(/\D/g, '');
+  const fila = digitos && db.prepare('SELECT * FROM pedidos WHERE numero = ?').get(`ISU-${digitos.slice(-6).padStart(6, '0')}`);
+  const suyo = fila && finDelTelefono(telefono).length === 6 && finDelTelefono(JSON.parse(fila.cliente).telefono) === finDelTelefono(telefono);
+  if (!suyo) return { status: 404, json: { message: 'No existe ese pedido.' } };
+  const estado = normalizarEstado(fila.estado);
+  return {
+    status: 200,
+    json: {
+      numero: fila.numero,
+      estado,
+      // Lo mismo que puede cambiar() y cancelar(): sólo los del asistente que ISUWAYA todavía no revisó.
+      modificable: fila.origen === 'asistente' && estado === 'pendiente',
+      total: fila.total,
+      unidades: fila.unidades,
+      items: JSON.parse(fila.items).map(({ skuAgrupador, titulo, unidades: u, detalle }) => ({ skuAgrupador, titulo, unidades: u, detalle })),
+      token: auth.firmarDocumento(fila.numero),
+    },
+  };
+}
+
+// El cliente se arrepiente antes de que ISUWAYA lo revise: queda cancelado y STOCKER suelta lo que iba a apartar.
+function cancelar(numero, { origen }) {
+  const fila = db.prepare('SELECT * FROM pedidos WHERE numero = ?').get(String(numero || ''));
+  if (!fila || fila.origen !== origen) return { status: 404, json: { message: 'No existe ese pedido.' } };
+  if (normalizarEstado(fila.estado) !== 'pendiente') {
+    return { status: 409, json: { message: 'ISUWAYA ya revisó ese pedido: para cancelarlo hay que hablar con ISUWAYA.' } };
+  }
+  registrarEstado(fila.id, 'cancelado', { nota: 'El cliente lo canceló por el chat.' });
+  contarleAStocker(fila.id, 'cancelado');
+  return { status: 200, json: { numero: fila.numero, estado: 'cancelado' } };
+}
+
+module.exports = { previsualizar, confirmar, cambiar, reclamar, cancelar, avisoDelMinimo, pesos, avisosEnCurso };

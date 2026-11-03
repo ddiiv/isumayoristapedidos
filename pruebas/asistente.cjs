@@ -121,7 +121,37 @@ const cola = (numero) => db.prepare('SELECT evento FROM stocker_cola WHERE numer
       (await pedir('PUT', `/asistente/pedidos/${numero}`, { cliente: CLIENTE, carrito: carrito(1) })).status);
     chk('y queda como lo dejó ISUWAYA', 5, db.prepare('SELECT unidades FROM pedidos WHERE numero = ?').get(numero).unidades);
 
-    tit('6. EL MÍNIMO DE COMPRA VALE IGUAL');
+    tit('6. UN PEDIDO POR SU NÚMERO, SÓLO DESDE SU TELÉFONO');
+    const otro = (await pedir('POST', '/asistente/pedidos', { cliente: CLIENTE, carrito: carrito(1) })).json.numero;
+    const reclamar = (n, telefono) => pedir('POST', `/asistente/pedidos/${n}/reclamar`, { telefono });
+    const suyo = await reclamar(otro.replace(/^ISU-0+/, ''), '+54 9 11 5555-1234');
+    chk('con el WhatsApp del pedido y el número sin ceros: lo trae', [200, otro, 'pendiente', true, 1],
+      [suyo.status, suyo.json?.numero, suyo.json?.estado, suyo.json?.modificable, suyo.json?.items?.[0]?.unidades]);
+    chk('con la firma para bajar el PDF', 200,
+      (await fetch(`${base}/pedidos/${otro}/pedido.pdf?t=${encodeURIComponent(suyo.json?.token)}`)).status);
+    chk('sin datos del cliente en la respuesta', undefined, suyo.json?.cliente);
+    const ajeno = await reclamar(otro, '+5491166667777');
+    chk('desde otro teléfono: como si no existiera, y sin firma', [404, undefined], [ajeno.status, ajeno.json?.token]);
+    chk('sin teléfono: 404', 404, (await reclamar(otro, '')).status);
+    chk('uno que no existe: 404', 404, (await reclamar('999999', '+5491155551234')).status);
+    chk('el revisado se trae, pero no se puede cambiar', [200, false], [(await reclamar(numero, '1155551234')).status, (await reclamar(numero, '1155551234')).json?.modificable]);
+    chk('el de la página se trae, pero no se puede cambiar', false, (await reclamar(dePagina.json?.numero, '1155551234')).json?.modificable);
+
+    tit('7. LOS DATOS QUE NO SE REPITEN SIGUEN COMO ESTABAN');
+    const sinRepetir = await pedir('PUT', `/asistente/pedidos/${otro}`, { cliente: { telefono: '+5491155551234', direccion: 'Mitre 10' }, carrito: carrito(3) });
+    const cambiado = JSON.parse(db.prepare('SELECT cliente FROM pedidos WHERE numero = ?').get(otro).cliente);
+    chk('se cambia sin volver a dar todo', [200, CLIENTE.cuit, 'Mitre 10'], [sinRepetir.status, cambiado.cuit, cambiado.direccion]);
+
+    tit('8. CANCELAR');
+    chk('uno de la página no lo cancela: 404', 404, (await pedir('POST', `/asistente/pedidos/${dePagina.json?.numero}/cancelar`)).status);
+    chk('uno revisado no lo cancela: 409', 409, (await pedir('POST', `/asistente/pedidos/${numero}/cancelar`)).status);
+    chk('sin la clave no entra: 401', 401, (await pedir('POST', `/asistente/pedidos/${otro}/cancelar`, null, null)).status);
+    const cancelado = await pedir('POST', `/asistente/pedidos/${otro}/cancelar`);
+    chk('el suyo pendiente se cancela', [200, 'cancelado'], [cancelado.status, cancelado.json?.estado]);
+    chk('STOCKER se entera', ['alta', 'modificado', 'cancelado'], cola(otro));
+    chk('y ya no se puede cambiar', 409, (await pedir('PUT', `/asistente/pedidos/${otro}`, { cliente: CLIENTE, carrito: carrito(1) })).status);
+
+    tit('9. EL MÍNIMO DE COMPRA VALE IGUAL');
     guardarConfig('minimo_compra', '100000');
     const corto = await pedir('POST', '/asistente/pedidos', { cliente: CLIENTE, carrito: carrito(1) });
     chk('debajo del mínimo no se confirma, y dice cuánto falta', [400, 90000], [corto.status, corto.json?.minimo?.falta]);
