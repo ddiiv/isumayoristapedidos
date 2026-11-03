@@ -7,7 +7,8 @@
  * la máquina, acepta cualquier usuario y contraseña, y guarda cada mail en una
  * carpeta para que las pruebas lo lean.
  *
- * Uso: node pruebas/correo-de-prueba.cjs [PUERTO] [CARPETA]
+ * Uso: node pruebas/correo-de-prueba.cjs [PUERTO] [CARPETA] [DEMORA_MS]
+ *      DEMORA_MS hace que salude tarde, como un SMTP lento.
  *      y el servidor con MAIL_HOST=127.0.0.1 MAIL_PORT=PUERTO MAIL_USER=x MAIL_PASS=x
  */
 const net = require('node:net');
@@ -17,6 +18,7 @@ const path = require('node:path');
 
 const PUERTO = Number(process.argv[2]) || 2525;
 const CARPETA = process.argv[3] || path.join(os.tmpdir(), 'isuwaya-correos');
+const DEMORA = Number(process.argv[4]) || 0;
 fs.mkdirSync(CARPETA, { recursive: true });
 
 let guardados = 0;
@@ -26,7 +28,7 @@ net.createServer((s) => {
   let datos = [];
   let para = [];
   const decir = (t) => s.write(`${t}\r\n`);
-  decir('220 correo-de-prueba');
+  setTimeout(() => decir('220 correo-de-prueba'), DEMORA);
 
   s.on('data', (trozo) => {
     pendiente += trozo.toString('latin1');

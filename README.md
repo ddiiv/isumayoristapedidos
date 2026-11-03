@@ -652,6 +652,8 @@ admin falsificada—.
   papel ni quede encimado. No necesita el servidor.
 - `pruebas/whatsapp.cjs` — el aviso al grupo de WhatsApp, con un WhatsApp de
   mentira. No necesita el servidor.
+- `pruebas/apagado.cjs` — que apagar el servidor (un redeploy) espere los
+  avisos del pedido recién contestado. Levanta su propio servidor y base.
 - `pruebas/panel.cjs` — seguimiento, estadísticas, colores y el circuito de
   compra. **Escribe pedidos y reimporta la planilla**: correla contra una copia
   de la base. Los avisos por mail se prueban con un correo de prueba que guarda

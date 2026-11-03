@@ -72,9 +72,15 @@ function previsualizar(cuerpo) {
  * y lo que pasó con cada canal igual queda en aviso_mail, aviso_whatsapp y
  * aviso_cliente, que es lo que mira el panel.
  */
+const enCurso = new Set();
 function avisarSinEsperar(pedido) {
-  avisar(pedido).catch((e) => console.error('  avisos:', pedido.numero, e.message));
+  const p = avisar(pedido).catch((e) => console.error('  avisos:', pedido.numero, e.message))
+    .finally(() => enCurso.delete(p));
+  enCurso.add(p);
 }
+
+// Al apagar: un redeploy no puede cortar el mail de un pedido ya contestado, que nadie reintenta.
+const avisosEnCurso = () => Promise.allSettled([...enCurso]);
 
 async function avisar(pedido) {
   const [pdfDelPedido, pdfDelRotulo] = await Promise.all([pdfPedido(pedido), pdfRotulo(pedido)]);
@@ -154,6 +160,8 @@ async function confirmar(cuerpo, { cuentaId = null, origen = null } = {}) {
       numero: pedido.numero,
       total: pedido.total,
       unidades: pedido.unidades,
+      // Lo que se sabe sin esperar el envío: la tienda le dice al cliente si le va una copia.
+      copiaPorMail: Boolean(pedido.cliente?.email && process.env.MAIL_USER && process.env.MAIL_PASS),
       /*
        * La firma para bajar el remito. Quien pidió sin cuenta no tiene otra
        * forma de probar que el pedido es suyo.
@@ -203,4 +211,4 @@ async function cambiar(numero, cuerpo, { origen }) {
   return { status: 200, json: { numero: pedido.numero, total, unidades, items } };
 }
 
-module.exports = { previsualizar, confirmar, cambiar, avisoDelMinimo, pesos };
+module.exports = { previsualizar, confirmar, cambiar, avisoDelMinimo, pesos, avisosEnCurso };

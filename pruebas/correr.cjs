@@ -202,6 +202,8 @@ const CLIENTE_OK = {
   chk('se confirma', 201, confirmado.status);
   chk('con número de pedido', true, /^ISU-\d{6}$/.test(confirmado.json?.numero || ''));
   chk('el total no cambió entre la previa y la confirmación', esperadoTotal, confirmado.json?.total);
+  // La pantalla de éxito lo usa para decir si le llega una copia: los avisos salen después de contestar.
+  chk('y dice si al cliente le va una copia por mail', 'boolean', typeof confirmado.json?.copiaPorMail);
 
   tit('7. EL REMITO SE GENERA Y ES UN PDF DE VERDAD');
   const numero = confirmado.json.numero;

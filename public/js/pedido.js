@@ -279,26 +279,24 @@ function vistaResumen() {
 // ── Paso 4: confirmado ────────────────────────────────────────────
 function vistaConfirmado() {
   /*
-   * El mensaje dice lo que de verdad pasó.
+   * El mensaje dice lo que de verdad se sabe.
    *
-   * Decir "ya le avisamos" cuando el mail no salió es afirmar algo que el
-   * cliente no puede comprobar y que, si es falso, descubre recién cuando
-   * nadie lo contacta. El pedido SÍ quedó guardado en los dos casos —eso es lo
-   * que no se pierde—, así que se afirma eso, y si ningún aviso salió se le da
-   * algo que hacer en vez de una espera silenciosa.
+   * Los avisos salen después de contestar, así que acá no se sabe si llegaron:
+   * decir "ya le avisamos" sería afirmar algo que el cliente no puede comprobar.
+   * Lo seguro es que el pedido quedó guardado, y si no le va una copia por mail
+   * se le da algo que hacer en vez de una espera silenciosa.
    */
-  const avisado = ['mail', 'whatsapp'].some((c) => confirmado.avisos?.[c] === 'ok');
   /*
    * Y dice que todavía falta un paso: el pedido no está confirmado hasta que
    * ISUWAYA revise el stock. Sin eso, "recibimos tu pedido" se lee como "ya
    * está", y el cliente cuenta con mercadería que puede no haber.
    */
-  const seEntera = confirmado.avisos?.cliente === 'ok'
+  const seEntera = confirmado.copiaPorMail
     ? 'Te mandamos una copia por mail y te escribimos apenas lo confirmemos.'
     : sesion.rol === 'cliente'
       ? 'Vas a ver la confirmación en «Mis pedidos».'
       : 'Si nadie te contacta en las próximas 24 horas, escribinos con este número de pedido.';
-  const cabecera = `<p class="mensaje ok">Recibimos tu pedido${avisado ? ' y ya le avisamos a ISUWAYA' : ' y quedó guardado'}.</p>`
+  const cabecera = '<p class="mensaje ok">Recibimos tu pedido y quedó guardado.</p>'
     + '<p class="mensaje info">Antes de prepararlo revisamos que tengamos todo el stock. '
     + `${esc(seEntera)}</p>`;
 

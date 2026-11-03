@@ -18,6 +18,7 @@ const eventos = require('./src/eventos');
 const stocker = require('./src/stocker');
 const respaldos = require('./src/respaldos');
 const tienda = require('./src/tienda');
+const { avisosEnCurso } = require('./src/tomarPedido');
 
 const app = express();
 const PORT = Number(process.env.PORT) || 8080;
@@ -261,5 +262,10 @@ process.on('unhandledRejection', (e) => {
 });
 
 for (const senal of ['SIGTERM', 'SIGINT']) {
-  process.on(senal, () => { whatsapp.apagar(); server.close(() => process.exit(0)); });
+  process.on(senal, () => server.close(async () => {
+    // Los avisos salen después de contestar: se esperan (hasta 30 s) antes de cortar el WhatsApp y salir.
+    await Promise.race([avisosEnCurso(), new Promise((r) => setTimeout(r, 30000))]);
+    whatsapp.apagar();
+    process.exit(0);
+  }));
 }
