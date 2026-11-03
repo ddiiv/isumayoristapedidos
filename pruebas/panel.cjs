@@ -292,7 +292,21 @@ const mover = (numero, estado, nota) => pedir(
           ? Buffer.from(x, 'base64').toString('utf8')
           : Buffer.from(x.replace(/_/g, ' ').replace(/=([0-9A-F]{2})/gi, (__, h) => String.fromCharCode(parseInt(h, 16))), 'latin1').toString('utf8'))).trim();
       };
+      // Los avisos salen después de contestar: se espera a que terminen de llegar los de los pedidos de antes.
+      for (let antes = -1, i = 0; i < 20 && antes !== fs.readdirSync(CORREOS).length; i += 1) {
+        antes = fs.readdirSync(CORREOS).length;
+        await esperar(300);
+      }
       const leidos = new Set(fs.readdirSync(CORREOS));
+      // Y lo que pasó con cada aviso se anota después del envío: se lee del panel cuando aparece.
+      const avisoAlCliente = async (numero) => {
+        for (let i = 0; i < 50; i += 1) {
+          const aviso = (await pedir(`/api/admin/pedidos/${numero}`, { como: 'admin' })).json?.pedido?.aviso_cliente;
+          if (aviso) return aviso;
+          await esperar(100);
+        }
+        return null;
+      };
       const nuevos = async (cuantos) => {
         for (let i = 0; i < 50 && fs.readdirSync(CORREOS).filter((x) => !leidos.has(x)).length < cuantos; i += 1) await esperar(100);
         const archivos = fs.readdirSync(CORREOS).filter((x) => !leidos.has(x)).sort();
@@ -314,8 +328,7 @@ const mover = (numero, estado, nota) => pedir(
       chk('sólo con el remito: el rótulo es del depósito', [`${numeroCircuito}-pedido.pdf`], alCliente?.adjuntos);
       chk('le dice que todavía falta confirmar el stock', true, /revisamos que tengamos todo el stock/.test(alCliente?.texto || ''));
       chk('y si responde, le escribe al negocio', true, alCliente?.crudo.includes(`Reply-To: ${NEGOCIO}`));
-      chk('el panel anota que el cliente se enteró', 'ok',
-        (await pedir(`/api/admin/pedidos/${numeroCircuito}`, { como: 'admin' })).json.pedido.aviso_cliente);
+      chk('el panel anota que el cliente se enteró', 'ok', await avisoAlCliente(numeroCircuito));
 
       const confirmar = await mover(numeroCircuito, 'confirmado', 'Está todo.');
       chk('se confirma el stock', [200, 'confirmado'], [confirmar.status, confirmar.json?.pedido?.estado]);
@@ -348,8 +361,8 @@ const mover = (numero, estado, nota) => pedir(
         cuerpo: { cliente: { ...CLIENTE, email: '' }, carrito: [{ skuAgrupador: producto.sku, curvas: 0, cantidades: { [a.sku]: 1 } }] },
       });
       chk('sin mail del cliente el pedido entra igual', 201, sinMail.status);
-      chk('y queda dicho por qué el cliente no recibió nada', 'omitido: el cliente no dejó mail', sinMail.json?.avisos?.cliente);
       chk('al negocio le llega igual', true, (await nuevos(1)).some((m) => m.para.includes(NEGOCIO)));
+      chk('y queda dicho por qué el cliente no recibió nada', 'omitido: el cliente no dejó mail', await avisoAlCliente(sinMail.json?.numero));
 
       const est = (await pedir('/api/admin/estadisticas', { como: 'admin' })).json;
       chk('las estadísticas cuentan los que esperan stock', true, (est.porEstado || []).some((e) => e.estado === 'pendiente'));

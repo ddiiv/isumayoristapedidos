@@ -93,7 +93,13 @@ const cola = (numero) => db.prepare('SELECT evento FROM stocker_cola WHERE numer
     chk('pendiente, del asistente, con su total', ['pendiente', 'asistente', 20000], [fila?.estado, fila?.origen, fila?.total]);
     chk('el cliente queda registrado por su CUIT', true, Boolean(fila?.cliente_id));
     chk('va a la cola de STOCKER como alta', ['alta'], cola(numero));
-    chk('y se intentó avisar (sin WhatsApp ni mail configurados, queda anotado)', true, Boolean(fila?.aviso_whatsapp && fila?.aviso_mail));
+    // Los avisos salen después de contestar: se espera a que queden anotados.
+    let avisado = null;
+    for (let i = 0; i < 50 && !(avisado?.aviso_whatsapp && avisado?.aviso_mail); i += 1) {
+      await new Promise((r) => setTimeout(r, 100));
+      avisado = db.prepare('SELECT aviso_whatsapp, aviso_mail FROM pedidos WHERE numero = ?').get(numero);
+    }
+    chk('y se intentó avisar (sin WhatsApp ni mail configurados, queda anotado)', true, Boolean(avisado?.aviso_whatsapp && avisado?.aviso_mail));
 
     tit('4. LO QUE PIDE DESPUÉS VA EN EL MISMO PEDIDO');
     const cambio = await pedir('PUT', `/asistente/pedidos/${numero}`, { cliente: CLIENTE, carrito: carrito(2, 3) });

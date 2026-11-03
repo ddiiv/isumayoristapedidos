@@ -66,7 +66,16 @@ function previsualizar(cuerpo) {
  * A ISUWAYA y al cliente a la vez. A ISUWAYA le llega el pedido para revisar el
  * stock; al cliente, la copia con el aviso de que falta esa confirmación. El
  * cliente no recibe el rótulo: es un papel del depósito.
+ *
+ * No se espera: la respuesta sale apenas el pedido está guardado. Armar los
+ * dos PDF, el SMTP y el WhatsApp eran segundos de "Enviando…" para el cliente,
+ * y lo que pasó con cada canal igual queda en aviso_mail, aviso_whatsapp y
+ * aviso_cliente, que es lo que mira el panel.
  */
+function avisarSinEsperar(pedido) {
+  avisar(pedido).catch((e) => console.error('  avisos:', pedido.numero, e.message));
+}
+
 async function avisar(pedido) {
   const [pdfDelPedido, pdfDelRotulo] = await Promise.all([pdfPedido(pedido), pdfRotulo(pedido)]);
   const conCuenta = { ...pedido, seVeEnCuenta: clientes.seVeEnCuenta(pedido) };
@@ -136,7 +145,7 @@ async function confirmar(cuerpo, { cuentaId = null, origen = null } = {}) {
     origen,
   }))();
 
-  const avisos = await avisar(pedido);
+  avisarSinEsperar(pedido);
   contarleAStocker(pedido.id, 'alta');
 
   return {
@@ -145,7 +154,6 @@ async function confirmar(cuerpo, { cuentaId = null, origen = null } = {}) {
       numero: pedido.numero,
       total: pedido.total,
       unidades: pedido.unidades,
-      avisos,
       /*
        * La firma para bajar el remito. Quien pidió sin cuenta no tiene otra
        * forma de probar que el pedido es suyo.
@@ -190,9 +198,9 @@ async function cambiar(numero, cuerpo, { origen }) {
   })();
 
   const pedido = leerPedido(fila.numero);
-  const avisos = await avisar({ ...pedido, cambio: true });
+  avisarSinEsperar({ ...pedido, cambio: true });
   contarleAStocker(fila.id, 'modificado');
-  return { status: 200, json: { numero: pedido.numero, total, unidades, items, avisos } };
+  return { status: 200, json: { numero: pedido.numero, total, unidades, items } };
 }
 
 module.exports = { previsualizar, confirmar, cambiar, avisoDelMinimo, pesos };

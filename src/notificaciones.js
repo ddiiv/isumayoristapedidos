@@ -28,6 +28,9 @@ function transporte() {
      */
     auth: { user: process.env.MAIL_USER, pass: String(process.env.MAIL_PASS).replace(/\s+/g, '') },
     connectionTimeout: 15000,
+    // Los de nodemailer por omisión son 30 s y 10 min: un SMTP colgado dejaba el aviso esperando todo eso.
+    greetingTimeout: 15000,
+    socketTimeout: 20000,
   });
 }
 
