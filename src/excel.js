@@ -1,4 +1,3 @@
-const ExcelJS = require('exceljs');
 const { db, ordenDeTalle } = require('./db');
 
 /*
@@ -95,6 +94,7 @@ const aNumero = (v) => {
 
 /** Importa el .xlsx exportado de STOCKER (ver importarFilas). */
 async function importarPlanilla(buffer) {
+  const ExcelJS = require('exceljs'); // recién al importar: no se carga al arrancar
   const libro = new ExcelJS.Workbook();
   try {
     await libro.xlsx.load(buffer);

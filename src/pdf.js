@@ -1,6 +1,5 @@
 const fs = require('node:fs');
 const path = require('node:path');
-const PDFDocument = require('pdfkit');
 
 /*
  * Los dos papeles que salen de un pedido.
@@ -146,6 +145,7 @@ async function pdfPedido(pedido) {
    * dos veces —una para contar y otra para dibujar— y las dos cuentas se
    * despegan al primer cambio de tipografía.
    */
+  const PDFDocument = require('pdfkit'); // recién al armar el PDF: no se carga al arrancar
   const doc = new PDFDocument({ size: 'A4', margin: 40, bufferPages: true });
   const cliente = pedido.cliente || {};
   const ancho = doc.page.width - 80;
@@ -402,6 +402,7 @@ async function pdfPedido(pedido) {
 const CM = 28.3465;
 
 async function pdfRotulo(pedido) {
+  const PDFDocument = require('pdfkit'); // recién al armar el PDF: no se carga al arrancar
   const doc = new PDFDocument({ size: [10 * CM, 15 * CM], margin: 0 });
   const cliente = pedido.cliente || {};
   const M = 0.6 * CM;

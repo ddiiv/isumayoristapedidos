@@ -3,6 +3,10 @@ const path = require('node:path');
 const sharp = require('sharp');
 const { db, FOTOS_DIR } = require('./db');
 
+// libvips guarda en memoria las últimas operaciones: acá no sirve, cada foto se hace una vez.
+sharp.cache({ memory: 16, files: 0, items: 50 });
+sharp.concurrency(1);
+
 /*
  * Miniaturas de las fotos.
  *

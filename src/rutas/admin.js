@@ -53,7 +53,12 @@ r.get('/respaldo', async (req, res, next) => {
  */
 const subirPlanilla = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 15 * 1024 * 1024 },
+  /*
+   * Tres megas: el catálogo entero exportado de STOCKER pesa unos 200 KB, y
+   * exceljs ocupa más de cien veces lo que pesa el archivo. Con el tope de
+   * memoria del arranque (package.json), uno de quince tiraba el proceso.
+   */
+  limits: { fileSize: 3 * 1024 * 1024 },
   /*
    * Sólo .xlsx, y se mira antes de cargarlo en memoria.
    *
@@ -70,7 +75,12 @@ const subirPlanilla = multer({
   },
 });
 
-r.post('/importar', subirPlanilla.single('planilla'), async (req, res, next) => {
+const recibirPlanilla = (req, res, next) => subirPlanilla.single('planilla')(req, res, (e) => {
+  if (e?.code === 'LIMIT_FILE_SIZE') return res.status(400).json({ message: 'La planilla puede pesar hasta 3 MB.' });
+  return next(e);
+});
+
+r.post('/importar', recibirPlanilla, async (req, res, next) => {
   try {
     if (!req.file) return res.status(400).json({ message: 'Subí el archivo .xlsx exportado de STOCKER.' });
     const resumen = await importarPlanilla(req.file.buffer);
