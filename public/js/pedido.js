@@ -213,7 +213,7 @@ function vistaDatos() {
       ${campo('cuit', 'CUIT', { obligatorio: true, ayuda: '30-12345678-9' })}
       <div class="campo ancho aviso-cuit" id="aviso-cuit" hidden></div>
       ${campo('nombre', 'Nombre y apellido', { obligatorio: true, ancho: true })}
-      ${campo('telefono', 'Teléfono', { obligatorio: true, tipo: 'tel', ayuda: '11 5555-5555' })}
+      ${campo('telefono', 'Teléfono', { obligatorio: true, tipo: 'tel', ayuda: '11 5555-5555 · Te avisamos por WhatsApp las novedades de tu pedido' })}
       ${campo('email', 'Email', { tipo: 'email', ancho: true, ayuda: 'Opcional: ahí te mandamos el pedido y la confirmación del stock' })}
       ${campo('provincia', 'Provincia', { obligatorio: true, opciones: PROVINCIAS })}
       ${campo('ciudad', 'Ciudad', { obligatorio: true })}

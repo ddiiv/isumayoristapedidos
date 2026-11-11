@@ -215,6 +215,15 @@ const socketFalso = () => {
   chk('por QR habla del QR', true, /QR/.test(sinUsar('qr')));
   chk('por código habla del código', true, /c\u00f3digo/i.test(sinUsar('codigo')) && !/QR/.test(sinUsar('codigo')));
 
+  tit('10. EL AVISO AL CLIENTE POR EL WHATSAPP DE META');
+  const avisos = require('../src/notificaciones');
+  chk('cada aviso al cliente tiene su plantilla', Object.keys(avisos.AL_CLIENTE).sort(),
+    Object.keys(avisos.PLANTILLA_CLIENTE).sort());
+  chk('el número sale como lo espera Meta', ['541155551234', '541155551234', '5491155551234', '5493511234567', null],
+    ['11 5555-1234', '011 5555 1234', '+54 9 11 5555-1234', '5493511234567', '4567'].map(avisos.aE164));
+  chk('sin Meta configurado, el aviso queda como era: sólo lo del mail', 'omitido: el cliente no dejó mail',
+    await avisos.avisarCliente({ numero: 'ISU-000001', cliente: { nombre: 'Ana', telefono: '11 5555-1234' } }, 'pendiente'));
+
   console.log(`\n\x1b[1m─────────────────────────────\x1b[0m\n  \x1b[32mPasaron: ${ok}\x1b[0m   \x1b[31mFallaron: ${ko}\x1b[0m`);
   fs.rmSync(process.env.DATA_DIR, { recursive: true, force: true });
   process.exit(ko ? 1 : 0);

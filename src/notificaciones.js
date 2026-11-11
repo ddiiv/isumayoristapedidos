@@ -11,6 +11,8 @@ const whatsapp = require('./whatsapp');
  * y se sigue.
  */
 
+const VERSION_META = process.env.WHATSAPP_META_API_VERSION || 'v22.0';
+
 const pesos = (n) => '$ ' + Number(n || 0).toLocaleString('es-AR', { maximumFractionDigits: 0 });
 
 function transporte() {
@@ -138,7 +140,7 @@ async function avisarPorWhatsapp(pedido, adjuntos = {}) {
     : { messaging_product: 'whatsapp', to: destino, type: 'text', text: { body: resumen } };
 
   const { data } = await axios.post(
-    `https://graph.facebook.com/v20.0/${phoneId}/messages`, cuerpo,
+    `https://graph.facebook.com/${VERSION_META}/${phoneId}/messages`, cuerpo,
     { headers: { Authorization: `Bearer ${token}` }, timeout: 15000 },
   );
   return { ok: true, id: data?.messages?.[0]?.id || null };
@@ -224,7 +226,78 @@ function textoDeCambios(cambios) {
       ? `Total: antes ${pesos(cambios.totalAntes)}, ahora ${pesos(cambios.totalDespues)}.\n` : '');
 }
 
-async function avisarCliente(pedido, estado, { pdf = null, nota = null, cambios = null } = {}) {
+/*
+ * El aviso al cliente por WhatsApp, desde el número del asistente.
+ *
+ * Es el mismo número de Meta que usan el asistente y la tienda minorista, a
+ * propósito: el cliente recibe la novedad ahí y, si responde, lo atiende el
+ * asistente, que ya sabe pasarle el PDF de su pedido. Un solo WhatsApp para
+ * todo, en vez de un número que avisa y otro que contesta.
+ *
+ * Va con plantilla porque Meta no deja escribirle primero a nadie de otra
+ * forma: el texto libre sólo sale dentro de las 24 horas de un mensaje del
+ * cliente. Las plantillas se crean y se aprueban en Meta; mientras no estén,
+ * esto devuelve el error y el mail sale igual.
+ */
+const PLANTILLA_CLIENTE = {
+  pendiente: 'mayorista_pedido_recibido',
+  confirmado: 'mayorista_pedido_confirmado',
+  'confirmado-con-cambios': 'mayorista_pedido_modificado',
+  modificado: 'mayorista_pedido_modificado',
+  cancelado: 'mayorista_pedido_cancelado',
+};
+
+// La misma regla que Stocker (normalizeToE164): es la que ya manda en producción.
+function aE164(crudo) {
+  const s = String(crudo || '');
+  const limpio = s.replace(/\D/g, '');
+  if (limpio.length < 8) return null;
+  if (s.trim().startsWith('+')) return limpio;
+  if (limpio.startsWith('0')) return `54${limpio.replace(/^0+/, '')}`;
+  return limpio.length >= 11 ? limpio : `54${limpio}`;
+}
+
+/** Null = Meta sin configurar: el aviso queda como era, sólo por mail. */
+async function whatsappAlCliente(pedido, estado) {
+  const token = process.env.WHATSAPP_META_TOKEN;
+  const phoneId = process.env.WHATSAPP_META_PHONE_NUMBER_ID;
+  if (!token || !phoneId) return null;
+  const to = aE164(pedido?.cliente?.telefono);
+  if (!to) return 'omitido: el teléfono no sirve para WhatsApp';
+  try {
+    await axios.post(`https://graph.facebook.com/${VERSION_META}/${phoneId}/messages`, {
+      messaging_product: 'whatsapp', to, type: 'template',
+      template: {
+        name: PLANTILLA_CLIENTE[estado],
+        language: { code: 'es_AR' },
+        components: [{
+          type: 'body',
+          parameters: [
+            { type: 'text', text: String(pedido.cliente.nombre || 'cliente').slice(0, 60) },
+            { type: 'text', text: pedido.numero },
+          ],
+        }],
+      },
+    }, { headers: { Authorization: `Bearer ${token}` }, timeout: 15000 });
+    return 'ok';
+  } catch (e) {
+    const err = e.response?.data?.error;
+    // El texto de Meta trae el teléfono del cliente adentro: no se guarda.
+    return `error: ${err?.code || ''} ${String(err?.message || e.message).replace(/\d{8,}/g, '…').slice(0, 120)}`.trim();
+  }
+}
+
+async function avisarCliente(pedido, estado, opciones = {}) {
+  if (!AL_CLIENTE[estado]) return null;
+  const [mail, wa] = await Promise.all([
+    mailAlCliente(pedido, estado, opciones),
+    whatsappAlCliente(pedido, estado),
+  ]);
+  // Sin Meta configurado, el resultado es el de siempre, palabra por palabra.
+  return wa === null ? mail : `${mail} · WhatsApp: ${wa}`;
+}
+
+async function mailAlCliente(pedido, estado, { pdf = null, nota = null, cambios = null } = {}) {
   const modelo = AL_CLIENTE[estado];
   if (!modelo) return null;
   const destino = String(pedido?.cliente?.email || '').trim();
@@ -256,4 +329,4 @@ async function avisarCliente(pedido, estado, { pdf = null, nota = null, cambios 
   }
 }
 
-module.exports = { avisarPedido, avisarCliente, cuerpoDelMail };
+module.exports = { avisarPedido, avisarCliente, cuerpoDelMail, aE164, PLANTILLA_CLIENTE, AL_CLIENTE };
