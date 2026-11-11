@@ -517,8 +517,12 @@ async function traerResoluciones() {
       if (resultado === 'confirmado' || resultado === 'cancelado') {
         const { leerPedido } = require('./pedidos');
         const { avisarCliente } = require('./notificaciones');
-        await avisarCliente(leerPedido(resolucion.pedidoExterno), resultado, {
-          nota: notaDeLaResolucion(resolucion),
+        const confirmadoAlla = leerPedido(resolucion.pedidoExterno);
+        // La confirmación va con el PDF: por WhatsApp no sale sin él.
+        const pdf = resultado === 'confirmado'
+          ? await require('./pdf').pdfPedido(confirmadoAlla).catch(() => null) : null;
+        await avisarCliente(confirmadoAlla, resultado, {
+          pdf, nota: notaDeLaResolucion(resolucion),
         }).catch(() => {});
       }
     } catch (e) { hechas.push({ pedido: resolucion.pedidoExterno, resultado: `error: ${e.message}` }); }

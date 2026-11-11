@@ -247,6 +247,34 @@ const PLANTILLA_CLIENTE = {
   cancelado: 'mayorista_pedido_cancelado',
 };
 
+/*
+ * Confirmado y modificado llevan el PDF adjunto, sin que el cliente lo pida:
+ * es el pedido que se va a preparar y lo tiene que tener a mano. Recibido y
+ * cancelado no: en uno todavía no está revisado y en el otro no hay nada que
+ * preparar.
+ */
+const CON_PDF = new Set(['mayorista_pedido_confirmado', 'mayorista_pedido_modificado']);
+
+/*
+ * El PDF se sube a Meta y se manda por su id, no por un enlace: un enlace
+ * público al pedido dejaría los datos del cliente a un clic de cualquiera.
+ */
+async function subirPdfAMeta(pdf, nombre, token, phoneId) {
+  const fd = new FormData();
+  fd.append('messaging_product', 'whatsapp');
+  fd.append('type', 'application/pdf');
+  fd.append('file', new Blob([pdf], { type: 'application/pdf' }), nombre);
+  const r = await fetch(`https://graph.facebook.com/${VERSION_META}/${phoneId}/media`, {
+    method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: fd,
+    signal: AbortSignal.timeout(20000),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || !j.id) {
+    throw Object.assign(new Error(j.error?.message || `Meta no aceptó el PDF (${r.status})`), { response: { data: j } });
+  }
+  return j.id;
+}
+
 // La misma regla que Stocker (normalizeToE164): es la que ya manda en producción.
 function aE164(crudo) {
   const s = String(crudo || '');
@@ -258,19 +286,29 @@ function aE164(crudo) {
 }
 
 /** Null = Meta sin configurar: el aviso queda como era, sólo por mail. */
-async function whatsappAlCliente(pedido, estado) {
+async function whatsappAlCliente(pedido, estado, pdf = null) {
   const token = process.env.WHATSAPP_META_TOKEN;
   const phoneId = process.env.WHATSAPP_META_PHONE_NUMBER_ID;
   if (!token || !phoneId) return null;
   const to = aE164(pedido?.cliente?.telefono);
   if (!to) return 'omitido: el teléfono no sirve para WhatsApp';
+  const plantilla = PLANTILLA_CLIENTE[estado];
+  // La plantilla con documento no sale sin documento: Meta la rechaza entera.
+  if (CON_PDF.has(plantilla) && !pdf) return 'error: falta el PDF del pedido';
   try {
+    const cabecera = CON_PDF.has(plantilla) ? [{
+      type: 'header',
+      parameters: [{
+        type: 'document',
+        document: { id: await subirPdfAMeta(pdf, `${pedido.numero}-pedido.pdf`, token, phoneId), filename: `${pedido.numero}-pedido.pdf` },
+      }],
+    }] : [];
     await axios.post(`https://graph.facebook.com/${VERSION_META}/${phoneId}/messages`, {
       messaging_product: 'whatsapp', to, type: 'template',
       template: {
-        name: PLANTILLA_CLIENTE[estado],
+        name: plantilla,
         language: { code: 'es_AR' },
-        components: [{
+        components: [...cabecera, {
           type: 'body',
           parameters: [
             { type: 'text', text: String(pedido.cliente.nombre || 'cliente').slice(0, 60) },
@@ -291,7 +329,7 @@ async function avisarCliente(pedido, estado, opciones = {}) {
   if (!AL_CLIENTE[estado]) return null;
   const [mail, wa] = await Promise.all([
     mailAlCliente(pedido, estado, opciones),
-    whatsappAlCliente(pedido, estado),
+    whatsappAlCliente(pedido, estado, opciones.pdf),
   ]);
   // Sin Meta configurado, el resultado es el de siempre, palabra por palabra.
   return wa === null ? mail : `${mail} · WhatsApp: ${wa}`;
@@ -329,4 +367,4 @@ async function mailAlCliente(pedido, estado, { pdf = null, nota = null, cambios 
   }
 }
 
-module.exports = { avisarPedido, avisarCliente, cuerpoDelMail, aE164, PLANTILLA_CLIENTE, AL_CLIENTE };
+module.exports = { avisarPedido, avisarCliente, cuerpoDelMail, aE164, PLANTILLA_CLIENTE, AL_CLIENTE, CON_PDF };

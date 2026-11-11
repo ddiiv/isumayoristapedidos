@@ -221,6 +221,14 @@ const socketFalso = () => {
     Object.keys(avisos.PLANTILLA_CLIENTE).sort());
   chk('el número sale como lo espera Meta', ['541155551234', '541155551234', '5491155551234', '5493511234567', null],
     ['11 5555-1234', '011 5555 1234', '+54 9 11 5555-1234', '5493511234567', '4567'].map(avisos.aE164));
+  chk('el PDF va con confirmado y modificado, no con recibido ni cancelado', [false, true, true, true, false],
+    ['pendiente', 'confirmado', 'confirmado-con-cambios', 'modificado', 'cancelado']
+      .map((e) => avisos.CON_PDF.has(avisos.PLANTILLA_CLIENTE[e])));
+  // Con Meta puesto y sin PDF, la confirmación no sale a medias: corta antes de llamar a nadie.
+  Object.assign(process.env, { WHATSAPP_META_TOKEN: 'x', WHATSAPP_META_PHONE_NUMBER_ID: '1' });
+  chk('una confirmación sin PDF no se manda', 'omitido: el cliente no dejó mail · WhatsApp: error: falta el PDF del pedido',
+    await avisos.avisarCliente({ numero: 'ISU-000001', cliente: { nombre: 'Ana', telefono: '11 5555-1234' } }, 'confirmado'));
+  delete process.env.WHATSAPP_META_TOKEN; delete process.env.WHATSAPP_META_PHONE_NUMBER_ID;
   chk('sin Meta configurado, el aviso queda como era: sólo lo del mail', 'omitido: el cliente no dejó mail',
     await avisos.avisarCliente({ numero: 'ISU-000001', cliente: { nombre: 'Ana', telefono: '11 5555-1234' } }, 'pendiente'));
 
