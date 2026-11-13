@@ -7,6 +7,7 @@ const express = require('express');
 const { FOTOS_DIR, DATA_DIR } = require('./src/db');
 const publicas = require('./src/rutas/publicas');
 const asistente = require('./src/rutas/asistente');
+const avisos = require('./src/rutas/avisos');
 const { rutas: cuentas } = require('./src/rutas/cuentas');
 const { rutas: admin } = require('./src/rutas/admin');
 const { conSesion } = require('./src/auth');
@@ -115,6 +116,7 @@ app.use('/api', cuentas);
 app.use('/api', publicas);
 app.use('/api/admin', admin);
 app.use('/api/asistente', asistente);
+app.use('/api/avisos', avisos);
 
 /*
  * Las fotos se sirven desde el volumen, no desde el código.

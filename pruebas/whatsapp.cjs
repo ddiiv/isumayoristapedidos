@@ -221,7 +221,7 @@ const socketFalso = () => {
     Object.keys(avisos.PLANTILLA_CLIENTE).sort());
   chk('el número sale como lo espera Meta', ['541155551234', '541155551234', '5491155551234', '5493511234567', null],
     ['11 5555-1234', '011 5555 1234', '+54 9 11 5555-1234', '5493511234567', '4567'].map(avisos.aE164));
-  chk('el PDF va con confirmado y modificado, no con recibido ni cancelado', [false, true, true, true, false],
+  chk('el PDF va al recibirlo, al confirmarlo y al modificarlo; no al cancelarlo', [true, true, true, true, false],
     ['pendiente', 'confirmado', 'confirmado-con-cambios', 'modificado', 'cancelado']
       .map((e) => avisos.CON_PDF.has(avisos.PLANTILLA_CLIENTE[e])));
   // Con Meta puesto y sin PDF, la confirmación no sale a medias: corta antes de llamar a nadie.
@@ -231,6 +231,55 @@ const socketFalso = () => {
   delete process.env.WHATSAPP_META_TOKEN; delete process.env.WHATSAPP_META_PHONE_NUMBER_ID;
   chk('sin Meta configurado, el aviso queda como era: sólo lo del mail', 'omitido: el cliente no dejó mail',
     await avisos.avisarCliente({ numero: 'ISU-000001', cliente: { nombre: 'Ana', telefono: '11 5555-1234' } }, 'pendiente'));
+
+  tit('11. RECIBIDO CON EL PDF; SI META TODAVÍA NO LA APROBÓ, LA DE ANTES');
+  {
+    const axios = require('axios');
+    const postOriginal = axios.post, fetchOriginal = globalThis.fetch;
+    const mandadas = [];
+    globalThis.fetch = async () => ({ ok: true, json: async () => ({ id: 'media-1' }) });
+    axios.post = async (url, cuerpo) => {
+      mandadas.push(cuerpo.template);
+      if (cuerpo.template.name === 'mayorista_pedido_recibido_pdf') throw Object.assign(new Error('x'), { response: { data: { error: { code: 132001, message: 'Template name does not exist in the translation' } } } });
+      return { data: {} };
+    };
+    Object.assign(process.env, { WHATSAPP_META_TOKEN: 'x', WHATSAPP_META_PHONE_NUMBER_ID: '1' });
+    try {
+      const r = await avisos.avisarCliente({ numero: 'ISU-000001', cliente: { nombre: 'Ana', telefono: '11 5555-1234' } }, 'pendiente', { pdf: Buffer.from('%PDF') });
+      chk('sale la de antes y queda anotado', true, /WhatsApp: ok \(sin el PDF/.test(r));
+      chk('primero con el PDF, después sin', [['mayorista_pedido_recibido_pdf', 'header'], ['mayorista_pedido_recibido', 'body']],
+        mandadas.map((t) => [t.name, t.components[0].type]));
+    } finally {
+      axios.post = postOriginal; globalThis.fetch = fetchOriginal;
+      delete process.env.WHATSAPP_META_TOKEN; delete process.env.WHATSAPP_META_PHONE_NUMBER_ID;
+    }
+  }
+
+  tit('12. LOS AVISOS DE LA TIENDA MINORISTA AL GRUPO');
+  {
+    const enviados = [];
+    const s = { sendMessage: async (id, m) => { enviados.push([id, m]); } };
+    chk('con PDF', { ok: true }, await whatsapp.mandarAlGrupo({ texto: '*Venta ISU-1042 · tienda minorista*', pdf: Buffer.from('%PDF-1'), archivo: 'ISU-1042.pdf' }, { socket: s, grupo: GRUPO, conectado: true }));
+    chk('va al grupo con el nombre del archivo', [GRUPO.id, 'ISU-1042.pdf', '*Venta ISU-1042 · tienda minorista*'], [enviados[0][0], enviados[0][1].fileName, enviados[0][1].caption]);
+    chk('el pedido mayorista dice de qué tienda es', true, /tienda mayorista/.test(whatsapp.resumenDelPedido(PEDIDO)));
+  }
+
+  tit('13. LA ENTRADA DE AVISOS (/api/avisos/grupo)');
+  {
+    const express = require('express');
+    const app = express(); app.use(express.json({ limit: '1mb' })); app.use('/api/avisos', require('../src/rutas/avisos'));
+    const srv = app.listen(0); const url = `http://127.0.0.1:${srv.address().port}/api/avisos/grupo`;
+    const post = (cuerpo, clave) => fetch(url, { method: 'POST', headers: { 'content-type': 'application/json', ...(clave ? { authorization: `Bearer ${clave}` } : {}) }, body: JSON.stringify(cuerpo) });
+    const CLAVE = 'c'.repeat(40);
+    delete process.env.AVISOS_TOKEN;
+    chk('sin AVISOS_TOKEN la puerta está cerrada', 503, (await post({ texto: 'hola' }, CLAVE)).status);
+    process.env.AVISOS_TOKEN = CLAVE;
+    chk('con otra clave, 401', 401, (await post({ texto: 'hola' }, 'x'.repeat(40))).status);
+    chk('un PDF que no es PDF, 400', 400, (await post({ texto: 'hola', pdf: Buffer.from('hola').toString('base64') }, CLAVE)).status);
+    chk('sin texto, 400', 400, (await post({}, CLAVE)).status);
+    chk('sin grupo elegido, 503 (la tienda reintenta)', 503, (await post({ texto: 'hola', pdf: Buffer.from('%PDF-1').toString('base64') }, CLAVE)).status);
+    delete process.env.AVISOS_TOKEN; srv.close();
+  }
 
   console.log(`\n\x1b[1m─────────────────────────────\x1b[0m\n  \x1b[32mPasaron: ${ok}\x1b[0m   \x1b[31mFallaron: ${ko}\x1b[0m`);
   fs.rmSync(process.env.DATA_DIR, { recursive: true, force: true });

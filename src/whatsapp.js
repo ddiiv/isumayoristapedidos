@@ -651,7 +651,7 @@ const configurado = () => Boolean(grupoElegido()?.id);
 function resumenDelPedido(p) {
   const c = p.cliente || {};
   return [
-    `*Pedido ${p.numero}*${p.cambio ? ' (actualizado)' : ''} — esperando confirmación de stock${p.origen === 'asistente' ? ' · tomado por el asistente' : ''}`,
+    `*Pedido ${p.numero} · tienda mayorista*${p.cambio ? ' (actualizado)' : ''} — esperando confirmación de stock${p.origen === 'asistente' ? ' · tomado por el asistente' : ''}`,
     `${c.nombre || ''}${c.cuit ? ` (CUIT ${c.cuit})` : ''}${c.telefono ? ` · Tel. ${c.telefono}` : ''}`,
     `${p.unidades} u. — ${pesos(p.total)}`,
     `Envío: ${c.formaEnvio || '—'} · ${c.ciudad || ''} (${c.codigoPostal || ''}), ${c.provincia || ''}`,
@@ -669,16 +669,19 @@ function resumenDelPedido(p) {
  * El socket, el grupo y el tope de espera se pueden pasar de afuera: así se
  * prueba sin un WhatsApp de verdad y sin esperar veinte segundos.
  */
-async function avisarGrupo(pedido, pdf, {
+async function avisarGrupo(pedido, pdf, opciones = {}) {
+  return mandarAlGrupo({ texto: resumenDelPedido(pedido), pdf, archivo: `${pedido.numero}-pedido.pdf` }, opciones);
+}
+
+/** Un mensaje al grupo, con un PDF o sin él (también lo usan los avisos de la tienda minorista: ver rutas/avisos.js). */
+async function mandarAlGrupo({ texto, pdf = null, archivo = 'pedido.pdf' }, {
   socket = sock, grupo = grupoElegido(), conectado = estado.conexion === 'conectado', tope = 20000,
 } = {}) {
   if (!grupo?.id) return { ok: false, motivo: 'sin grupo de WhatsApp elegido' };
   if (!socket || !conectado) return { ok: false, motivo: 'WhatsApp desconectado' };
   const envio = pdf
-    ? socket.sendMessage(grupo.id, {
-      document: pdf, mimetype: 'application/pdf', fileName: `${pedido.numero}-pedido.pdf`, caption: resumenDelPedido(pedido),
-    })
-    : socket.sendMessage(grupo.id, { text: resumenDelPedido(pedido) });
+    ? socket.sendMessage(grupo.id, { document: pdf, mimetype: 'application/pdf', fileName: archivo, caption: texto })
+    : socket.sendMessage(grupo.id, { text: texto });
   // Un envío que no contesta no puede dejar colgada la confirmación del pedido.
   let espera;
   const limite = new Promise((_, no) => {
@@ -700,7 +703,7 @@ async function mandarPrueba() {
 
 module.exports = {
   vincular, desvincular, apagar, arrancarSiHaySesion, grupos, elegirGrupo, configurado,
-  avisarGrupo, mandarPrueba, estadoPublico, resumenDelPedido,
+  avisarGrupo, mandarAlGrupo, mandarPrueba, estadoPublico, resumenDelPedido,
   // Para las pruebas: decisiones y archivos, sin levantar ninguna conexión.
   decidirCorte, cerrojoDeOtraCopia, respaldarCredenciales, restaurarCredenciales, normalizarNumero,
   CARPETA, INSTANCIA,

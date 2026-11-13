@@ -240,7 +240,7 @@ function textoDeCambios(cambios) {
  * esto devuelve el error y el mail sale igual.
  */
 const PLANTILLA_CLIENTE = {
-  pendiente: 'mayorista_pedido_recibido',
+  pendiente: 'mayorista_pedido_recibido_pdf',
   confirmado: 'mayorista_pedido_confirmado',
   'confirmado-con-cambios': 'mayorista_pedido_modificado',
   modificado: 'mayorista_pedido_modificado',
@@ -253,7 +253,9 @@ const PLANTILLA_CLIENTE = {
  * cancelado no: en uno todavía no está revisado y en el otro no hay nada que
  * preparar.
  */
-const CON_PDF = new Set(['mayorista_pedido_confirmado', 'mayorista_pedido_modificado']);
+const CON_PDF = new Set(['mayorista_pedido_recibido_pdf', 'mayorista_pedido_confirmado', 'mayorista_pedido_modificado']);
+// Mientras Meta no apruebe la plantilla con el PDF (o si la pausa), sale la de antes, sin el PDF.
+const RESPALDO = { mayorista_pedido_recibido_pdf: 'mayorista_pedido_recibido' };
 
 /*
  * El PDF se sube a Meta y se manda por su id, no por un enlace: un enlace
@@ -295,8 +297,8 @@ async function whatsappAlCliente(pedido, estado, pdf = null) {
   const plantilla = PLANTILLA_CLIENTE[estado];
   // La plantilla con documento no sale sin documento: Meta la rechaza entera.
   if (CON_PDF.has(plantilla) && !pdf) return 'error: falta el PDF del pedido';
-  try {
-    const cabecera = CON_PDF.has(plantilla) ? [{
+  const mandar = async (nombre) => {
+    const cabecera = CON_PDF.has(nombre) ? [{
       type: 'header',
       parameters: [{
         type: 'document',
@@ -306,7 +308,7 @@ async function whatsappAlCliente(pedido, estado, pdf = null) {
     await axios.post(`https://graph.facebook.com/${VERSION_META}/${phoneId}/messages`, {
       messaging_product: 'whatsapp', to, type: 'template',
       template: {
-        name: plantilla,
+        name: nombre,
         language: { code: 'es_AR' },
         components: [...cabecera, {
           type: 'body',
@@ -317,6 +319,15 @@ async function whatsappAlCliente(pedido, estado, pdf = null) {
         }],
       },
     }, { headers: { Authorization: `Bearer ${token}` }, timeout: 15000 });
+  };
+  try {
+    try {
+      await mandar(plantilla);
+    } catch (e) {
+      if (!RESPALDO[plantilla] || !e.response) throw e;
+      await mandar(RESPALDO[plantilla]);
+      return 'ok (sin el PDF: la plantilla con el PDF todavía no está aprobada)';
+    }
     return 'ok';
   } catch (e) {
     const err = e.response?.data?.error;
