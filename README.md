@@ -83,9 +83,9 @@ En **Variables** del servicio (`.env.example` las tiene todas comentadas):
 | Variable | Para qué |
 |---|---|
 | `ADMIN_EMAIL` `ADMIN_PASSWORD` | La cuenta del panel. Sin contraseña el panel no abre: no hay valor por defecto a propósito. |
-| `PEDIDOS_EMAIL` `PEDIDOS_WHATSAPP` | A dónde llega cada pedido. `PEDIDOS_WHATSAPP`: los números de los empleados, separados por coma; les llega la plantilla `mayorista_pedido_para_armar` con el remito (no puede ser el número que manda). |
+| `PEDIDOS_EMAIL` `PEDIDOS_WHATSAPP` | A dónde llega cada pedido |
 | `MAIL_HOST` `MAIL_PORT` `MAIL_USER` `MAIL_PASS` `MAIL_FROM` | Envío de correo. **Sin `MAIL_USER` y `MAIL_PASS` no sale ningún mail**, ni a ISUWAYA ni a los clientes. |
-| `WHATSAPP_META_TOKEN` `WHATSAPP_META_PHONE_NUMBER_ID` | La API oficial de Meta (el número del asistente): avisos a los empleados y al cliente. El grupo de empleados, si se usa además, se vincula desde el panel, sin variables. |
+| `WHATSAPP_META_TOKEN` `WHATSAPP_META_PHONE_NUMBER_ID` `WHATSAPP_TEMPLATE_NAME` `WHATSAPP_TEMPLATE_LANG` | Sólo para la API oficial de Meta. El grupo de empleados se vincula desde el panel, sin variables. |
 | `SESSION_SECRET` | Opcional. Si no está, la app genera una y la guarda en el volumen. |
 | `ASISTENTE_TOKEN` | La clave del asistente de ventas por chat (Stocker). Con ella crea y cambia pedidos por `/api/asistente`, que entran igual que los de la página: avisos por WhatsApp y mail, cliente registrado y a STOCKER. Sin la variable esa puerta está cerrada. Una frase larga al azar; la misma va en el `.env` del asistente como `MAYORISTA_TOKEN`. |
 
