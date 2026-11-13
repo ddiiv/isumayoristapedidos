@@ -90,60 +90,71 @@ async function avisarPorMail(pedido, adjuntos) {
 }
 
 /*
- * WhatsApp: avisa, no adjunta.
+ * WhatsApp a los empleados, para que revisen el stock y armen el pedido.
  *
- * La API de Meta manda documentos sólo por URL pública, y publicar los datos de
- * un cliente en una dirección adivinable para que WhatsApp la baje es peor que
- * no mandar el adjunto. El mensaje avisa y lleva el resumen; los PDF están en
- * el mail y en el panel.
+ * Por Meta, la plantilla oficial «mayorista_pedido_para_armar» con el remito en
+ * PDF, a cada número de PEDIDOS_WHATSAPP (separados por coma). Fuera de las 24 h
+ * Meta sólo entrega plantillas aprobadas: por eso ya no se manda texto libre, que
+ * casi nunca llegaba. El PDF se sube una vez a Meta y va por su id (ver
+ * subirPdfAMeta), nunca por un enlace público.
  *
- * Fuera de la ventana de 24 h Meta sólo entrega PLANTILLAS aprobadas. Si
- * WHATSAPP_TEMPLATE_NAME está cargado se usa esa; si no, se manda texto libre,
- * que funciona mientras haya conversación abierta.
+ * Si además hay un WhatsApp vinculado desde el panel con un grupo elegido, el
+ * aviso también va a ese grupo.
  */
-async function avisarPorWhatsapp(pedido, adjuntos = {}) {
-  /*
-   * Si hay un WhatsApp vinculado desde el panel con un grupo elegido, el
-   * aviso va a ese grupo, con el PDF. La API de Meta queda para quien la
-   * configure por variables y no vincule nada.
-   */
-  if (whatsapp.configurado()) return whatsapp.avisarGrupo(pedido, adjuntos.pedido);
+// Meta rechaza un parámetro con saltos de línea, tabulaciones o más de 4 espacios seguidos.
+const enUnaLinea = (t) => String(t ?? '').replace(/\s+/g, ' ').trim().slice(0, 200);
 
-  const destino = String(process.env.PEDIDOS_WHATSAPP || '').replace(/\D/g, '');
+async function avisarEmpleadosPorMeta(pedido, pdf) {
+  const destinos = [...new Set(String(process.env.PEDIDOS_WHATSAPP || '').split(',').map(aE164).filter(Boolean))];
   const token = process.env.WHATSAPP_META_TOKEN;
   const phoneId = process.env.WHATSAPP_META_PHONE_NUMBER_ID;
-  if (!destino) return { ok: false, motivo: 'sin PEDIDOS_WHATSAPP' };
+  if (!destinos.length) return { ok: false, motivo: 'sin PEDIDOS_WHATSAPP' };
   if (!token || !phoneId) return { ok: false, motivo: 'sin credenciales de WhatsApp' };
-
+  if (!pdf) return { ok: false, motivo: 'falta el PDF del pedido' };
   const c = pedido.cliente;
-  const resumen = `Pedido ${pedido.numero}${pedido.cambio ? ' (actualizado)' : ''}\n${c.nombre} (CUIT ${c.cuit})\n`
-    + `${pedido.unidades} u. — ${pesos(pedido.total)}\n`
-    + `Envío: ${c.formaEnvio} · ${c.ciudad}, ${c.provincia}`;
+  const nombre = `${pedido.numero}-pedido.pdf`;
+  let media;
+  try {
+    media = await subirPdfAMeta(pdf, nombre, token, phoneId);
+  } catch (e) {
+    return { ok: false, motivo: `error al subir el PDF: ${String(e.message).slice(0, 120)}` };
+  }
+  const parametros = [
+    `${pedido.numero}${pedido.cambio ? ' (actualizado)' : ''}`,
+    `${c.nombre} (CUIT ${c.cuit})`,
+    `${pedido.unidades} u. por ${pesos(pedido.total)}`,
+    `${c.formaEnvio} · ${c.ciudad}, ${c.provincia}`,
+  ].map((t) => ({ type: 'text', text: enUnaLinea(t) }));
+  const r = await Promise.allSettled(destinos.map((to) => axios.post(`https://graph.facebook.com/${VERSION_META}/${phoneId}/messages`, {
+    messaging_product: 'whatsapp', to, type: 'template',
+    template: {
+      name: 'mayorista_pedido_para_armar',
+      language: { code: 'es_AR' },
+      components: [
+        { type: 'header', parameters: [{ type: 'document', document: { id: media, filename: nombre } }] },
+        { type: 'body', parameters: parametros },
+      ],
+    },
+  }, { headers: { Authorization: `Bearer ${token}` }, timeout: 15000 })));
+  const fallas = r.filter((x) => x.status === 'rejected');
+  if (!fallas.length) return { ok: true };
+  const e = fallas[0].reason?.response?.data?.error;
+  // El texto de Meta puede traer el teléfono adentro: no se guarda.
+  const por = `${e?.code || ''} ${String(e?.message || fallas[0].reason?.message).replace(/\d{8,}/g, '…')}`.trim().slice(0, 120);
+  return { ok: false, motivo: `no salió a ${fallas.length} de ${destinos.length}: ${por}` };
+}
 
-  const plantilla = process.env.WHATSAPP_TEMPLATE_NAME;
-  const cuerpo = plantilla
-    ? {
-      messaging_product: 'whatsapp', to: destino, type: 'template',
-      template: {
-        name: plantilla,
-        language: { code: process.env.WHATSAPP_TEMPLATE_LANG || 'es_AR' },
-        components: [{
-          type: 'body',
-          parameters: [
-            { type: 'text', text: pedido.numero },
-            { type: 'text', text: c.nombre },
-            { type: 'text', text: `${pedido.unidades} u. ${pesos(pedido.total)}` },
-          ],
-        }],
-      },
-    }
-    : { messaging_product: 'whatsapp', to: destino, type: 'text', text: { body: resumen } };
-
-  const { data } = await axios.post(
-    `https://graph.facebook.com/${VERSION_META}/${phoneId}/messages`, cuerpo,
-    { headers: { Authorization: `Bearer ${token}` }, timeout: 15000 },
-  );
-  return { ok: true, id: data?.messages?.[0]?.id || null };
+async function avisarPorWhatsapp(pedido, adjuntos = {}) {
+  const [meta, grupo] = await Promise.all([
+    avisarEmpleadosPorMeta(pedido, adjuntos.pedido),
+    whatsapp.configurado()
+      ? whatsapp.avisarGrupo(pedido, adjuntos.pedido).catch((e) => ({ ok: false, motivo: String(e.message).slice(0, 120) }))
+      : null,
+  ]);
+  if (!grupo) return meta;
+  if (meta.ok && grupo.ok) return { ok: true };
+  if (meta.motivo === 'sin PEDIDOS_WHATSAPP') return grupo;
+  return { ok: false, motivo: `Meta: ${meta.ok ? 'ok' : meta.motivo} · grupo: ${grupo.ok ? 'ok' : grupo.motivo}` };
 }
 
 /**
@@ -367,4 +378,4 @@ async function mailAlCliente(pedido, estado, { pdf = null, nota = null, cambios 
   }
 }
 
-module.exports = { avisarPedido, avisarCliente, cuerpoDelMail, aE164, PLANTILLA_CLIENTE, AL_CLIENTE, CON_PDF };
+module.exports = { avisarPedido, avisarCliente, avisarPorWhatsapp, cuerpoDelMail, aE164, PLANTILLA_CLIENTE, AL_CLIENTE, CON_PDF };

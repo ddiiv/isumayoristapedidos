@@ -232,6 +232,38 @@ const socketFalso = () => {
   chk('sin Meta configurado, el aviso queda como era: sólo lo del mail', 'omitido: el cliente no dejó mail',
     await avisos.avisarCliente({ numero: 'ISU-000001', cliente: { nombre: 'Ana', telefono: '11 5555-1234' } }, 'pendiente'));
 
+  tit('11. EL AVISO A LOS EMPLEADOS POR META (PLANTILLA CON EL REMITO)');
+  {
+    const axios = require('axios');
+    const postOriginal = axios.post, fetchOriginal = globalThis.fetch;
+    const mandados = [];
+    globalThis.fetch = async () => ({ ok: true, json: async () => ({ id: 'media-1' }) });
+    axios.post = async (url, cuerpo) => {
+      if (cuerpo.to === '5491100000000') throw Object.assign(new Error('x'), { response: { data: { error: { code: 131026, message: 'no tiene WhatsApp 5491100000000' } } } });
+      mandados.push(cuerpo); return { data: {} };
+    };
+    const pedido = { numero: 'M-0231', unidades: 240, total: 1234000, cliente: { nombre: 'Juan\nGómez', cuit: '20-12345678-9', formaEnvio: 'Expreso Oca', ciudad: 'Rosario', provincia: 'Santa Fe' } };
+    try {
+      delete process.env.PEDIDOS_WHATSAPP;
+      chk('sin PEDIDOS_WHATSAPP no se manda nada', { ok: false, motivo: 'sin PEDIDOS_WHATSAPP' }, await avisos.avisarPorWhatsapp(pedido, { pedido: Buffer.from('%PDF') }));
+      Object.assign(process.env, { WHATSAPP_META_TOKEN: 'x', WHATSAPP_META_PHONE_NUMBER_ID: '1', PEDIDOS_WHATSAPP: '+54 9 11 6922-1390, +5493511234567' });
+      chk('a cada empleado', { ok: true }, await avisos.avisarPorWhatsapp(pedido, { pedido: Buffer.from('%PDF') }));
+      chk('los dos números', ['5491169221390', '5493511234567'], mandados.map((m) => m.to));
+      const t = mandados[0].template;
+      chk('la plantilla con el remito subido a Meta', ['mayorista_pedido_para_armar', 'media-1', 'M-0231-pedido.pdf'],
+        [t.name, t.components[0].parameters[0].document.id, t.components[0].parameters[0].document.filename]);
+      chk('los datos en una línea (Meta no acepta saltos)', ['M-0231', 'Juan Gómez (CUIT 20-12345678-9)', '240 u. por $ 1.234.000', 'Expreso Oca · Rosario, Santa Fe'],
+        t.components[1].parameters.map((x) => x.text));
+      process.env.PEDIDOS_WHATSAPP = '+5491169221390,+5491100000000';
+      const r = await avisos.avisarPorWhatsapp(pedido, { pedido: Buffer.from('%PDF') });
+      chk('si uno falla se dice cuántos, sin guardar el teléfono', true, r.ok === false && /no salió a 1 de 2: 131026/.test(r.motivo) && !/5491100000000/.test(r.motivo));
+      chk('sin el PDF no sale (Meta rechaza la plantilla entera)', { ok: false, motivo: 'falta el PDF del pedido' }, await avisos.avisarPorWhatsapp(pedido, {}));
+    } finally {
+      axios.post = postOriginal; globalThis.fetch = fetchOriginal;
+      for (const v of ['WHATSAPP_META_TOKEN', 'WHATSAPP_META_PHONE_NUMBER_ID', 'PEDIDOS_WHATSAPP']) delete process.env[v];
+    }
+  }
+
   console.log(`\n\x1b[1m─────────────────────────────\x1b[0m\n  \x1b[32mPasaron: ${ok}\x1b[0m   \x1b[31mFallaron: ${ko}\x1b[0m`);
   fs.rmSync(process.env.DATA_DIR, { recursive: true, force: true });
   process.exit(ko ? 1 : 0);
